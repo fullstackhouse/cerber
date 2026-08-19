@@ -496,19 +496,9 @@ button:hover {
   background: #0757b3;
 }
 
-.send-btn-confirm {
-  background: var(--red);
-  border-color: var(--red);
-}
-
-.send-btn-confirm:hover {
-  background: #a91e28;
-}
-
-.confirm-group {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
+.send-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .body-preview {

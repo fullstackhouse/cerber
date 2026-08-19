@@ -22,6 +22,8 @@ export interface ReviewPayload {
   comments: InlineComment[];
   /** Comments that could not be attached inline (no/invalid line) — folded into the body. */
   folded: Comment[];
+  /** Head commit the review was drafted against; anchors inline comments there. */
+  commitId?: string;
 }
 
 /**
@@ -61,7 +63,13 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
   }
   parts.push("", "---", "_Reviewed with [cerber](https://github.com/fullstackhouse/cerber) 🐕 — drafted by AI, sent by a human._");
 
-  return { event, body: parts.join("\n").trim(), comments: inline, folded };
+  return {
+    event,
+    body: parts.join("\n").trim(),
+    comments: inline,
+    folded,
+    commitId: artifact.pr.headSha || undefined,
+  };
 }
 
 /** Snapshot of AI-proposal vs human-final, recorded at send time for `cerber stats`. */

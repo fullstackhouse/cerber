@@ -189,7 +189,7 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
     try {
       const { url } = await submitReview(
         { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number },
-        { event: payload.event, body: payload.body, comments: payload.comments },
+        { event: payload.event, body: payload.body, comments: payload.comments, commitId: payload.commitId },
       );
       const updated = await updateArtifactByKey(c.req.param("key"), (a) => ({
         ...a,

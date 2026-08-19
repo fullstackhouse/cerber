@@ -180,6 +180,7 @@ program
       event: payload.event,
       body: payload.body,
       comments: payload.comments,
+      commitId: payload.commitId,
     });
     await updateArtifactByKey(artifactKey(id), (a) => ({
       ...a,

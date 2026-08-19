@@ -54,8 +54,8 @@ Early. Current phase: review + read-only cockpit.
 
 1. ✅ `cerber review <pr>` + artifact schema + cockpit (read-only)
 2. ✅ Comment editing in the cockpit (edit/approve/drop/add), verdict override,
-   gated **Send** (double-confirm; posts the review via your `gh` — the only
-   GitHub write in the codebase) + `cerber export` to markdown
+   gated **Send** (one deliberate click; posts the review via your `gh` — the
+   only GitHub write in the codebase) + `cerber export` to markdown
 3. ✅ `--awaiting-me` discovery, parallel runs (`--parallel`, default 3),
    freshness skip (same head SHA → no re-run; `--force` overrides), queue stats
 4. ✅ Daemon/VPS mode: `cerber serve --daemon` polls for PRs awaiting your

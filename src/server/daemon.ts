@@ -147,7 +147,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const payload = buildReviewPayload(artifact, "APPROVE");
       const { url } = await submitReview(
         { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number },
-        { event: payload.event, body: payload.body, comments: payload.comments },
+        { event: payload.event, body: payload.body, comments: payload.comments, commitId: payload.commitId },
       );
       await updateArtifactByKey(artifactKey(artifact.id), (a) => ({
         ...a,

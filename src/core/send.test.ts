@@ -80,6 +80,12 @@ describe("buildReviewPayload", () => {
     expect(payload.body).toContain("cerber");
   });
 
+  it("anchors the review to the reviewed head commit", () => {
+    expect(buildReviewPayload(makeArtifact(), "COMMENT").commitId).toBe("abc");
+    const noSha = makeArtifact({ pr: { ...makeArtifact().pr, headSha: "" } });
+    expect(buildReviewPayload(noSha, "COMMENT").commitId).toBeUndefined();
+  });
+
   it("maps recommendations to events", () => {
     expect(eventForRecommendation("approve")).toBe("APPROVE");
     expect(eventForRecommendation("comment")).toBe("COMMENT");

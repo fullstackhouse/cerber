@@ -135,7 +135,14 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
  */
 export async function submitReview(
   ref: PrRef,
-  payload: { event: string; body: string; comments: { path: string; line: number; side: string; body: string }[] },
+  payload: {
+    event: string;
+    body: string;
+    comments: { path: string; line: number; side: string; body: string }[];
+    /** Commit the review was drafted against. Without it GitHub anchors comments
+     *  to the PR's latest commit, which 422s whenever the PR moved on. */
+    commitId?: string;
+  },
 ): Promise<{ url: string | null }> {
   const args = [
     "api",
@@ -145,13 +152,17 @@ export async function submitReview(
     "--input",
     "-",
   ];
+  const { commitId, ...rest } = payload;
+  const body = commitId ? { ...rest, commit_id: commitId } : rest;
   const { execFile: ef } = await import("node:child_process");
   const out = await new Promise<string>((resolve, reject) => {
     const child = ef("gh", args, { maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`gh api reviews failed: ${stderr?.trim() || err.message}`));
+      // gh only prints the top-level "message" ("Unprocessable Entity"); the useful
+      // part is the errors[] array it leaves in the response body on stdout.
+      if (err) reject(new Error(`gh api reviews failed: ${ghErrorDetail(stderr, stdout) || err.message}`));
       else resolve(stdout);
     });
-    child.stdin!.write(JSON.stringify(payload));
+    child.stdin!.write(JSON.stringify(body));
     child.stdin!.end();
   });
   try {
@@ -160,4 +171,25 @@ export async function submitReview(
   } catch {
     return { url: null };
   }
+}
+
+/** Combine gh's stderr with the details GitHub returns in the response body. */
+export function ghErrorDetail(stderr: string | undefined, stdout: string | undefined): string {
+  const head = stderr?.trim() ?? "";
+  let details: string[] = [];
+  try {
+    const res = JSON.parse(stdout ?? "");
+    details = (Array.isArray(res.errors) ? res.errors : [])
+      .map((e: unknown) => (typeof e === "string" ? e : describeGhError(e as Record<string, unknown>)))
+      .filter((s: string) => s.length > 0 && !head.includes(s));
+  } catch {
+    // Non-JSON body (rate-limit HTML, empty response) — stderr is all we have.
+  }
+  return [head, ...details].filter(Boolean).join(" — ");
+}
+
+function describeGhError(e: Record<string, unknown>): string {
+  if (typeof e.message === "string") return e.message;
+  const where = [e.resource, e.field].filter((v) => typeof v === "string").join(".");
+  return [where, e.code].filter(Boolean).join(": ");
 }

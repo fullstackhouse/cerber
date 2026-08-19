@@ -299,13 +299,11 @@ function SendPanel({
   const [event, setEvent] = useState<string>(defaultEvent);
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [showBody, setShowBody] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSendPreview(reviewKey, event).then(setPreview).catch((e) => setError(String(e)));
-    setConfirming(false);
   }, [reviewKey, event, artifact]);
 
   if (artifact.sent) {
@@ -331,7 +329,7 @@ function SendPanel({
       <div className="send-head">
         <h2>Send to GitHub</h2>
         <span className="muted">
-          nothing is sent until you confirm here · dropped comments stay local · off-diff comments
+          the send button posts straight away · dropped comments stay local · off-diff comments
           fold into the body
         </span>
       </div>
@@ -357,37 +355,24 @@ function SendPanel({
         <a href={exportUrl(reviewKey)} className="export-link">
           export .md
         </a>
-        {!confirming ? (
-          <button className="send-btn" onClick={() => setConfirming(true)}>
-            Send review to GitHub…
-          </button>
-        ) : (
-          <span className="confirm-group">
-            <strong>
-              Really send {event} to {artifact.pr.owner}/{artifact.pr.repo}#{artifact.pr.number}?
-            </strong>
-            <button
-              className="send-btn send-btn-confirm"
-              disabled={sending}
-              onClick={async () => {
-                setSending(true);
-                setError(null);
-                try {
-                  const updated = await sendReview(reviewKey, event);
-                  onSent(updated);
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setSending(false);
-                  setConfirming(false);
-                }
-              }}
-            >
-              {sending ? "Sending…" : "Yes, send it"}
-            </button>
-            <button onClick={() => setConfirming(false)}>cancel</button>
-          </span>
-        )}
+        <button
+          className="send-btn"
+          disabled={sending}
+          onClick={async () => {
+            setSending(true);
+            setError(null);
+            try {
+              const updated = await sendReview(reviewKey, event);
+              onSent(updated);
+            } catch (e) {
+              setError(String(e));
+            } finally {
+              setSending(false);
+            }
+          }}
+        >
+          {sending ? "Sending…" : `Send ${event} to #${artifact.pr.number}`}
+        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {showBody && preview && <pre className="body-preview">{preview.body}</pre>}
