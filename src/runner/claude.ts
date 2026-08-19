@@ -56,8 +56,19 @@ export function unauthenticatedEnv(base: NodeJS.ProcessEnv, emptyDir: string): N
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "",
+    // https is not the only way out: a run could point the remote at
+    // git@github.com and ride the user's keys. No agent, no ~/.ssh/config, and
+    // no default identity — IdentitiesOnly alone still permits ssh's built-in
+    // key paths, which authenticated in testing.
+    SSH_AUTH_SOCK: "",
+    SSH_ASKPASS: "",
+    GIT_SSH_COMMAND: NO_IDENTITY_SSH,
   };
 }
+
+/** `ssh` with nothing to authenticate as: no agent, no config, no identity. */
+const NO_IDENTITY_SSH =
+  "ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=/dev/null -o BatchMode=yes";
 
 /**
  * Generous, but finite: a wedged `claude` would otherwise hold the inflight

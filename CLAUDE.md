@@ -55,8 +55,10 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   gets Bash — and never Edit/Write: a review reads and runs, it doesn't fix
 - Don't let a run hold GitHub credentials. Bash plus a stored credential would
   make "nothing reaches GitHub without a Send" a request rather than a fact:
-  the fetch credential is per-command, and the run's env blanks the tokens and
-  disables git's global *and* system config (`GIT_CONFIG_NOSYSTEM`)
+  the fetch credential is per-command, and the run's env blanks the tokens,
+  disables git's global *and* system config (`GIT_CONFIG_NOSYSTEM`), and closes
+  ssh (no agent, no default identity). It is not a sandbox — say so rather than
+  implying one
 - Don't let anything but the user grant trust. Not the PR, not its author's
   association, not a heuristic — trust is a claim about people, stated up front
 - Don't let a repo stand in for the people who can open PRs against it. A repo

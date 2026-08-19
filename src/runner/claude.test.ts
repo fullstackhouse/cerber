@@ -113,4 +113,14 @@ describe("unauthenticatedEnv", () => {
   it("never lets git fall back to an interactive prompt", () => {
     expect(env().GIT_TERMINAL_PROMPT).toBe("0");
   });
+
+  it("closes the ssh route too, not just https", () => {
+    // A run could point the remote at git@github.com and ride the user's keys.
+    expect(env().SSH_AUTH_SOCK).toBe("");
+    expect(env().GIT_SSH_COMMAND).toContain("IdentityAgent=none");
+    // IdentitiesOnly alone still permits ssh's built-in key paths — measured
+    // authenticating to GitHub without this.
+    expect(env().GIT_SSH_COMMAND).toContain("IdentityFile=/dev/null");
+    expect(env().GIT_SSH_COMMAND).toContain("-F /dev/null");
+  });
 });

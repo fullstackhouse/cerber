@@ -150,15 +150,22 @@ the repo's own `.claude` config applies — it behaves as if you had checked the
 branch out and opened it yourself. The cockpit labels it "ran the code" so you
 know which kind you are reading.
 
-It cannot write to GitHub, and that is *enforced*, not requested: the run gets
-no GitHub credentials at all. `GH_CONFIG_DIR` points at an empty directory,
-`GH_TOKEN`/`GITHUB_TOKEN` are blanked, the fetch credential is passed per
-command instead of being stored in the checkout, and git's global and system
-config are switched off so a keychain helper cannot stand in. A `git push` or
-`gh pr comment` from inside a review fails to authenticate. Be clear about the
-edge of that guarantee: `Bash` can still *write files in the checkout*, and the
-instruction not to modify the code under review is an instruction, not a wall.
-The checkout is a disposable cache, so the blast radius is a wasted re-review.
+It is handed no GitHub credentials, and that part is *enforced* rather than
+requested. `GH_CONFIG_DIR` points at a fresh empty directory, `GH_TOKEN` and
+`GITHUB_TOKEN` are blanked, the fetch credential rides the fetch command
+instead of being stored in the checkout, git's global and system config are
+switched off so a keychain helper cannot stand in, and the ssh route is closed
+too — no agent, no `~/.ssh/config`, no default identity — since otherwise a run
+could point the remote at `git@github.com` and ride your keys. Measured from
+inside a checkout: `git push` over https and over ssh, and `gh pr comment`, all
+fail to authenticate, while `git log` still works.
+
+**It is not a sandbox, and you should not read it as one.** A trusted run has
+`Bash` and your filesystem: it can write files in the checkout, and a
+determined one could read a key straight out of `~/.ssh` and use it itself.
+What cerber guarantees is that it *hands* the run nothing. The rest is what
+trusting a person means — which is why trust is spelled `@org/team`, and why
+the default is a review that cannot run anything at all.
 
 **What you are accepting.** A trusted review executes code from that PR on your
 machine — the branch's scripts, its dependencies, its test suite. That is the

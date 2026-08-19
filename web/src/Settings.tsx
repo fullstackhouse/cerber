@@ -123,9 +123,10 @@ export function Settings() {
       </table>
 
       <p className="muted">
-        A trusted review cannot write to GitHub — it is given no credentials, so a push or a{" "}
-        <code>gh</code> call fails to authenticate rather than being merely discouraged. It is only{" "}
-        <em>told</em> not to modify the code it is reviewing; the checkout is a disposable cache.
+        A trusted review is handed no GitHub credentials — no token, no <code>gh</code> login, no
+        git or ssh identity — so a push fails to authenticate rather than being merely discouraged.
+        It is not a sandbox though: it has <code>Bash</code> and this machine, so trust people you
+        would let run their branch here anyway.
         The daemon reviews unattended, so with rules set it runs matching PRs' code with nobody
         watching — start it with <code>--no-trust</code> to prevent that.
       </p>
