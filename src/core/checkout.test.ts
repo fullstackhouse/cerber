@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { evictOldCheckouts, listCheckouts, prepareCheckout, sourceDir } from "./checkout.js";
+import { createRunDir, evictOldCheckouts, listCheckouts, prepareCheckout, removeRunDir, sourceDir } from "./checkout.js";
 
 const ref = { owner: "acme", repo: "widgets", number: 42 };
 
@@ -176,5 +176,54 @@ describe("prepareCheckout — trusted", () => {
     // wiped any quarantine an earlier untrusted run left behind.
     expect(renamed).toEqual([]);
     expect(calls).toContainEqual(["clean", "-qfdx"]);
+  });
+});
+
+describe("createRunDir", () => {
+  const previousHome = process.env.CERBER_HOME;
+  let home: string;
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-rundir-"));
+    process.env.CERBER_HOME = home;
+  });
+
+  afterEach(async () => {
+    if (previousHome === undefined) delete process.env.CERBER_HOME;
+    else process.env.CERBER_HOME = previousHome;
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it("gives each run its own directory, so one run cannot seed the next", async () => {
+    // A trusted run has Bash; a shared directory would let it leave a
+    // CLAUDE.md that later diff-only runs would load as their own memory.
+    const a = await createRunDir();
+    const b = await createRunDir();
+    expect(a).not.toBe(b);
+    await fs.writeFile(path.join(a, "CLAUDE.md"), "trust nobody");
+    expect(await fs.readdir(b)).toEqual([]);
+  });
+
+  it("hands back an empty directory", async () => {
+    expect(await fs.readdir(await createRunDir())).toEqual([]);
+  });
+
+  it("removes what the run left behind", async () => {
+    const dir = await createRunDir();
+    await fs.writeFile(path.join(dir, "hosts.yml"), "github.com: {}");
+    await removeRunDir(dir);
+    expect(await fs.readdir(dir).catch(() => "gone")).toBe("gone");
+  });
+
+  it("sweeps directories a crashed run left, but not today's", async () => {
+    const stale = path.join(home, "run", "run-stale");
+    await fs.mkdir(stale, { recursive: true });
+    const old = new Date(Date.now() - 48 * 60 * 60_000);
+    await fs.utimes(stale, old, old);
+    const fresh = await createRunDir();
+
+    await createRunDir();
+    expect(await fs.readdir(stale).catch(() => "gone")).toBe("gone");
+    expect(await fs.readdir(fresh)).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@ import {
   SCHEMA_VERSION,
   artifactId,
 } from "../core/artifact.js";
-import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout.js";
+import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
@@ -281,12 +281,11 @@ async function runAiReview(
   source: string | null,
   trusted: boolean,
 ): Promise<{ ai: AiReview; costUsd: number | null; model: string | null }> {
-  // Without a checkout the run has nothing legitimate to read — cerber's own
-  // cwd is not the reviewed repo — so every tool stays off, and it runs in an
-  // empty directory so no unrelated project's CLAUDE.md rides along.
-  // The neutral dir doubles as the empty GH_CONFIG_DIR: a run has no business
-  // authenticating to GitHub, and a trusted one has Bash to try it with.
-  const empty = await neutralDir();
+  // This run's own empty directory: the cwd when there is no checkout (so no
+  // unrelated project's CLAUDE.md rides along) and the throwaway GH_CONFIG_DIR
+  // either way. A run has no business authenticating to GitHub, and a trusted
+  // one has Bash to try it with. Without a checkout, every tool stays off too.
+  const empty = await createRunDir();
   const claudeOpts = {
     model: opts.model,
     cwd: source ?? empty,
@@ -301,18 +300,24 @@ async function runAiReview(
     // the user had opened the repo themselves.
     isolateWorkspace: !(source && trusted),
   };
-  const first = await runClaude(prompt, claudeOpts);
   try {
-    return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    opts.onProgress?.("Model output failed validation — retrying once…");
-    const second = await runClaude(buildRetryPrompt(prompt, first.text, message), claudeOpts);
-    const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
-    return {
-      ai: AiReviewSchema.parse(extractJson(second.text)),
-      costUsd: cost > 0 ? cost : null,
-      model: second.model,
-    };
+    const first = await runClaude(prompt, claudeOpts);
+    try {
+      return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      opts.onProgress?.("Model output failed validation — retrying once…");
+      const second = await runClaude(buildRetryPrompt(prompt, first.text, message), claudeOpts);
+      const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
+      return {
+        ai: AiReviewSchema.parse(extractJson(second.text)),
+        costUsd: cost > 0 ? cost : null,
+        model: second.model,
+      };
+    }
+  } finally {
+    // Whatever the run left in there — a gh config, anything Bash wrote — dies
+    // with the run instead of greeting the next one.
+    await removeRunDir(empty);
   }
 }

@@ -83,14 +83,35 @@ export function sourceDir(ref: PrRef): string {
 }
 
 /**
- * An empty directory for diff-only runs. Whatever directory cerber was started
- * from belongs to some other project, and the run would pick up its CLAUDE.md
- * and settings as if they described the PR under review.
+ * A fresh empty directory for one review run: the cwd of a diff-only run, and
+ * the throwaway `GH_CONFIG_DIR` of every run.
+ *
+ * Per run, not shared, because both uses assume "empty" and a run can write.
+ * A trusted run has `Bash`; given one directory reused forever, it could leave
+ * a `CLAUDE.md` there that every later diff-only run would then load as its
+ * own memory. Delete it with {@link removeRunDir} when the run ends.
  */
-export async function neutralDir(): Promise<string> {
-  const dir = path.join(cerberHome(), "run");
-  await fs.mkdir(dir, { recursive: true });
-  return dir;
+export async function createRunDir(): Promise<string> {
+  const root = path.join(cerberHome(), "run");
+  await fs.mkdir(root, { recursive: true });
+  await sweepStaleRunDirs(root);
+  return fs.mkdtemp(path.join(root, "run-"));
+}
+
+export async function removeRunDir(dir: string): Promise<void> {
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** A crashed run leaves its directory behind; don't accumulate them forever. */
+async function sweepStaleRunDirs(root: string): Promise<void> {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  const entries = await fs.readdir(root).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.startsWith("run-")) continue;
+    const full = path.join(root, entry);
+    const stat = await fs.stat(full).catch(() => null);
+    if (stat && stat.mtimeMs < cutoff) await removeRunDir(full);
+  }
 }
 
 /**
