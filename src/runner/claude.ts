@@ -13,10 +13,39 @@ export interface ClaudeResult {
   sessionId: string | null;
 }
 
+/**
+ * One line of `claude --output-format stream-json` — the run narrating itself
+ * as it goes: what it is about to read, what it just decided, what it cost.
+ *
+ * Deliberately loose. This is the CLI's wire format, not cerber's schema: a new
+ * event type must be something we ignore, never something that fails a review.
+ */
+export interface ClaudeEvent {
+  type: string;
+  subtype?: string;
+  message?: {
+    content?: Array<{
+      type: string;
+      text?: string;
+      thinking?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+      is_error?: boolean;
+    }>;
+  };
+  [key: string]: unknown;
+}
+
 export interface ClaudeOptions {
   model?: string;
   /** Defaults to the `claude` on PATH. */
   bin?: string;
+  /**
+   * Called for each event as the run emits it. A review or a chat turn takes
+   * minutes; this is the only way to say what it is doing while it does it,
+   * rather than making the user watch a spinner and hope.
+   */
+  onEvent?: (event: ClaudeEvent) => void;
   /**
    * Directory the run sees as its workspace. Without one the run inherits
    * cerber's own cwd, where any file it read would belong to the wrong repo.
@@ -98,7 +127,10 @@ export const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 const SIGKILL_GRACE_MS = 5_000;
 
 export function buildClaudeArgs(opts: ClaudeOptions): string[] {
-  const args = ["-p", "--output-format", "json"];
+  // stream-json, not json: the same final result arrives in the closing event,
+  // and everything before it is the run saying what it is doing. `--verbose` is
+  // not optional — the CLI refuses the combination without it.
+  const args = ["-p", "--output-format", "stream-json", "--verbose"];
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   if (opts.model) args.push("--model", opts.model);
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
@@ -110,8 +142,37 @@ export function buildClaudeArgs(opts: ClaudeOptions): string[] {
 }
 
 /**
+ * Split a stream-json stdout chunk into whole events, keeping whatever trailing
+ * fragment has not been terminated yet. A tool result can be megabytes, so a
+ * single event routinely arrives across several chunks.
+ */
+export function readEvents(buffer: string): { events: ClaudeEvent[]; rest: string } {
+  const lines = buffer.split("\n");
+  // The last piece has no newline after it — it may be half an event.
+  const rest = lines.pop() ?? "";
+  const events: ClaudeEvent[] = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
+        events.push(parsed as ClaudeEvent);
+      }
+    } catch {
+      // A line we can't parse is a line we don't need — the run's own result
+      // comes from the closing event, and dying here would throw away a
+      // finished review over a stray byte.
+    }
+  }
+  return { events, rest };
+}
+
+/**
  * Run `claude -p` headless with the prompt on stdin, return the result text.
  * Rides the user's existing Claude Code login — no API key handling here.
+ *
+ * Reads the run as a stream so {@link ClaudeOptions.onEvent} can report what it
+ * is doing while it does it; the result itself is the closing event.
  */
 export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<ClaudeResult> {
   const args = buildClaudeArgs(opts);
@@ -122,7 +183,10 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
       cwd: opts.cwd,
       env: opts.env,
     });
-    let stdout = "";
+    let unread = "";
+    let result: ClaudeEvent | null = null;
+    /** Kept only to explain a failure — the events carry everything we use. */
+    let tail = "";
     let stderr = "";
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let settled = false;
@@ -149,7 +213,25 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
       );
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => (stdout += d));
+    const ingest = (chunk: string) => {
+      const read = readEvents(unread + chunk);
+      unread = read.rest;
+      for (const event of read.events) {
+        if (event.type === "result") result = event;
+        // A throwing listener must not take the run down with it: the answer is
+        // the point, the narration is not.
+        try {
+          opts.onEvent?.(event);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    child.stdout.on("data", (d) => {
+      tail = (tail + d).slice(-2_000);
+      ingest(String(d));
+    });
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => {
       settle(() =>
@@ -161,20 +243,24 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
       clearTimeout(timer);
       settled = true;
       if (code !== 0) {
-        reject(new Error(`claude exited with code ${code}: ${stderr.trim() || stdout.slice(0, 500)}`));
+        reject(new Error(`claude exited with code ${code}: ${stderr.trim() || tail.slice(-500)}`));
         return;
       }
-      try {
-        const wrapper = JSON.parse(stdout);
-        resolve({
-          text: wrapper.result ?? "",
-          costUsd: typeof wrapper.total_cost_usd === "number" ? wrapper.total_cost_usd : null,
-          model: wrapper.modelUsage ? Object.keys(wrapper.modelUsage)[0] ?? null : null,
-          sessionId: typeof wrapper.session_id === "string" ? wrapper.session_id : null,
-        });
-      } catch {
-        reject(new Error(`Could not parse claude output as JSON wrapper: ${stdout.slice(0, 500)}`));
+      // The last line need not be newline-terminated, and it is the one that
+      // matters: dropping it would throw away a finished review for the want
+      // of a trailing byte.
+      ingest("\n");
+      const wrapper = result as (ClaudeEvent & Record<string, unknown>) | null;
+      if (!wrapper) {
+        reject(new Error(`claude produced no result event: ${tail.slice(-500)}`));
+        return;
       }
+      resolve({
+        text: typeof wrapper.result === "string" ? wrapper.result : "",
+        costUsd: typeof wrapper.total_cost_usd === "number" ? wrapper.total_cost_usd : null,
+        model: wrapper.modelUsage ? Object.keys(wrapper.modelUsage as object)[0] ?? null : null,
+        sessionId: typeof wrapper.session_id === "string" ? wrapper.session_id : null,
+      });
     });
     child.stdin.write(prompt);
     child.stdin.end();

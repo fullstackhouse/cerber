@@ -106,24 +106,32 @@ export async function updateArtifactByKey(
 }
 
 /**
- * Clear "running" statuses left behind by a process that died mid-review.
- * Nothing in a freshly started process is running, so anything still marked
- * running is a leftover — without this it stays wedged forever, with no way to
- * retry it from the cockpit. A `cerber review` running in another terminal is
- * the one false positive; it overwrites the artifact when it finishes anyway.
+ * Clear AI work left in flight by a process that died mid-run — a review marked
+ * "running", or a chat turn still waiting for its answer. Nothing in a freshly
+ * started process is running, so anything still marked so is a leftover; without
+ * this it stays wedged forever, with no way to retry it from the cockpit. A
+ * `cerber review` running in another terminal is the one false positive; it
+ * overwrites the artifact when it finishes anyway.
  */
 export async function reconcileRunning(): Promise<number> {
   const artifacts = await listArtifacts();
   let cleared = 0;
   for (const artifact of artifacts) {
-    if (artifact.status !== "running") continue;
+    const stuckRun = artifact.status === "running";
+    const stuckChat =
+      artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;
+    if (!stuckRun && !stuckChat) continue;
     await saveArtifact({
       ...artifact,
-      status: "failed",
+      status: stuckRun ? "failed" : artifact.status,
       updatedAt: new Date().toISOString(),
-      run: artifact.run
-        ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
-        : null,
+      run:
+        stuckRun && artifact.run
+          ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
+          : artifact.run,
+      pendingChat: stuckChat
+        ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
+        : artifact.pendingChat,
     });
     cleared++;
   }

@@ -172,6 +172,31 @@ export const ChatTurnSchema = z.object({
 });
 export type ChatTurn = z.infer<typeof ChatTurnSchema>;
 
+/**
+ * The chat turn being answered right now — or the one that failed.
+ *
+ * A turn takes minutes: the reviewer re-reads the code before it answers. So
+ * the turn runs detached and this is what the cockpit polls. The question is on
+ * the artifact from the moment it is asked, which is what makes a reload
+ * mid-turn show it still being answered rather than a conversation that lost
+ * it, and what carries a failure back to a request that already returned.
+ */
+export const PendingChatSchema = z.object({
+  /** The message being answered — shown in the transcript while we wait. */
+  message: z.string(),
+  refs: ChatTurnSchema.shape.refs,
+  startedAt: z.string(),
+  /**
+   * What the turn has been doing, in its own words — "reading src/core/diff.ts",
+   * "searching for carryOverComments". The answer takes minutes and this is the
+   * only honest account of them; it is thrown away when the answer lands.
+   */
+  progress: z.array(z.string()).default([]),
+  /** Why the turn failed. Null while it is still running. */
+  error: z.string().nullable().default(null),
+});
+export type PendingChat = z.infer<typeof PendingChatSchema>;
+
 /** The parts of a review a chat turn may rewrite — the reset target. */
 export const ReviewSnapshotSchema = z.object({
   at: z.string(),
@@ -205,6 +230,8 @@ export const ArtifactSchema = z.object({
   calibration: CalibrationSchema.nullable().default(null),
   /** The conversation about this review. Never sent to GitHub. */
   chat: z.array(ChatTurnSchema).default([]),
+  /** A turn in flight, or the one that failed. Null when nothing is pending. */
+  pendingChat: PendingChatSchema.nullable().default(null),
   /** The review as it stood before the first chat turn — "reset" restores this. */
   preChat: ReviewSnapshotSchema.nullable().default(null),
 });

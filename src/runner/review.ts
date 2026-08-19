@@ -13,7 +13,8 @@ import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
-import { extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { describeEvent } from "./progress.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
@@ -182,6 +183,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     // this run just replaced, and resetting to it would restore a dead review.
     chat: existing?.chat ?? [],
     preChat: null,
+    pendingChat: null,
   };
   await saveArtifact(artifact);
 
@@ -298,6 +300,10 @@ async function runAiReview(
   const empty = await createRunDir();
   const claudeOpts = {
     model: opts.model,
+    // Say what the review is doing while it does it, rather than going quiet
+    // for minutes. `cerber review` and the daemon log print these.
+    onEvent: (event: ClaudeEvent) =>
+      opts.onProgress && describeEvent(event).forEach(opts.onProgress),
     cwd: source ?? empty,
     env: unauthenticatedEnv(process.env, empty),
     allowedTools: source ? (trusted ? TRUSTED_TOOLS : READ_TOOLS) : undefined,

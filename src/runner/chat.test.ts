@@ -67,6 +67,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     calibration: null,
     chat: [],
     preChat: null,
+    pendingChat: null,
     ...over,
   };
 }

@@ -10,8 +10,9 @@ import {
 import { createRunDir, prepareCheckout, removeRunDir, sourceDir } from "../core/checkout.js";
 import { PrRef } from "../core/gh.js";
 import { applyRevisions, snapshotReview } from "../core/revise.js";
-import { extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 import { beginReview, endReview } from "./inflight.js";
+import { describeEvent } from "./progress.js";
 import { buildChatPrompt } from "./prompt.js";
 
 /**
@@ -194,6 +195,10 @@ async function turn(
   const empty = await createRunDir();
   const claudeOpts = {
     model: opts.model,
+    // The turn narrates itself while it works. Nothing waits on this — it is
+    // the difference between a minute of spinner and a minute of "reading
+    // src/core/refresh.ts".
+    onEvent: (event: ClaudeEvent) => describeEvent(event).forEach(log),
     cwd: source ?? empty,
     env: unauthenticatedEnv(process.env, empty),
     allowedTools: source ? (trusted ? TRUSTED_TOOLS : READ_TOOLS) : undefined,

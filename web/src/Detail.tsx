@@ -5,6 +5,7 @@ import { newSideLines, patchForFiles, unclaimedFiles } from "../../src/core/diff
 import {
   addComment,
   deleteComment,
+  dismissPendingChat,
   exportUrl,
   fetchReview,
   fetchSendPreview,
@@ -13,8 +14,8 @@ import {
   refreshReview,
   rerunReview,
   resetReviewToPreChat,
-  sendChatTurn,
   sendReview,
+  startChatTurn,
 } from "./api";
 import { highlightDiff } from "./highlight";
 import { Markdown } from "./Markdown";
@@ -413,24 +414,33 @@ function ChatPanel({
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const chat = artifact.chat ?? [];
+  const pending = artifact.pendingChat ?? null;
+  // A turn runs detached, so "busy" outlives the request that started it: it
+  // ends when the artifact stops carrying an unanswered question.
+  const inFlight = pending != null && pending.error == null;
+  const busy = starting || inFlight;
 
-  const send = () => {
-    const message = draft.trim();
+  const start = (message: string, withRefs: ChatRef[], onStarted?: () => void) => {
     if (!message || busy) return;
-    setBusy(true);
+    setStarting(true);
     setError(null);
-    sendChatTurn(reviewKey, { message, refs })
-      .then((result) => {
-        onArtifact(result.artifact);
-        setDraft("");
-        onClearRefs();
+    startChatTurn(reviewKey, { message, refs: withRefs })
+      .then((a) => {
+        onArtifact(a);
+        onStarted?.();
       })
       .catch((e) => setError(String(e.message ?? e)))
-      .finally(() => setBusy(false));
+      .finally(() => setStarting(false));
   };
+
+  const send = () =>
+    start(draft.trim(), refs, () => {
+      setDraft("");
+      onClearRefs();
+    });
 
   return (
     <section className="chat-panel">
@@ -441,11 +451,64 @@ function ChatPanel({
         </span>
       </div>
 
-      {chat.length > 0 && (
+      {(chat.length > 0 || pending) && (
         <div className="chat-log">
           {chat.map((t) => (
             <ChatTurnView key={t.id} turn={t} artifact={artifact} />
           ))}
+          {pending && (
+            <div className="chat-turn chat-turn-user chat-turn-pending">
+              <div className="chat-turn-who">You</div>
+              {pending.refs.length > 0 && (
+                <div className="chat-refs">
+                  {pending.refs.map((r, i) => (
+                    <span key={i} className="chat-ref">
+                      {describeRef(r, artifact)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Markdown className="chat-turn-body" text={pending.message} />
+              {pending.error ? (
+                <div className="chat-failed">
+                  ✕ this turn didn't finish — {pending.error}
+                  {!readOnly && (
+                    <>
+                      {" "}
+                      <button onClick={() => start(pending.message, pending.refs)}>
+                        ask again
+                      </button>{" "}
+                      <button
+                        onClick={() =>
+                          dismissPendingChat(reviewKey)
+                            .then(onArtifact)
+                            .catch((e) => setError(String(e.message ?? e)))
+                        }
+                      >
+                        dismiss
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="chat-waiting">
+                  {/* What it is doing right now, in its own words. The last
+                      line is the live one; the rest is how it got there. */}
+                  {pending.progress.length > 0 ? (
+                    <ol className="chat-progress">
+                      {pending.progress.map((line, i) => (
+                        <li key={i} className={i === pending.progress.length - 1 ? "now" : undefined}>
+                          {line}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    "Thinking… it re-reads the code before answering."
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -470,7 +533,9 @@ function ChatPanel({
             className="chat-input"
             rows={3}
             value={draft}
-            disabled={busy}
+            // Only the send is blocked while a turn runs — composing the next
+            // message during the minutes it takes is exactly what you want to do.
+            disabled={starting}
             placeholder={
               chat.length === 0
                 ? "e.g. the summary is restating the author's claims — say what you actually verified"
@@ -483,7 +548,7 @@ function ChatPanel({
           />
           <div className="chat-actions">
             <button className="chat-send" onClick={send} disabled={busy || draft.trim() === ""}>
-              {busy ? "Thinking… (it re-reads the code)" : "Send message"}
+              {inFlight ? "Waiting for the answer…" : starting ? "Sending…" : "Send message"}
             </button>
             <span className="muted">⌘↵</span>
             {artifact.preChat && (
@@ -492,11 +557,11 @@ function ChatPanel({
                 disabled={busy}
                 title="Put the review back the way the AI first wrote it. The conversation stays."
                 onClick={() => {
-                  setBusy(true);
+                  setStarting(true);
                   resetReviewToPreChat(reviewKey)
                     .then(onArtifact)
                     .catch((e) => setError(String(e.message ?? e)))
-                    .finally(() => setBusy(false));
+                    .finally(() => setStarting(false));
                 }}
               >
                 Reset the review
@@ -709,9 +774,11 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     };
   }, [reviewKey]);
 
-  // While an AI run is in flight, follow it until it lands.
+  // While AI work is in flight — a re-review, or a chat turn — follow it until
+  // it lands. Both run detached, so the artifact is the only thing that knows.
+  const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
   useEffect(() => {
-    if (artifact?.status !== "running") return;
+    if (artifact?.status !== "running" && !chatInFlight) return;
     const timer = setInterval(() => {
       fetchReview(reviewKey)
         .then((a) => {
@@ -723,7 +790,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         });
     }, 3000);
     return () => clearInterval(timer);
-  }, [artifact?.status, reviewKey]);
+  }, [artifact?.status, chatInFlight, reviewKey]);
 
   if (error) return <p className="error">{error}</p>;
   if (!artifact) return <p className="muted">Loading…</p>;
