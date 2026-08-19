@@ -34,7 +34,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
   gh client (shells out to `gh`, no tokens handled), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
-  matching each comment's line *text*, never a fuzzy guess), source checkouts
+  matching each comment's line *text*, never a fuzzy guess), review revision
+  (`revise.ts` — applies a chat turn's edits, refuses the user's own comments,
+  and folds a finished turn onto whatever the artifact says now), source checkouts
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
   an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
   trust rules (`trust.ts` — `@login`, `@org/team`, `@org/*`; people only, no
@@ -44,7 +46,10 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
-  only; `--no-source` reviews the diff alone, with every tool off and an empty cwd
+  only; `--no-source` reviews the diff alone, with every tool off and an empty cwd.
+  `chat.ts` is one turn of a conversation about a finished draft: it resumes the
+  review's own session (`run.sessionId`, captured from `claude -p`), re-clones an
+  evicted checkout so resume is whole, and revises the artifact directly
 - `src/server/` — Hono API + static cockpit serving, plus the inbox loop
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
@@ -71,7 +76,14 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
 - Don't let a re-review discard human work: comments the user wrote or edited
-  are carried across (`carryOverComments`), never regenerated away
+  are carried across (`carryOverComments`), never regenerated away. A chat turn
+  is the second way to lose it — it refuses to rewrite the user's own comments,
+  and its result is folded onto the current artifact (`mergeConcurrentEdits`)
+  rather than overwriting whatever they edited while the turn ran
+- Don't add an accept step to a revision the user asked for. The chat agent
+  writes the draft directly; Send is where a human vouches for what reaches
+  GitHub, and one pre-chat snapshot is the way back. A per-turn undo is
+  propose/accept machinery wearing a different name
 - Don't start an AI run without claiming `runner/inflight` — the daemon's timer
   and the cockpit's button both write the same artifact file
 - Don't give the review run a tool it doesn't need. The default run reads and

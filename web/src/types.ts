@@ -50,6 +50,32 @@ export interface ReviewComment {
   drifted?: boolean;
 }
 
+/** What the user pointed at with "discuss this". */
+export interface ChatRef {
+  target: "summary" | "verdict" | "chapter" | "comment";
+  id: string | null;
+}
+
+/** One edit a chat turn made to the review. Already applied — not a proposal. */
+export type Revision =
+  | { kind: "summary"; body: string }
+  | { kind: "verdict"; verdict: Verdict }
+  | { kind: "chapter"; chapterId: string; title?: string; explanation?: string }
+  | { kind: "comment-edit"; commentId: string; body: string }
+  | { kind: "comment-drop"; commentId: string }
+  | { kind: "comment-add"; path: string; line: number | null; body: string; chapterId: string | null };
+
+export interface ChatTurn {
+  id: string;
+  role: "user" | "assistant";
+  at: string;
+  body: string;
+  refs: ChatRef[];
+  revisions: Revision[];
+  refused: { revision: Revision; reason: string }[];
+  costUsd: number | null;
+}
+
 export interface Artifact {
   schemaVersion: number;
   id: string;
@@ -90,6 +116,16 @@ export interface Artifact {
     moved: number;
     drifted: number;
   } | null;
+  /** The conversation about this review. Never sent to GitHub. */
+  chat?: ChatTurn[];
+  /** Present once a chat has started — what "reset" goes back to. */
+  preChat?: { at: string } | null;
+}
+
+export interface ChatTurnResult {
+  artifact: Artifact;
+  applied: Revision[];
+  refused: { revision: Revision; reason: string }[];
 }
 
 export interface RefreshResult {

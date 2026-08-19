@@ -41,6 +41,23 @@ describe("buildClaudeArgs", () => {
       "json",
     ]);
   });
+
+  it("resumes an earlier session when asked to", () => {
+    expect(buildClaudeArgs({ resumeSessionId: "sess-123" })).toEqual([
+      "-p",
+      "--output-format",
+      "json",
+      "--resume",
+      "sess-123",
+    ]);
+  });
+
+  it("starts fresh when no session is given", () => {
+    // An empty string is "we never captured one", not a session to resume —
+    // `--resume ""` would fail the run rather than start a new conversation.
+    expect(buildClaudeArgs({ resumeSessionId: "" })).not.toContain("--resume");
+    expect(buildClaudeArgs({})).not.toContain("--resume");
+  });
 });
 
 describe("extractJson", () => {
@@ -84,6 +101,36 @@ describe("runClaude", () => {
     await expect(runClaude("hi", { bin: "definitely-not-a-real-binary-xyz" })).rejects.toThrow(
       /Is Claude Code installed/,
     );
+  });
+
+  /** A stand-in `claude` that prints one canned JSON wrapper and exits. */
+  async function stubClaude(wrapper: unknown, run: (bin: string) => Promise<void>) {
+    const bin = path.join(os.tmpdir(), `cerber-stub-${process.pid}-${Math.random().toString(36).slice(2)}.sh`);
+    const json = JSON.stringify(wrapper).replace(/'/g, `'\\''`);
+    await fs.writeFile(bin, `#!/bin/sh\ncat > /dev/null\nprintf '%s' '${json}'\n`, { mode: 0o755 });
+    try {
+      await run(bin);
+    } finally {
+      await fs.rm(bin, { force: true });
+    }
+  }
+
+  it("hands back the session id, so a later turn can resume this conversation", async () => {
+    await stubClaude(
+      { result: "ok", total_cost_usd: 1.5, session_id: "sess-abc", modelUsage: { opus: {} } },
+      async (bin) => {
+        const result = await runClaude("hi", { bin });
+        expect(result.sessionId).toBe("sess-abc");
+        expect(result.text).toBe("ok");
+        expect(result.costUsd).toBe(1.5);
+      },
+    );
+  });
+
+  it("reports no session rather than guessing when the wrapper omits one", async () => {
+    await stubClaude({ result: "ok" }, async (bin) => {
+      expect((await runClaude("hi", { bin })).sessionId).toBeNull();
+    });
   });
 });
 

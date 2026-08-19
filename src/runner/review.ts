@@ -171,10 +171,17 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       error: null,
       withSource: source !== null,
       trusted: trusted && source !== null,
+      sessionId: null,
     },
     sent: null,
     refresh: null,
     calibration: null,
+    // The conversation is the user's writing, so a re-review keeps it — the
+    // chat prompt replays the transcript, which is what makes it survive the
+    // session change. The snapshot does NOT carry over: it describes the draft
+    // this run just replaced, and resetting to it would restore a dead review.
+    chat: existing?.chat ?? [],
+    preChat: null,
   };
   await saveArtifact(artifact);
 
@@ -223,6 +230,9 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         error: null,
         withSource: source !== null,
         trusted: trusted && source !== null,
+        // Only worth keeping when there is a checkout to resume into: a session
+        // whose working directory was empty has nothing a chat turn could read.
+        sessionId: source ? review.sessionId : null,
       },
     };
 
@@ -280,7 +290,7 @@ async function runAiReview(
   opts: ReviewOptions,
   source: string | null,
   trusted: boolean,
-): Promise<{ ai: AiReview; costUsd: number | null; model: string | null }> {
+): Promise<{ ai: AiReview; costUsd: number | null; model: string | null; sessionId: string | null }> {
   // This run's own empty directory: the cwd when there is no checkout (so no
   // unrelated project's CLAUDE.md rides along) and the throwaway GH_CONFIG_DIR
   // either way. A run has no business authenticating to GitHub, and a trusted
@@ -303,16 +313,24 @@ async function runAiReview(
   try {
     const first = await runClaude(prompt, claudeOpts);
     try {
-      return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
+      return {
+        ai: AiReviewSchema.parse(extractJson(first.text)),
+        costUsd: first.costUsd,
+        model: first.model,
+        sessionId: first.sessionId,
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       opts.onProgress?.("Model output failed validation — retrying once…");
+      // A fresh run, not a resume: the retry prompt already carries the whole
+      // original prompt, so resuming would send the diff twice.
       const second = await runClaude(buildRetryPrompt(prompt, first.text, message), claudeOpts);
       const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
       return {
         ai: AiReviewSchema.parse(extractJson(second.text)),
         costUsd: cost > 0 ? cost : null,
         model: second.model,
+        sessionId: second.sessionId ?? first.sessionId,
       };
     }
   } finally {

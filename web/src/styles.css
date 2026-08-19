@@ -651,3 +651,118 @@ button:hover {
 .trust-deny code {
   text-decoration: line-through;
 }
+
+/* Chat: arguing with the review before it goes out */
+.chat-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 24px 0;
+}
+
+.chat-panel h2 {
+  margin: 0;
+}
+
+.chat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.chat-turn {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+}
+
+.chat-turn-user {
+  border-left-color: var(--accent);
+}
+
+.chat-turn-who {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.chat-turn-body p:first-child {
+  margin-top: 0;
+}
+.chat-turn-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* What the turn changed. Already applied — a record, not a proposal. */
+.chat-revision {
+  font-size: 13px;
+  color: var(--green);
+  margin-top: 4px;
+}
+
+.chat-refusal {
+  font-size: 13px;
+  color: var(--yellow);
+  margin-top: 4px;
+}
+
+.chat-refs {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.chat-ref {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.chat-refs-pending .chat-ref {
+  cursor: pointer;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.chat-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.chat-reset {
+  margin-left: auto;
+}
+
+.discuss-btn {
+  margin: 8px 0;
+  font-size: 13px;
+}

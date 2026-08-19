@@ -78,6 +78,11 @@ export const RunInfoSchema = z.object({
   withSource: z.boolean().default(false),
   /** The user vouched for this PR, so the reviewer could also run commands. */
   trusted: z.boolean().default(false),
+  /**
+   * The Claude session this review ran in. Chat turns resume it, so the
+   * reviewer answering a question still holds everything it read.
+   */
+  sessionId: z.string().nullable().default(null),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 
@@ -114,6 +119,69 @@ export const CalibrationSchema = z.object({
 });
 export type Calibration = z.infer<typeof CalibrationSchema>;
 
+/**
+ * One edit a chat turn made to the review it is about.
+ *
+ * The agent revises the draft directly — there is no accept step — so these are
+ * a record of what already happened, rendered in the transcript, not a proposal
+ * awaiting a click. The user's escape hatch is the conversation itself, plus
+ * the one pre-chat snapshot.
+ */
+export const RevisionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("summary"), body: z.string() }),
+  z.object({ kind: z.literal("verdict"), verdict: VerdictSchema }),
+  z.object({ kind: z.literal("chapter"), chapterId: z.string(), title: z.string().optional(), explanation: z.string().optional() }),
+  z.object({ kind: z.literal("comment-edit"), commentId: z.string(), body: z.string() }),
+  z.object({ kind: z.literal("comment-drop"), commentId: z.string() }),
+  z.object({
+    kind: z.literal("comment-add"),
+    path: z.string(),
+    line: z.number().int().positive().nullable(),
+    body: z.string(),
+    chapterId: z.string().nullable().default(null),
+  }),
+]);
+export type Revision = z.infer<typeof RevisionSchema>;
+
+/** A revision the run declined to make, and why — shown in the transcript. */
+export const RefusalSchema = z.object({
+  revision: RevisionSchema,
+  reason: z.string(),
+});
+export type Refusal = z.infer<typeof RefusalSchema>;
+
+export const ChatTurnSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  at: z.string(),
+  body: z.string(),
+  /** What the user pointed at with "discuss this" — user turns only. */
+  refs: z
+    .array(
+      z.object({
+        target: z.enum(["summary", "verdict", "chapter", "comment"]),
+        id: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
+  /** Edits this turn made to the review. Assistant turns only. */
+  revisions: z.array(RevisionSchema).default([]),
+  /** Edits this turn asked for but the artifact would not accept. */
+  refused: z.array(RefusalSchema).default([]),
+  costUsd: z.number().nullable().default(null),
+});
+export type ChatTurn = z.infer<typeof ChatTurnSchema>;
+
+/** The parts of a review a chat turn may rewrite — the reset target. */
+export const ReviewSnapshotSchema = z.object({
+  at: z.string(),
+  summary: z.string(),
+  chapters: z.array(ChapterSchema),
+  comments: z.array(CommentSchema),
+  verdict: VerdictSchema.nullable(),
+});
+export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
+
 export const ArtifactSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   /** "owner/repo#123" */
@@ -135,6 +203,10 @@ export const ArtifactSchema = z.object({
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),
+  /** The conversation about this review. Never sent to GitHub. */
+  chat: z.array(ChatTurnSchema).default([]),
+  /** The review as it stood before the first chat turn — "reset" restores this. */
+  preChat: ReviewSnapshotSchema.nullable().default(null),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
@@ -160,6 +232,13 @@ export const AiReviewSchema = z.object({
   verdict: VerdictSchema,
 });
 export type AiReview = z.infer<typeof AiReviewSchema>;
+
+/** What a chat turn must return: something to say, and what it changed. */
+export const AiChatTurnSchema = z.object({
+  reply: z.string(),
+  revisions: z.array(RevisionSchema).default([]),
+});
+export type AiChatTurn = z.infer<typeof AiChatTurnSchema>;
 
 export function artifactId(pr: Pick<PrInfo, "owner" | "repo" | "number">): string {
   return `${pr.owner}/${pr.repo}#${pr.number}`;

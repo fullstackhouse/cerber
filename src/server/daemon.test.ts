@@ -59,6 +59,7 @@ describe("stubArtifact", () => {
           error: null,
           withSource: false,
           trusted: false,
+          sessionId: null,
         },
       }),
     ).toBe(false);
