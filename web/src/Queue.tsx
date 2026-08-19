@@ -26,6 +26,11 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         🟢 daemon polling every {Math.round(daemon.intervalMs / 60_000)}m
         {daemon.repos.length > 0 ? ` (${daemon.repos.join(", ")})` : " (all repos)"}
       </span>
+      <span>
+        {daemon.autoSend === "on"
+          ? `🤖 auto-send ON ≥${daemon.autoSendThreshold}% (${daemon.autoSent} sent)`
+          : `👻 auto-send shadow ≥${daemon.autoSendThreshold}% (${daemon.autoSendCandidates} candidate${daemon.autoSendCandidates === 1 ? "" : "s"})`}
+      </span>
       {daemon.polling && <span>⏳ polling now…</span>}
       {daemon.lastSummary && <span className="muted">last: {daemon.lastSummary}</span>}
       {daemon.nextPollAt && !daemon.polling && (

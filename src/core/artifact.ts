@@ -12,6 +12,8 @@ export const CommentSchema = z.object({
   chapterId: z.string().nullable().default(null),
   origin: z.enum(["ai", "user"]),
   status: z.enum(["draft", "approved", "dropped"]).default("draft"),
+  /** Set when the user edits an AI comment's body — calibration signal. */
+  editedByUser: z.boolean().default(false),
 });
 export type Comment = z.infer<typeof CommentSchema>;
 
@@ -73,8 +75,22 @@ export const SentInfoSchema = z.object({
   at: z.string(),
   event: z.enum(["APPROVE", "COMMENT", "REQUEST_CHANGES"]),
   url: z.string().nullable().default(null),
+  /** True when the daemon auto-sent this review (opt-in --auto-send). */
+  auto: z.boolean().default(false),
 });
 export type SentInfo = z.infer<typeof SentInfoSchema>;
+
+/** What actually happened vs what the AI proposed — recorded at send time. */
+export const CalibrationSchema = z.object({
+  aiRecommendation: z.enum(["approve", "comment", "request_changes"]).nullable(),
+  aiConfidence: z.number().nullable(),
+  sentEvent: z.enum(["APPROVE", "COMMENT", "REQUEST_CHANGES"]),
+  aiCommentsTotal: z.number().int(),
+  aiCommentsDropped: z.number().int(),
+  aiCommentsEdited: z.number().int(),
+  userCommentsAdded: z.number().int(),
+});
+export type Calibration = z.infer<typeof CalibrationSchema>;
 
 export const ArtifactSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -92,8 +108,9 @@ export const ArtifactSchema = z.object({
   comments: z.array(CommentSchema).default([]),
   verdict: VerdictSchema.nullable().default(null),
   run: RunInfoSchema.nullable().default(null),
-  /** Set once the user explicitly sent the review to GitHub. */
+  /** Set once the review was sent to GitHub (explicitly, or via opt-in auto-send). */
   sent: SentInfoSchema.nullable().default(null),
+  calibration: CalibrationSchema.nullable().default(null),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

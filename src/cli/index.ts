@@ -4,8 +4,14 @@ import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
-import { ReviewEvent, buildReviewPayload, eventForRecommendation } from "../core/send.js";
-import { cerberHome, listArtifacts, loadArtifact, updateArtifactByKey } from "../core/state.js";
+import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
+import {
+  cerberHome,
+  listArtifacts,
+  loadArtifact,
+  readAutoSendLog,
+  updateArtifactByKey,
+} from "../core/state.js";
 import { pool, reviewPr } from "../runner/review.js";
 import { startDaemon } from "../server/daemon.js";
 import { startServer } from "../server/index.js";
@@ -17,7 +23,7 @@ program
   .description(
     "AI code-review cockpit. Claude reviews PRs into local artifacts; nothing reaches GitHub until you explicitly send it.",
   )
-  .version("0.4.0");
+  .version("0.5.0");
 
 program
   .command("review")
@@ -178,9 +184,64 @@ program
     await updateArtifactByKey(artifactKey(id), (a) => ({
       ...a,
       status: "sent" as const,
-      sent: { at: new Date().toISOString(), event, url },
+      sent: { at: new Date().toISOString(), event, url, auto: false },
+      calibration: computeCalibration(a, event),
     }));
     console.log(`✔ Review sent${url ? `: ${url}` : "."}`);
+  });
+
+program
+  .command("stats")
+  .description("How well-calibrated the AI reviews are: verdict agreement and comment survival by confidence")
+  .action(async () => {
+    const artifacts = await listArtifacts();
+    const sent = artifacts.filter((a) => a.calibration);
+    if (sent.length === 0) {
+      console.log("No sent reviews with calibration data yet. Stats appear after you send reviews.");
+    } else {
+      const buckets: [string, (c: number) => boolean][] = [
+        ["  <60%", (c) => c < 60],
+        ["60-79%", (c) => c >= 60 && c < 80],
+        ["80-89%", (c) => c >= 80 && c < 90],
+        ["  90%+", (c) => c >= 90],
+      ];
+      console.log(`Calibration over ${sent.length} sent review(s):\n`);
+      console.log("confidence  n   verdict-agree  ai-comments kept/edited/dropped");
+      for (const [label, match] of buckets) {
+        const group = sent.filter((a) => a.calibration!.aiConfidence != null && match(a.calibration!.aiConfidence));
+        if (group.length === 0) continue;
+        const agree = group.filter(
+          (a) =>
+            a.calibration!.aiRecommendation &&
+            eventForRecommendation(a.calibration!.aiRecommendation) === a.calibration!.sentEvent,
+        ).length;
+        const totals = group.reduce(
+          (acc, a) => {
+            const c = a.calibration!;
+            acc.total += c.aiCommentsTotal;
+            acc.dropped += c.aiCommentsDropped;
+            acc.edited += c.aiCommentsEdited;
+            return acc;
+          },
+          { total: 0, dropped: 0, edited: 0 },
+        );
+        const kept = totals.total - totals.dropped;
+        console.log(
+          `${label}      ${String(group.length).padEnd(3)} ${`${agree}/${group.length}`.padEnd(14)}` +
+            `${kept}/${totals.edited}/${totals.dropped} of ${totals.total}`,
+        );
+      }
+    }
+
+    const log = await readAutoSendLog();
+    if (log.length > 0) {
+      const wouldSend = log.filter((e) => e.decision.startsWith("would send")).length;
+      const autoSent = log.filter((e) => e.sent).length;
+      console.log(
+        `\nAuto-send log (${cerberHome()}/autosend.ndjson): ${log.length} decision(s), ` +
+          `${wouldSend} shadow candidate(s), ${autoSent} auto-sent.`,
+      );
+    }
   });
 
 program
@@ -194,6 +255,11 @@ program
   .option("-R, --repo <owner/repo>", "repo(s) the daemon watches (repeatable; default: all)", collect, [])
   .option("-P, --parallel <n>", "daemon review concurrency", "3")
   .option("-m, --model <model>", "Claude model override for daemon reviews")
+  .option(
+    "--auto-send",
+    "ACTUALLY auto-send APPROVE verdicts at/above --auto-send-threshold (default: shadow mode, which only logs what would be sent)",
+  )
+  .option("--auto-send-threshold <pct>", "confidence needed to auto-send", "90")
   .option("--insecure", "allow binding a non-localhost host without a token (NOT recommended)")
   .action(
     async (opts: {
@@ -205,6 +271,8 @@ program
       repo: string[];
       parallel: string;
       model?: string;
+      autoSend?: boolean;
+      autoSendThreshold: string;
       insecure?: boolean;
     }) => {
       const token = opts.token ?? process.env.CERBER_TOKEN;
@@ -216,12 +284,21 @@ program
         );
         process.exit(1);
       }
+      const threshold = Math.min(100, Math.max(50, Number(opts.autoSendThreshold) || 90));
+      if (opts.autoSend) {
+        console.log(
+          `⚠ auto-send is ON: APPROVE verdicts with confidence ≥ ${threshold}% will be sent to GitHub as you, without a per-review confirmation.\n` +
+            `  Every decision is logged to ${cerberHome()}/autosend.ndjson. COMMENT/REQUEST_CHANGES always wait for a human.`,
+        );
+      }
       const daemon = opts.daemon
         ? startDaemon({
             repos: opts.repo,
             intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
             parallel: Math.max(1, Number(opts.parallel) || 1),
             model: opts.model,
+            autoSend: opts.autoSend ? "on" : "shadow",
+            autoSendThreshold: threshold,
           })
         : undefined;
       await startServer({ port: Number(opts.port), host: opts.host, token, daemon });

@@ -242,7 +242,9 @@ function SendPanel({
   if (artifact.sent) {
     return (
       <div className="send-panel sent">
-        ✔ Review sent ({artifact.sent.event}) at {new Date(artifact.sent.at).toLocaleString()}
+        ✔ Review sent ({artifact.sent.event}
+        {artifact.sent.auto ? ", auto-sent by daemon" : ""}) at{" "}
+        {new Date(artifact.sent.at).toLocaleString()}
         {artifact.sent.url && (
           <>
             {" — "}

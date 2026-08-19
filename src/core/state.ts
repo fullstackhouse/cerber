@@ -44,6 +44,41 @@ export async function loadArtifactByKey(key: string): Promise<Artifact | null> {
   }
 }
 
+export interface AutoSendLogEntry {
+  at: string;
+  id: string;
+  recommendation: string | null;
+  confidence: number | null;
+  mode: "shadow" | "on";
+  decision: string;
+  sent: boolean;
+}
+
+/** Append to ~/.cerber/autosend.ndjson — the shadow/auto-send audit log. */
+export async function appendAutoSendLog(entry: AutoSendLogEntry): Promise<void> {
+  await fs.mkdir(cerberHome(), { recursive: true });
+  await fs.appendFile(path.join(cerberHome(), "autosend.ndjson"), JSON.stringify(entry) + "\n");
+}
+
+export async function readAutoSendLog(): Promise<AutoSendLogEntry[]> {
+  try {
+    const raw = await fs.readFile(path.join(cerberHome(), "autosend.ndjson"), "utf8");
+    return raw
+      .split("\n")
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as AutoSendLogEntry];
+        } catch {
+          return [];
+        }
+      });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+}
+
 /** Load by key, apply a mutation, bump updatedAt, save. Returns the new artifact. */
 export async function updateArtifactByKey(
   key: string,

@@ -67,6 +67,7 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
     verdict: null,
     run: { model: opts.model ?? null, startedAt: now(), finishedAt: null, costUsd: null, error: null },
     sent: null,
+    calibration: null,
   };
   await saveArtifact(artifact);
 
@@ -98,6 +99,7 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
         chapterId: c.chapterId ?? null,
         origin: "ai" as const,
         status: "draft" as const,
+        editedByUser: false,
       })),
       verdict: review.ai.verdict,
       run: {

@@ -72,6 +72,7 @@ export interface Artifact {
     at: string;
     event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
     url: string | null;
+    auto?: boolean;
   } | null;
 }
 
@@ -87,6 +88,10 @@ export type DaemonStatus =
       lastPollAt: string | null;
       nextPollAt: string | null;
       lastSummary: string | null;
+      autoSend: "shadow" | "on";
+      autoSendThreshold: number;
+      autoSent: number;
+      autoSendCandidates: number;
     };
 
 export interface SendPreview {

@@ -2,8 +2,10 @@
 
 Cerber: AI code-review cockpit. Claude reviews PRs into local JSON artifacts;
 the user walks through them in a local React cockpit. **Hard rule: cerber never
-writes to GitHub except an explicit, user-clicked Send (phase 2+). No pending
-reviews, no comments, no reactions — reviewing is read-only.**
+writes to GitHub except (a) an explicit, user-confirmed Send, or (b) daemon
+auto-send that the user explicitly enabled with --auto-send — approve-only,
+confidence-threshold-gated, every decision logged to autosend.ndjson. No
+pending reviews, no comments, no reactions — reviewing is read-only.**
 
 ## Architecture
 

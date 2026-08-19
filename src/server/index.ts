@@ -10,7 +10,7 @@ import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { submitReview } from "../core/gh.js";
-import { ReviewEvent, buildReviewPayload } from "../core/send.js";
+import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import { listArtifacts, loadArtifactByKey, updateArtifactByKey } from "../core/state.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -113,6 +113,9 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
               ...(body.status !== undefined
                 ? { status: body.status as "draft" | "approved" | "dropped" }
                 : {}),
+              ...(body.body !== undefined && body.body !== cm.body && cm.origin === "ai"
+                ? { editedByUser: true }
+                : {}),
             }
           : cm,
       ),
@@ -135,6 +138,7 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
           chapterId: body.chapterId ?? null,
           origin: "user" as const,
           status: "draft" as const,
+          editedByUser: false,
         },
       ],
     }));
@@ -190,7 +194,8 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
       const updated = await updateArtifactByKey(c.req.param("key"), (a) => ({
         ...a,
         status: "sent" as const,
-        sent: { at: new Date().toISOString(), event: payload.event, url },
+        sent: { at: new Date().toISOString(), event: payload.event, url, auto: false },
+        calibration: computeCalibration(a, payload.event),
       }));
       return c.json(updated);
     } catch (err: unknown) {

@@ -44,6 +44,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     verdict: { recommendation: "comment", confidence: 80, reasoning: "ok" },
     run: null,
     sent: null,
+    calibration: null,
     ...overrides,
   };
 }
@@ -62,10 +63,10 @@ describe("buildReviewPayload", () => {
   it("sends anchorable comments inline and folds the rest into the body", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", origin: "ai", status: "draft" },
-        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", origin: "ai", status: "draft" },
-        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, origin: "user", status: "approved" },
-        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, origin: "ai", status: "dropped" },
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
+        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, origin: "user", status: "approved", editedByUser: false },
+        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, origin: "ai", status: "dropped", editedByUser: false },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -90,8 +91,8 @@ describe("toMarkdown", () => {
   it("renders a full review document without dropped comments", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", origin: "ai", status: "draft" },
-        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", origin: "ai", status: "dropped" },
+        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
+        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", origin: "ai", status: "dropped", editedByUser: false },
       ],
     });
     const md = toMarkdown(artifact);

@@ -1,4 +1,8 @@
-import { searchAwaitingMe } from "../core/gh.js";
+import { Artifact, artifactKey } from "../core/artifact.js";
+import { evaluateAutoSend } from "../core/autosend.js";
+import { searchAwaitingMe, submitReview } from "../core/gh.js";
+import { buildReviewPayload, computeCalibration } from "../core/send.js";
+import { appendAutoSendLog, updateArtifactByKey } from "../core/state.js";
 import { pool, reviewPr } from "../runner/review.js";
 
 export interface DaemonOptions {
@@ -7,6 +11,13 @@ export interface DaemonOptions {
   intervalMs: number;
   parallel: number;
   model?: string;
+  /**
+   * "shadow" (default): log what WOULD be auto-sent, send nothing.
+   * "on": actually auto-send APPROVE verdicts at/above the threshold —
+   * the user opted in explicitly via --auto-send.
+   */
+  autoSend: "shadow" | "on";
+  autoSendThreshold: number;
 }
 
 export interface DaemonStatus {
@@ -19,6 +30,10 @@ export interface DaemonStatus {
   lastPollAt: string | null;
   nextPollAt: string | null;
   lastSummary: string | null;
+  autoSend: "shadow" | "on";
+  autoSendThreshold: number;
+  autoSent: number;
+  autoSendCandidates: number;
 }
 
 export interface DaemonHandle {
@@ -43,6 +58,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     lastPollAt: null,
     nextPollAt: new Date(Date.now()).toISOString(),
     lastSummary: null,
+    autoSend: opts.autoSend,
+    autoSendThreshold: opts.autoSendThreshold,
+    autoSent: 0,
+    autoSendCandidates: 0,
   };
 
   const log = (m: string) => console.log(`[daemon] ${m}`);
@@ -76,7 +95,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
             onProgress: (m) => log(`[${label}] ${m}`),
           });
           if (result.skipped) skipped++;
-          else reviewed++;
+          else {
+            reviewed++;
+            await handleAutoSend(result.artifact);
+          }
         } catch (err: unknown) {
           failed++;
           status.errors++;
@@ -96,6 +118,51 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         status.nextPollAt = new Date(Date.now() + opts.intervalMs).toISOString();
         timer = setTimeout(poll, opts.intervalMs);
       }
+    }
+  }
+
+  async function handleAutoSend(artifact: Artifact): Promise<void> {
+    const decision = evaluateAutoSend(artifact, opts.autoSendThreshold);
+    if (decision.eligible) status.autoSendCandidates++;
+    const entryBase = {
+      at: new Date().toISOString(),
+      id: artifact.id,
+      recommendation: artifact.verdict?.recommendation ?? null,
+      confidence: artifact.verdict?.confidence ?? null,
+      mode: opts.autoSend,
+    };
+
+    if (!decision.eligible) {
+      await appendAutoSendLog({ ...entryBase, decision: decision.reason, sent: false });
+      return;
+    }
+
+    if (opts.autoSend === "shadow") {
+      log(`[${artifact.id}] WOULD auto-send: ${decision.reason} (shadow mode — nothing sent)`);
+      await appendAutoSendLog({ ...entryBase, decision: `would send: ${decision.reason}`, sent: false });
+      return;
+    }
+
+    try {
+      const payload = buildReviewPayload(artifact, "APPROVE");
+      const { url } = await submitReview(
+        { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number },
+        { event: payload.event, body: payload.body, comments: payload.comments },
+      );
+      await updateArtifactByKey(artifactKey(artifact.id), (a) => ({
+        ...a,
+        status: "sent" as const,
+        sent: { at: new Date().toISOString(), event: "APPROVE" as const, url, auto: true },
+        calibration: computeCalibration(a, "APPROVE"),
+      }));
+      status.autoSent++;
+      log(`[${artifact.id}] AUTO-SENT approve (${decision.reason})${url ? ` — ${url}` : ""}`);
+      await appendAutoSendLog({ ...entryBase, decision: `auto-sent: ${decision.reason}`, sent: true });
+    } catch (err: unknown) {
+      status.errors++;
+      const message = err instanceof Error ? err.message : String(err);
+      log(`[${artifact.id}] auto-send failed: ${message}`);
+      await appendAutoSendLog({ ...entryBase, decision: `auto-send failed: ${message}`, sent: false });
     }
   }
 

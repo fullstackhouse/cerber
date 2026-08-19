@@ -61,8 +61,9 @@ Early. Current phase: review + read-only cockpit.
 4. ✅ Daemon/VPS mode: `cerber serve --daemon` polls for PRs awaiting your
    review and reviews them automatically (read-only); token auth for
    non-localhost binds
-5. Confidence calibration → shadow-mode auto-send → opt-in auto-send above a
-   threshold
+5. ✅ Confidence calibration (`cerber stats`), shadow-mode auto-send (default
+   in daemon: logs what would be sent), opt-in `--auto-send` (approve-only,
+   `--auto-send-threshold`, default 90%)
 
 ## Running on a VPS
 
@@ -75,8 +76,15 @@ The daemon polls GitHub, reviews anything new (skipping PRs whose artifact
 already matches the head SHA), and the cockpit is always warm — open it any
 minute and see pending/ready/sent reviews. Auth: `?token=…` once in the
 browser (sets a cookie) or `Authorization: Bearer …`. Binding a non-localhost
-host without a token is refused. The daemon never sends reviews — Send stays
-a human click.
+host without a token is refused. By default the daemon never sends reviews — Send stays a human click.
+
+**Auto-send** (opt-in): add `--auto-send --auto-send-threshold 90` and the
+daemon will submit APPROVE verdicts at/above the threshold as you. It never
+auto-sends COMMENT or REQUEST_CHANGES. Before enabling, run the default
+shadow mode for a while: every would-send decision lands in
+`~/.cerber/autosend.ndjson`, and `cerber stats` shows how often the AI's
+verdicts and comments survive your review — enable auto-send when its 90%
+actually means 90%.
 
 ## Development
 

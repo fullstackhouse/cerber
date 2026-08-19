@@ -1,4 +1,4 @@
-import { Artifact, Comment, Verdict } from "./artifact.js";
+import { Artifact, Calibration, Comment, Verdict } from "./artifact.js";
 import { newSideLines } from "./diff.js";
 
 export type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
@@ -62,4 +62,18 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
   parts.push("", "---", "_Reviewed with [cerber](https://github.com/fullstackhouse/cerber) 🐕 — drafted by AI, sent by a human._");
 
   return { event, body: parts.join("\n").trim(), comments: inline, folded };
+}
+
+/** Snapshot of AI-proposal vs human-final, recorded at send time for `cerber stats`. */
+export function computeCalibration(artifact: Artifact, event: ReviewEvent): Calibration {
+  const ai = artifact.comments.filter((c) => c.origin === "ai");
+  return {
+    aiRecommendation: artifact.verdict?.recommendation ?? null,
+    aiConfidence: artifact.verdict?.confidence ?? null,
+    sentEvent: event,
+    aiCommentsTotal: ai.length,
+    aiCommentsDropped: ai.filter((c) => c.status === "dropped").length,
+    aiCommentsEdited: ai.filter((c) => c.editedByUser).length,
+    userCommentsAdded: artifact.comments.filter((c) => c.origin === "user").length,
+  };
 }
