@@ -73,11 +73,25 @@ export function mergeConcurrentEdits(
   const merged = current.comments.map((now) =>
     userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now,
   );
-  // Comments the turn itself added are not in `current` yet.
+  // Comments the turn itself added are not in `current` yet. Only those: a
+  // comment present in both `before` and `after` but missing from `current` is
+  // one the user deleted while the turn ran, and pushing it back would undo
+  // the deletion — the very thing this function exists to prevent. (Delete
+  // removes the row outright; drop only marks it, so drops survive above.)
   const seen = new Set(merged.map((c) => c.id));
-  for (const c of after.comments) if (!seen.has(c.id)) merged.push(c);
+  for (const c of after.comments) {
+    if (!wasThere.has(c.id) && !seen.has(c.id)) merged.push(c);
+  }
 
-  return { ...after, comments: merged };
+  return {
+    ...after,
+    comments: merged,
+    // The turn never sets a queue status, so a "mark reviewed" clicked while it
+    // ran is the user's and stands. The verdict it can change, so the turn wins
+    // there only when it actually revised one.
+    status: current.status,
+    verdict: after.verdict === before.verdict ? current.verdict : after.verdict,
+  };
 }
 
 export interface ReviseOptions {

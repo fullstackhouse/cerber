@@ -229,6 +229,15 @@ describe("mergeConcurrentEdits", () => {
     expect(mergeConcurrentEdits(b, after, current).comments[0]!.status).toBe("dropped");
   });
 
+  it("does not resurrect a comment the user deleted while the turn was running", () => {
+    // Delete removes the row outright (unlike drop, which marks it), so the
+    // turn's copy is the only one left — pushing it back would undo the
+    // deletion, which is exactly what this function exists to prevent.
+    const b = before();
+    const merged = mergeConcurrentEdits(b, b, artifact({ comments: [] }));
+    expect(merged.comments).toEqual([]);
+  });
+
   it("keeps a comment the user added while the turn was running", () => {
     const b = before();
     const current = artifact({
@@ -247,6 +256,29 @@ describe("mergeConcurrentEdits", () => {
     );
     const merged = mergeConcurrentEdits(b, after, artifact({ comments: [comment({ id: "c1" })] }));
     expect(merged.comments.map((c) => c.id)).toEqual(["c1", "new-1"]);
+  });
+
+  it("keeps a queue status the user set while the turn was running", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [{ kind: "summary", body: "x" }]);
+    const current = artifact({ ...b, status: "reviewed" });
+    expect(mergeConcurrentEdits(b, after, current).status).toBe("reviewed");
+  });
+
+  it("keeps a verdict override the user set, when the turn did not touch the verdict", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [{ kind: "summary", body: "x" }]);
+    const mine = { recommendation: "approve" as const, confidence: 70, reasoning: "because" };
+    const merged = mergeConcurrentEdits(b, after, artifact({ ...b, verdict: mine }));
+    expect(merged.verdict).toEqual(mine);
+  });
+
+  it("takes the turn's verdict when the turn did revise it", () => {
+    const b = before();
+    const theirs = { recommendation: "request_changes" as const, confidence: 80, reasoning: "found one" };
+    const { artifact: after } = applyRevisions(b, [{ kind: "verdict", verdict: theirs }]);
+    const merged = mergeConcurrentEdits(b, after, artifact({ ...b, verdict: null }));
+    expect(merged.verdict).toEqual(theirs);
   });
 
   it("takes the turn's summary, chapters and verdict", () => {
