@@ -27,7 +27,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 - State files are user-editable: read defensively, write atomically (tmp+rename)
 - Zero config: ride existing `gh`/`claude` logins, degrade gracefully
 - `pnpm typecheck && pnpm test` must pass before commit
-- Conventional commits
+- Conventional commits — they drive the release: every green merge to `main`
+  runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
+  hand-bump `version` or cut a tag/release; CI owns both.
 
 ## Don'ts
 
