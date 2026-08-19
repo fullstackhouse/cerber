@@ -21,7 +21,13 @@ export function tabOf(r: ReviewListItem): Exclude<Tab, "all"> {
 /** Merged and closed PRs drop out of the queue into the archived list. */
 export const isArchived = (r: ReviewListItem) => !!r.pr.state && r.pr.state !== "OPEN";
 
-const STATUS_ORDER = ["ready", "running", "awaiting", "reviewed", "failed", "sent", "skipped"];
+/**
+ * How much a review wants you, most first: a finished draft is the thing to
+ * read; one nobody has drafted yet is a keypress away; a run in flight will
+ * arrive on its own; a failed one needs a hand. Settled reviews sink, and a
+ * sent one is history. Newest first inside each band.
+ */
+const STATUS_ORDER = ["ready", "awaiting", "running", "failed", "reviewed", "skipped", "sent"];
 
 export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
   return [...list].sort(
@@ -31,12 +37,16 @@ export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
   );
 }
 
+/** Statuses that mean you have dealt with this review, one way or another. */
+const SETTLED = ["sent", "reviewed", "skipped"];
+
 /**
  * The reviews the ‹ › arrows walk: open PRs that still want something from you.
- * A sent review is a record, so walking past it would be walking backwards.
+ * A sent review is a record and a skipped one is a decision, so walking past
+ * either would be walking backwards.
  */
 export function walkable(list: ReviewListItem[]): ReviewListItem[] {
-  return sortReviews(list.filter((r) => !isArchived(r) && tabOf(r) !== "sent"));
+  return sortReviews(list.filter((r) => !isArchived(r) && !SETTLED.includes(r.status)));
 }
 
 /** "now", "40s", "12m", "2h", "5d" — the queue's `upd` column. */

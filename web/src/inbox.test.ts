@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageLabel, isArchived, strip, tabOf, verdictCell, walkable } from "./inbox";
+import { ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell, walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
@@ -65,14 +65,44 @@ describe("tabOf", () => {
 });
 
 describe("walkable", () => {
-  it("walks open PRs that still want you, newest-first within a status", () => {
+  it("walks open PRs that still want you, and only those", () => {
     const list = [
       row({ key: "sent", status: "sent" }),
       row({ key: "merged", pr: { ...row().pr, state: "MERGED" } }),
+      row({ key: "reviewed", status: "reviewed" }),
+      row({ key: "skipped", status: "skipped" }),
       row({ key: "ready", status: "ready" }),
       row({ key: "awaiting", status: "awaiting" }),
     ];
     expect(walkable(list).map((r) => r.key)).toEqual(["ready", "awaiting"]);
+  });
+
+  it("drops a review the moment you settle it, so the walk moves forward", () => {
+    const list = [row({ key: "a", status: "ready" }), row({ key: "b", status: "ready" })];
+    expect(walkable(list).map((r) => r.key)).toEqual(["a", "b"]);
+    const settled = [{ ...list[0]!, status: "reviewed" }, list[1]!];
+    expect(walkable(settled).map((r) => r.key)).toEqual(["b"]);
+  });
+});
+
+describe("sortReviews", () => {
+  it("puts what wants you most on top, newest first inside a band", () => {
+    const list = [
+      row({ key: "sent", status: "sent" }),
+      row({ key: "running", status: "running" }),
+      row({ key: "failed", status: "failed" }),
+      row({ key: "ready-old", status: "ready", updatedAt: "2026-08-01T12:00:00.000Z" }),
+      row({ key: "awaiting", status: "awaiting" }),
+      row({ key: "ready-new", status: "ready", updatedAt: "2026-08-19T12:00:00.000Z" }),
+    ];
+    expect(sortReviews(list).map((r) => r.key)).toEqual([
+      "ready-new",
+      "ready-old",
+      "awaiting",
+      "running",
+      "failed",
+      "sent",
+    ]);
   });
 });
 

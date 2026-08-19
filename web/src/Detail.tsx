@@ -703,6 +703,8 @@ function SendPanel({
   onSend,
   error,
   footer,
+  next,
+  onAdvance,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -715,6 +717,9 @@ function SendPanel({
   /** The ways out that don't touch GitHub — kept here because this is where
       you are when you decide not to send, but fenced off from the button. */
   footer: ReactNode;
+  /** Where the queue goes next, once this one is done with. */
+  next: ReviewListItem | null;
+  onAdvance: () => void;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -746,6 +751,12 @@ function SendPanel({
               view on GitHub <Icon name="external" />
             </a>
           )}
+          {/* Sending is the irreversible step, so it doesn't move you by
+              itself — it shows what landed, and offers the way onward. */}
+          <button className="btn" onClick={onAdvance}>
+            {next ? `next review: ${next.pr.repo}#${next.pr.number}` : "back to the queue"}
+            <Icon name="arrowRight" />
+          </button>
         </div>
         <div className="post-actions">{footer}</div>
       </>
@@ -922,6 +933,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Walking to another review starts at its top, not wherever the last one
+    // left the page.
+    window.scrollTo({ top: 0 });
     setFreshness(null);
     setFreshnessError(null);
     setEventOverride(null);
@@ -992,10 +1006,23 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   }, [artifact?.status, chatInFlight, reviewKey]);
 
   const readOnly = artifact?.sent != null;
+  // The walk is the queue as it stood when this page opened. Deliberately not
+  // refetched: finishing this review must not renumber the walk under you or
+  // strand the arrows on a list this PR has just left.
   const walk = useMemo(() => walkable(neighbours), [neighbours]);
   const at = walk.findIndex((r) => r.key === reviewKey);
-  const prev = at > 0 ? walk[at - 1] : null;
-  const next = at >= 0 && at < walk.length - 1 ? walk[at + 1] : null;
+  const prev = (at > 0 ? walk[at - 1] : null) ?? null;
+  const next = (at >= 0 && at < walk.length - 1 ? walk[at + 1] : null) ?? null;
+
+  const goTo = (key: string) => {
+    window.location.hash = `#/r/${encodeURIComponent(key)}`;
+  };
+
+  /** Done here — on to the next review that wants you, or back to the queue. */
+  const advance = () => {
+    if (next) goTo(next.key);
+    else window.location.hash = "#/";
+  };
 
   const chapters: Chapter[] = useMemo(() => {
     if (!artifact) return [];
@@ -1058,8 +1085,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "[" && prev) window.location.hash = `#/r/${encodeURIComponent(prev.key)}`;
-      else if (e.key === "]" && next) window.location.hash = `#/r/${encodeURIComponent(next.key)}`;
+      if (e.key === "[" && prev) goTo(prev.key);
+      else if (e.key === "]" && next) goTo(next.key);
       else if (e.key === "n") goChapter(Math.min(chapters.length - 1, focused + 1));
       else if (e.key === "N") goChapter(Math.max(0, focused - 1));
       else if (e.key === "s" && !readOnly) doSend();
@@ -1086,6 +1113,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   };
 
   const apply = (p: Promise<Artifact>) => p.then(setArtifact).catch((e) => setError(String(e)));
+
+  /** Settle this review locally and move on. Stays put if the write failed. */
+  const settle = (status: "reviewed" | "skipped") =>
+    patchReview(reviewKey, { status })
+      .then(advance)
+      .catch((e) => setError(String(e)));
   const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
     apply(patchComment(reviewKey, id, patch));
   const onDeleteComment = (id: string) => apply(deleteComment(reviewKey, id));
@@ -1139,7 +1172,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 className="walk-btn"
                 disabled={!prev}
                 title={prev ? `[ — ${prev.id}: ${prev.pr.title}` : "no more reviews this way"}
-                onClick={() => prev && (window.location.hash = `#/r/${encodeURIComponent(prev.key)}`)}
+                onClick={() => prev && goTo(prev.key)}
               >
                 <Icon name="chevronLeft" />
               </button>
@@ -1147,7 +1180,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 className="walk-btn"
                 disabled={!next}
                 title={next ? `] — ${next.id}: ${next.pr.title}` : "no more reviews this way"}
-                onClick={() => next && (window.location.hash = `#/r/${encodeURIComponent(next.key)}`)}
+                onClick={() => next && goTo(next.key)}
               >
                 <Icon name="chevronRight" />
               </button>
@@ -1410,16 +1443,31 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             sending={sending}
             onSend={doSend}
             error={sendError}
+            next={next}
+            onAdvance={advance}
             footer={
               <>
                 <span className="faint">not sending?</span>
                 {!readOnly && (
                   <>
-                    <button className="btn btn-sm" onClick={() => apply(patchReview(reviewKey, { status: "reviewed" }))}>
+                    {/* Both mean "I'm done with this one" — so they move you on. */}
+                    <button
+                      className="btn btn-sm"
+                      title={
+                        next
+                          ? `Settle it locally and go to ${next.id}`
+                          : "Settle it locally and go back to the queue"
+                      }
+                      onClick={() => settle("reviewed")}
+                    >
                       <Icon name="check" />
                       mark reviewed
                     </button>
-                    <button className="btn btn-sm" onClick={() => apply(patchReview(reviewKey, { status: "skipped" }))}>
+                    <button
+                      className="btn btn-sm"
+                      title={next ? `Leave it and go to ${next.id}` : "Leave it and go back to the queue"}
+                      onClick={() => settle("skipped")}
+                    >
                       <Icon name="skip" />
                       skip
                     </button>
