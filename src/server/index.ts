@@ -142,7 +142,9 @@ export async function buildApp(
       });
       const trust = remove === true ? without : [...without, canonical];
       await saveConfig({ ...config, trust });
-      return c.json({ path: configPath(), trust: trustView(trust) });
+      // Full ConfigView — the cockpit replaces its config state with this
+      // wholesale, so omitting daemon would crash the Settings toggles.
+      return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon });
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }

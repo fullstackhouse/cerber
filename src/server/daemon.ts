@@ -268,15 +268,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     try {
       // The config is re-read every poll, so the cockpit's Settings toggles
       // take effect on the next tick — no restart. CLI --no-* flags cap it.
-      const config = await loadConfig().catch(() => null);
-      const knobs = config?.daemon ?? { poll: true, autoReview: true };
+      // loadConfig is strict on purpose (a typo must not silently change trust
+      // or the knobs), so a broken file skips the tick loudly instead of
+      // proceeding on guessed defaults.
+      const config = await loadConfig();
+      const knobs = config.daemon;
       const autoReview = opts.autoReview && knobs.autoReview;
       status.pollEnabled = knobs.poll;
       status.autoReview = autoReview;
       // Recomputed too, so a trust rule added mid-run shows up in the strip.
-      status.trustedRuns = autoReview && opts.trust !== false && (config?.trust.length ?? 0) > 0;
+      status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
 
       if (!knobs.poll) {
+        // Deliberately off is not an outage — don't leave a stale error up.
+        status.lastPollError = null;
         status.lastSummary = "polling off (settings) — the queue only shows what you review by hand";
         return;
       }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchDaemonStatus, fetchReviews, rerunReview } from "./api";
 import { DaemonStatus, ReviewListItem } from "./types";
 
@@ -102,24 +102,28 @@ export function Queue() {
   const [showArchived, setShowArchived] = useState(false);
   const [starting, setStarting] = useState<Set<string>>(new Set());
 
+  // Fetches outlive the component; never set state after unmount.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
   const load = () => {
     fetchReviews()
-      .then((r) => setReviews(r))
-      .catch((e) => setError(String(e)));
+      .then((r) => alive.current && setReviews(r))
+      .catch((e) => alive.current && setError(String(e)));
     fetchDaemonStatus()
-      .then((d) => setDaemon(d))
+      .then((d) => alive.current && setDaemon(d))
       .catch(() => {});
   };
 
   useEffect(() => {
-    let alive = true;
-    const tick = () => alive && load();
-    tick();
-    const timer = setInterval(tick, 10_000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
+    load();
+    const timer = setInterval(load, 10_000);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -127,14 +131,15 @@ export function Queue() {
     setStarting((s) => new Set(s).add(key));
     rerunReview(key)
       .then(() => load())
-      .catch((e) => setError(String(e)))
-      .finally(() =>
+      .catch((e) => alive.current && setError(String(e)))
+      .finally(() => {
+        if (!alive.current) return;
         setStarting((s) => {
           const next = new Set(s);
           next.delete(key);
           return next;
-        }),
-      );
+        });
+      });
   };
 
   if (error && !reviews) return <p className="error">{error}</p>;
@@ -154,7 +159,8 @@ export function Queue() {
     acc[r.status] = (acc[r.status] ?? 0) + 1;
     return acc;
   }, {});
-  const totalCost = reviews.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  // Only the rows the stats describe — archived reviews' spend is history.
+  const totalCost = active.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
 
   const table = (rows: ReviewListItem[]) => (
     <table className="queue">
