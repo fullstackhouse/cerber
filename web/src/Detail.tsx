@@ -14,6 +14,7 @@ import {
   rerunReview,
   sendReview,
 } from "./api";
+import { highlightDiff } from "./highlight";
 import { Markdown } from "./Markdown";
 import { Artifact, Chapter, RefreshResult, ReviewComment, SendPreview } from "./types";
 
@@ -45,6 +46,7 @@ function DiffBlock({
     const root = ref.current;
     if (!root) return;
     root.innerHTML = rendered;
+    highlightDiff(root);
 
     const byFile = new Map<string, Element>();
     for (const wrapper of root.querySelectorAll(".d2h-file-wrapper")) {

@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "diff2html/bundles/css/diff2html.min.css";
+import "highlight.js/styles/github.css";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
