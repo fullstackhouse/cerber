@@ -9,7 +9,12 @@ import { DaemonStatus, ReviewListItem } from "./types";
 
 export type Tab = "all" | "awaiting" | "drafted" | "sent";
 
-export const TABS: Tab[] = ["all", "awaiting", "drafted", "sent"];
+/**
+ * The tabs filter the live queue. Sent reviews are records and merged PRs are
+ * history — both keep their own drawer under the table rather than a tab, so
+ * neither pushes work you haven't done off the top of the list.
+ */
+export const TABS: Tab[] = ["all", "awaiting", "drafted"];
 
 /** Which filter tab a review belongs to. Every status lands in exactly one. */
 export function tabOf(r: ReviewListItem): Exclude<Tab, "all"> {

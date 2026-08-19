@@ -37,9 +37,10 @@ npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
-`~/.cerber/config.json` and apply on the next poll. Merged and closed PRs are
-archived out of the queue automatically, and PRs in archived repos are never
-picked up at all — the repo is read-only, so a review could never be sent.
+`~/.cerber/config.json` and apply on the next poll. The queue only lists what
+still wants you: a review you have sent drops into a drawer under it, merged
+and closed PRs into another, and PRs in archived repos are never picked up at
+all — the repo is read-only, so a review could never be sent.
 
 ## What a review looks like
 

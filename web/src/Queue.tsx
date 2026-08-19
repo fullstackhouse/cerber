@@ -121,19 +121,44 @@ function Row({
   );
 }
 
-function ArchivedRow({ r }: { r: ReviewListItem }) {
+/** A row in one of the drawers: still openable, but out of the day's way. */
+function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
   return (
-    <div className="row row-archived">
+    <div className="row row-settled" onClick={() => openReview(r.key)} role="button" tabIndex={-1}>
       <span className="col-caret" />
       <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
         {r.pr.repo}#{r.pr.number}
       </span>
-      <span className="col-title">{r.pr.title}</span>
+      <span className="col-title" title={r.pr.title}>
+        {r.pr.title}
+      </span>
       <span className="col-author">{r.pr.author}</span>
-      <span className="col-verdict">{r.pr.state?.toLowerCase()}</span>
+      <span className="col-verdict">{verdict}</span>
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
       <span className="col-age">{ageLabel(r.updatedAt)}</span>
+    </div>
+  );
+}
+
+/** One of the two collapsed drawers under the queue. */
+function Drawer({
+  open,
+  onToggle,
+  label,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="drawer">
+      <button className="drawer-toggle" onClick={onToggle}>
+        <span className="faint">{open ? "▾" : "▸"}</span> {label}
+      </button>
+      {open && <div className="drawer-rows">{children}</div>}
     </div>
   );
 }
@@ -143,6 +168,7 @@ export function Queue() {
   const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [showSent, setShowSent] = useState(false);
   const [starting, setStarting] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("all");
   // The cursor is a review, not a row number: the list re-sorts under it every
@@ -175,22 +201,32 @@ export function Queue() {
   }, []);
 
   const all = reviews ?? [];
-  const active = useMemo(() => sortReviews(all.filter((r) => !isArchived(r))), [all]);
   const archived = useMemo(() => sortReviews(all.filter(isArchived)), [all]);
+  // The queue is what still wants you. A sent review is a record of what you
+  // already did, so it drops into its own drawer instead of sitting between
+  // two drafts you haven't read.
+  const live = useMemo(
+    () => sortReviews(all.filter((r) => !isArchived(r) && r.status !== "sent")),
+    [all],
+  );
+  const sent = useMemo(
+    () => sortReviews(all.filter((r) => !isArchived(r) && r.status === "sent")),
+    [all],
+  );
   const rows = useMemo(
-    () => (tab === "all" ? active : active.filter((r) => tabOf(r) === tab)),
-    [active, tab],
+    () => (tab === "all" ? live : live.filter((r) => tabOf(r) === tab)),
+    [live, tab],
   );
   const counts = useMemo(
     () =>
       TABS.reduce<Record<Tab, number>>(
         (acc, t) => {
-          acc[t] = t === "all" ? active.length : active.filter((r) => tabOf(r) === t).length;
+          acc[t] = t === "all" ? live.length : live.filter((r) => tabOf(r) === t).length;
           return acc;
         },
         { all: 0, awaiting: 0, drafted: 0, sent: 0 },
       ),
-    [active],
+    [live],
   );
 
   // Keep the cursor on a row that still exists in the current filter.
@@ -239,8 +275,8 @@ export function Queue() {
   if (error && !reviews) return <p className="error">{error}</p>;
   if (!reviews) return <p className="muted pad">Loading…</p>;
 
-  // Only the rows the stats describe — archived reviews' spend is history.
-  const totalCost = active.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  // Only the rows the stats describe — what is in a drawer is history.
+  const totalCost = live.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   const detail = selected ? strip(selected, daemon) : null;
   const busy = selected ? starting.has(selected.key) : false;
 
@@ -253,7 +289,7 @@ export function Queue() {
         </div>
       )}
 
-      {active.length === 0 ? (
+      {live.length === 0 ? (
         <div className="wrap">
           <div className="empty">
             {daemon?.enabled ? (
@@ -382,21 +418,34 @@ export function Queue() {
         </div>
       )}
 
-      {archived.length > 0 && (
-        <div className="wrap">
-          <div className="archived">
-            <button className="archived-toggle" onClick={() => setShowArchived(!showArchived)}>
-              <span className="faint">{showArchived ? "▾" : "▸"}</span> archived — {archived.length}{" "}
-              merged/closed PR{archived.length === 1 ? "" : "s"}
-            </button>
-            {showArchived && (
-              <div className="archived-rows">
-                {archived.map((r) => (
-                  <ArchivedRow key={r.key} r={r} />
-                ))}
-              </div>
-            )}
-          </div>
+      {(sent.length > 0 || archived.length > 0) && (
+        <div className="wrap drawers">
+          {sent.length > 0 && (
+            <Drawer
+              open={showSent}
+              onToggle={() => setShowSent(!showSent)}
+              label={`sent — ${sent.length} review${sent.length === 1 ? "" : "s"} on GitHub`}
+            >
+              {sent.map((r) => (
+                <SettledRow
+                  key={r.key}
+                  r={r}
+                  verdict={verdictCell(r).label}
+                />
+              ))}
+            </Drawer>
+          )}
+          {archived.length > 0 && (
+            <Drawer
+              open={showArchived}
+              onToggle={() => setShowArchived(!showArchived)}
+              label={`archived — ${archived.length} merged/closed PR${archived.length === 1 ? "" : "s"}`}
+            >
+              {archived.map((r) => (
+                <SettledRow key={r.key} r={r} verdict={r.pr.state?.toLowerCase() ?? ""} />
+              ))}
+            </Drawer>
+          )}
         </div>
       )}
     </>

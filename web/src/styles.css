@@ -581,12 +581,17 @@ button {
   padding: 7px 0;
 }
 
-.archived {
+/* What you already dealt with, folded away under the queue. */
+.drawers {
   margin-top: 16px;
   padding-bottom: 8px;
 }
 
-.archived-toggle {
+.drawer + .drawer {
+  margin-top: 6px;
+}
+
+.drawer-toggle {
   font-size: 11.5px;
   color: var(--muted);
   background: none;
@@ -594,17 +599,17 @@ button {
   padding: 4px 0;
 }
 
-.archived-rows {
-  margin-top: 8px;
+.drawer-toggle:hover {
+  color: var(--fg);
+}
+
+.drawer-rows {
+  margin: 8px 0 14px;
   opacity: 0.62;
 }
 
-.row-archived {
-  cursor: default;
-}
-
-.row-archived:hover {
-  background: none;
+.row-settled:hover {
+  opacity: 1;
 }
 
 /* ---- review: breadcrumb + head ---- */
