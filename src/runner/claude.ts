@@ -213,9 +213,8 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
       );
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => {
-      tail = (tail + d).slice(-2_000);
-      const read = readEvents(unread + d);
+    const ingest = (chunk: string) => {
+      const read = readEvents(unread + chunk);
       unread = read.rest;
       for (const event of read.events) {
         if (event.type === "result") result = event;
@@ -227,6 +226,11 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
           // ignore
         }
       }
+    };
+
+    child.stdout.on("data", (d) => {
+      tail = (tail + d).slice(-2_000);
+      ingest(String(d));
     });
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => {
@@ -242,6 +246,10 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
         reject(new Error(`claude exited with code ${code}: ${stderr.trim() || tail.slice(-500)}`));
         return;
       }
+      // The last line need not be newline-terminated, and it is the one that
+      // matters: dropping it would throw away a finished review for the want
+      // of a trailing byte.
+      ingest("\n");
       const wrapper = result as (ClaudeEvent & Record<string, unknown>) | null;
       if (!wrapper) {
         reject(new Error(`claude produced no result event: ${tail.slice(-500)}`));

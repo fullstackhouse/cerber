@@ -163,6 +163,22 @@ describe("runClaude", () => {
     });
   });
 
+  it("reads a final event that arrived without a trailing newline", async () => {
+    // The result is the last line, so dropping an unterminated one throws away
+    // a finished review for the want of a trailing byte.
+    const bin = path.join(os.tmpdir(), `cerber-nonl-${process.pid}.sh`);
+    await fs.writeFile(
+      bin,
+      `#!/bin/sh\ncat > /dev/null\nprintf '%s' '{"type":"result","result":"ok","session_id":"s"}'\n`,
+      { mode: 0o755 },
+    );
+    try {
+      expect((await runClaude("hi", { bin })).text).toBe("ok");
+    } finally {
+      await fs.rm(bin, { force: true });
+    }
+  });
+
   it("fails loudly when a run ends without a result event", async () => {
     await stubClaude([{ type: "system", subtype: "init" }], async (bin) => {
       await expect(runClaude("hi", { bin })).rejects.toThrow(/no result event/);

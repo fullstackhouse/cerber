@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, SCHEMA_VERSION } from "../core/artifact.js";
-import { ChatTurnResult } from "../runner/chat.js";
+// Type-only: the mock below replaces this module with `runChatTurn` alone, so
+// a value import of the type would ask for an export that isn't there.
+import type { ChatTurnResult } from "../runner/chat.js";
 import { runChatTurn } from "../runner/chat.js";
 import { buildApp } from "./index.js";
 
