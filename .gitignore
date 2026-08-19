@@ -4,3 +4,9 @@ web/dist/
 *.log
 .DS_Store
 .playwright-mcp/
+
+# Agent pipeline: per-run QA state and artifacts. The generated launcher
+# scripts under .ai/scripts/ stay committed so the environment is reproducible.
+.ai/qa/artifacts_*/
+.ai/qa/test-env.json
+.ai/qa/test-env.env
