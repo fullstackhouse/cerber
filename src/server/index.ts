@@ -330,6 +330,7 @@ export async function buildApp(
         error: null,
         withSource: withSource !== false,
         trusted: false,
+        sessionId: null,
       },
     }));
 

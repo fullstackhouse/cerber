@@ -4,6 +4,13 @@ export interface ClaudeResult {
   text: string;
   costUsd: number | null;
   model: string | null;
+  /**
+   * The session this run belongs to. Handed back so a later run can re-enter it
+   * with {@link ClaudeOptions.resumeSessionId} instead of rebuilding the context
+   * from scratch — the difference between an agent that remembers reading a file
+   * and one that only ever saw the diff.
+   */
+  sessionId: string | null;
 }
 
 export interface ClaudeOptions {
@@ -25,6 +32,17 @@ export interface ClaudeOptions {
   isolateWorkspace?: boolean;
   /** Kill the run after this long. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /**
+   * Continue an earlier run's session rather than starting a fresh one. The
+   * session keeps everything that run read, so a follow-up can answer "which
+   * claim did you actually check?" instead of re-deriving an opinion.
+   *
+   * Sessions are keyed by the working directory they were created in: resuming
+   * with a different (or deleted) `cwd` keeps the transcript but leaves the
+   * run unable to open the files it is talking about. Callers must keep the
+   * checkout alive, or say plainly in the prompt that it is gone.
+   */
+  resumeSessionId?: string;
   /**
    * Take GitHub write access away from the run. A trusted review gets `Bash`,
    * and cerber's promise is that nothing reaches GitHub except an explicit
@@ -81,6 +99,7 @@ const SIGKILL_GRACE_MS = 5_000;
 
 export function buildClaudeArgs(opts: ClaudeOptions): string[] {
   const args = ["-p", "--output-format", "json"];
+  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   if (opts.model) args.push("--model", opts.model);
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
   if (opts.disallowedTools?.length) args.push("--disallowedTools", opts.disallowedTools.join(","));
@@ -151,6 +170,7 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
           text: wrapper.result ?? "",
           costUsd: typeof wrapper.total_cost_usd === "number" ? wrapper.total_cost_usd : null,
           model: wrapper.modelUsage ? Object.keys(wrapper.modelUsage)[0] ?? null : null,
+          sessionId: typeof wrapper.session_id === "string" ? wrapper.session_id : null,
         });
       } catch {
         reject(new Error(`Could not parse claude output as JSON wrapper: ${stdout.slice(0, 500)}`));

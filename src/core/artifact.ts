@@ -78,6 +78,11 @@ export const RunInfoSchema = z.object({
   withSource: z.boolean().default(false),
   /** The user vouched for this PR, so the reviewer could also run commands. */
   trusted: z.boolean().default(false),
+  /**
+   * The Claude session this review ran in. Chat turns resume it, so the
+   * reviewer answering a question still holds everything it read.
+   */
+  sessionId: z.string().nullable().default(null),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 
