@@ -301,4 +301,4 @@ Web cockpit dev with hot reload: `pnpm dev serve` in one terminal,
 
 ## License
 
-MIT © Full Stack House
+MIT © [Full Stack House](https://fullstack.house)
