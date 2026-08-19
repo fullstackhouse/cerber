@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ghErrorDetail, parsePrRef } from "./gh.js";
+import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
 
 describe("parsePrRef", () => {
   it("parses a full PR URL", () => {
@@ -29,6 +29,25 @@ describe("parsePrRef", () => {
 
   it("rejects garbage", () => {
     expect(() => parsePrRef("what is this")).toThrow(/Cannot parse/);
+  });
+});
+
+describe("searchAwaitingArgs", () => {
+  it("skips archived repos — read-only, so their PRs never leave the inbox", () => {
+    expect(searchAwaitingArgs()).toContain("archived:false");
+  });
+
+  it("keeps the repo filter and limit", () => {
+    const args = searchAwaitingArgs("acme/widgets", 10);
+    expect(args).toContain("archived:false");
+    expect(args.slice(args.indexOf("--repo"), args.indexOf("--repo") + 2)).toEqual([
+      "--repo",
+      "acme/widgets",
+    ]);
+    expect(args.slice(args.indexOf("--limit"), args.indexOf("--limit") + 2)).toEqual([
+      "--limit",
+      "10",
+    ]);
   });
 });
 

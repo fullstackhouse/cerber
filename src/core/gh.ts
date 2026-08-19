@@ -148,11 +148,13 @@ export function mapSearchResults(
     });
 }
 
-/** Open, non-draft PRs where the current gh user's review is requested. */
-export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
+export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",
     "prs",
+    // An archived repo is read-only: its PRs can never merge, close, or take a
+    // review. Without this they'd sit in the inbox forever — nothing retires them.
+    "archived:false",
     "--review-requested=@me",
     "--state=open",
     "--limit",
@@ -161,7 +163,12 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
     "number,title,repository,isDraft,url,updatedAt,author",
   ];
   if (repoFilter) args.push("--repo", repoFilter);
-  const out = await gh(args);
+  return args;
+}
+
+/** Open, non-draft PRs where the current gh user's review is requested. */
+export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
+  const out = await gh(searchAwaitingArgs(repoFilter, limit));
   return mapSearchResults(JSON.parse(out));
 }
 
