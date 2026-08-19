@@ -87,9 +87,10 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 4 — Keeping the source readable
 
-- 4.1 A chat pins its checkout: `evictOldCheckouts` skips a pinned one, and opening a chat
-  re-clones when the checkout is already gone. When neither is possible the prompt says so
-  plainly instead of letting the model assume it can read.
+- 4.1 A chat turn restores its own checkout (`ensureChatSource`). No pin registry was
+  needed: eviction is already by mtime and `prepareCheckout` touches, so every turn renews
+  the checkout for the next one. When restoring fails the prompt says so plainly instead of
+  letting the model assume it can read.
 - 4.2 Tests: pinned checkouts survive eviction, re-clone on miss, degraded flag on failure.
 
 ### Phase 5 — Server endpoints
@@ -132,8 +133,8 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 4: Keeping the source readable
 
-- [ ] 4.1 Pin the checkout for the life of a chat; re-clone or degrade loudly
-- [ ] 4.2 Tests for pinning, re-clone, and the degraded flag
+- [x] 4.1 Pin the checkout for the life of a chat; re-clone or degrade loudly — b0e927c
+- [x] 4.2 Tests for pinning, re-clone, and the degraded flag — b0e927c
 
 ### Phase 5: Server endpoints
 
