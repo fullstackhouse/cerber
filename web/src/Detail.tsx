@@ -12,11 +12,22 @@ import {
   patchReview,
   refreshReview,
   rerunReview,
+  resetReviewToPreChat,
+  sendChatTurn,
   sendReview,
 } from "./api";
 import { highlightDiff } from "./highlight";
 import { Markdown } from "./Markdown";
-import { Artifact, Chapter, RefreshResult, ReviewComment, SendPreview } from "./types";
+import {
+  Artifact,
+  Chapter,
+  ChatRef,
+  ChatTurn,
+  RefreshResult,
+  Revision,
+  ReviewComment,
+  SendPreview,
+} from "./types";
 
 /**
  * Diff rendered by diff2html, with review comments injected inline under the
@@ -97,11 +108,13 @@ function CommentCard({
   comment,
   onUpdate,
   onDelete,
+  onDiscuss,
   readOnly,
 }: {
   comment: ReviewComment;
   onUpdate: (patch: { body?: string; status?: string }) => void;
   onDelete: () => void;
+  onDiscuss?: () => void;
   readOnly: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -147,6 +160,11 @@ function CommentCard({
               </>
             ) : (
               <>
+                {onDiscuss && (
+                  <button onClick={onDiscuss} title="Ask the reviewer about this comment">
+                    discuss
+                  </button>
+                )}
                 <button onClick={() => setEditing(true)}>edit</button>
                 {comment.status !== "approved" && (
                   <button onClick={() => onUpdate({ status: "approved" })}>approve</button>
@@ -245,6 +263,7 @@ function ChapterSection({
   onUpdateComment,
   onDeleteComment,
   onAddComment,
+  onDiscuss,
   readOnly,
 }: {
   chapter: Chapter;
@@ -253,6 +272,7 @@ function ChapterSection({
   onUpdateComment: (id: string, patch: { body?: string; status?: string }) => void;
   onDeleteComment: (id: string) => void;
   onAddComment: (c: { path: string; line: number | null; body: string; chapterId: string | null }) => void;
+  onDiscuss?: (ref: ChatRef) => void;
   readOnly: boolean;
 }) {
   const [open, setOpen] = useState(true);
@@ -268,6 +288,7 @@ function ChapterSection({
       comment={c}
       onUpdate={(p) => onUpdateComment(c.id, p)}
       onDelete={() => onDeleteComment(c.id)}
+      onDiscuss={onDiscuss && (() => onDiscuss({ target: "comment", id: c.id }))}
       readOnly={readOnly}
     />
   );
@@ -283,11 +304,206 @@ function ChapterSection({
       {open && (
         <>
           <Markdown className="chapter-explanation" text={chapter.explanation} />
+          {onDiscuss && (
+            <button
+              className="discuss-btn"
+              onClick={() => onDiscuss({ target: "chapter", id: chapter.id })}
+            >
+              discuss this chapter
+            </button>
+          )}
           {floating.map(renderComment)}
           {!readOnly && chapter.files.length > 0 && (
             <AddComment files={chapter.files} chapterId={chapter.id} onAdd={onAddComment} />
           )}
           <DiffBlock patch={patch} comments={inline} renderComment={renderComment} />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Plain-English name for the thing a revision touched. */
+function describeRevision(revision: Revision, artifact: Artifact): string {
+  switch (revision.kind) {
+    case "summary":
+      return "rewrote the summary";
+    case "verdict":
+      return `changed the verdict to ${revision.verdict.recommendation.replace("_", " ")}`;
+    case "chapter": {
+      const ch = artifact.chapters.find((c) => c.id === revision.chapterId);
+      return `rewrote the "${ch?.title ?? revision.chapterId}" chapter`;
+    }
+    case "comment-edit": {
+      const c = artifact.comments.find((x) => x.id === revision.commentId);
+      return c ? `rewrote the comment on ${c.path}:${c.line ?? "file"}` : "rewrote a comment";
+    }
+    case "comment-drop": {
+      const c = artifact.comments.find((x) => x.id === revision.commentId);
+      return c ? `dropped the comment on ${c.path}:${c.line ?? "file"}` : "dropped a comment";
+    }
+    case "comment-add":
+      return `added a comment on ${revision.path}:${revision.line ?? "file"}`;
+  }
+}
+
+function describeRef(ref: ChatRef, artifact: Artifact): string {
+  if (ref.target === "summary") return "the summary";
+  if (ref.target === "verdict") return "the verdict";
+  if (ref.target === "chapter") {
+    return artifact.chapters.find((c) => c.id === ref.id)?.title ?? "a chapter";
+  }
+  const c = artifact.comments.find((x) => x.id === ref.id);
+  return c ? `${c.path}:${c.line ?? "file"}` : "a comment";
+}
+
+function ChatTurnView({ turn, artifact }: { turn: ChatTurn; artifact: Artifact }) {
+  return (
+    <div className={`chat-turn chat-turn-${turn.role}`}>
+      <div className="chat-turn-who">{turn.role === "user" ? "You" : "Reviewer"}</div>
+      {turn.refs.length > 0 && (
+        <div className="chat-refs">
+          {turn.refs.map((r, i) => (
+            <span key={i} className="chat-ref">
+              {describeRef(r, artifact)}
+            </span>
+          ))}
+        </div>
+      )}
+      <Markdown className="chat-turn-body" text={turn.body} />
+      {turn.revisions.map((r, i) => (
+        <div key={i} className="chat-revision">
+          ✎ {describeRevision(r, artifact)}
+        </div>
+      ))}
+      {turn.refused.map((r, i) => (
+        <div key={i} className="chat-refusal" title={r.reason}>
+          ⃠ left alone — {r.reason}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The conversation about this review.
+ *
+ * The reviewer revises the draft as it answers — there is no accept step,
+ * because the user asked for the change and a second confirmation on it would
+ * be friction wearing safety's coat. Send is still where a human vouches for
+ * what reaches GitHub, and the transcript never goes there at all.
+ */
+function ChatPanel({
+  artifact,
+  reviewKey,
+  refs,
+  onClearRefs,
+  onDropRef,
+  onArtifact,
+  readOnly,
+  inputRef,
+}: {
+  artifact: Artifact;
+  reviewKey: string;
+  refs: ChatRef[];
+  onClearRefs: () => void;
+  onDropRef: (index: number) => void;
+  onArtifact: (a: Artifact) => void;
+  readOnly: boolean;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const chat = artifact.chat ?? [];
+
+  const send = () => {
+    const message = draft.trim();
+    if (!message || busy) return;
+    setBusy(true);
+    setError(null);
+    sendChatTurn(reviewKey, { message, refs })
+      .then((result) => {
+        onArtifact(result.artifact);
+        setDraft("");
+        onClearRefs();
+      })
+      .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <section className="chat-panel">
+      <div className="chat-head">
+        <h2>Talk to the reviewer</h2>
+        <span className="muted">
+          It revises the draft as you go. Nothing here reaches GitHub — only Send does.
+        </span>
+      </div>
+
+      {chat.length > 0 && (
+        <div className="chat-log">
+          {chat.map((t) => (
+            <ChatTurnView key={t.id} turn={t} artifact={artifact} />
+          ))}
+        </div>
+      )}
+
+      {readOnly ? (
+        <p className="muted">
+          This review was sent — the conversation is kept as a record, but it can't continue.
+        </p>
+      ) : (
+        <>
+          {refs.length > 0 && (
+            <div className="chat-refs chat-refs-pending">
+              <span className="muted">About:</span>
+              {refs.map((r, i) => (
+                <button key={i} className="chat-ref" onClick={() => onDropRef(i)} title="Remove">
+                  {describeRef(r, artifact)} ✕
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={inputRef}
+            className="chat-input"
+            rows={3}
+            value={draft}
+            disabled={busy}
+            placeholder={
+              chat.length === 0
+                ? "e.g. the summary is restating the author's claims — say what you actually verified"
+                : "Say more…"
+            }
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+            }}
+          />
+          <div className="chat-actions">
+            <button className="chat-send" onClick={send} disabled={busy || draft.trim() === ""}>
+              {busy ? "Thinking… (it re-reads the code)" : "Send message"}
+            </button>
+            <span className="muted">⌘↵</span>
+            {artifact.preChat && (
+              <button
+                className="chat-reset"
+                disabled={busy}
+                title="Put the review back the way the AI first wrote it. The conversation stays."
+                onClick={() => {
+                  setBusy(true);
+                  resetReviewToPreChat(reviewKey)
+                    .then(onArtifact)
+                    .catch((e) => setError(String(e.message ?? e)))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Reset the review
+              </button>
+            )}
+          </div>
+          {error && <div className="error">{error}</div>}
         </>
       )}
     </section>
@@ -457,6 +673,20 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<RefreshResult | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  // What the user has pointed at with "discuss this", waiting to be sent with
+  // their next message. Lives here so a button anywhere in the walkthrough can
+  // reach the one chat panel at the bottom.
+  const [chatRefs, setChatRefs] = useState<ChatRef[]>([]);
+  const chatInput = useRef<HTMLTextAreaElement | null>(null);
+
+  const discuss = (ref: ChatRef) => {
+    setChatRefs((refs) =>
+      refs.some((r) => r.target === ref.target && r.id === ref.id) ? refs : [...refs, ref],
+    );
+    // Pointing at something is only useful if you can then type about it.
+    chatInput.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    chatInput.current?.focus();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -594,6 +824,11 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       <section className="summary">
         <h2>Summary</h2>
         <Markdown className="summary-body" text={artifact.summary || "(no summary)"} />
+        {!readOnly && (
+          <button className="discuss-btn" onClick={() => discuss({ target: "summary", id: null })}>
+            discuss the summary
+          </button>
+        )}
       </section>
 
       <h2>Walkthrough</h2>
@@ -606,6 +841,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           onUpdateComment={onUpdateComment}
           onDeleteComment={onDeleteComment}
           onAddComment={onAddComment}
+          onDiscuss={readOnly ? undefined : discuss}
           readOnly={readOnly}
         />
       ))}
@@ -623,6 +859,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           onUpdateComment={onUpdateComment}
           onDeleteComment={onDeleteComment}
           onAddComment={onAddComment}
+          onDiscuss={readOnly ? undefined : discuss}
           readOnly={readOnly}
         />
       )}
@@ -636,11 +873,23 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               comment={c}
               onUpdate={(p) => onUpdateComment(c.id, p)}
               onDelete={() => onDeleteComment(c.id)}
+              onDiscuss={readOnly ? undefined : () => discuss({ target: "comment", id: c.id })}
               readOnly={readOnly}
             />
           ))}
         </section>
       )}
+
+      <ChatPanel
+        artifact={artifact}
+        reviewKey={reviewKey}
+        refs={chatRefs}
+        onClearRefs={() => setChatRefs([])}
+        onDropRef={(i) => setChatRefs((refs) => refs.filter((_, n) => n !== i))}
+        onArtifact={setArtifact}
+        readOnly={readOnly}
+        inputRef={chatInput}
+      />
 
       <SendPanel artifact={artifact} reviewKey={reviewKey} onSent={setArtifact} />
 

@@ -1,4 +1,14 @@
-import { Artifact, ConfigView, DaemonConfig, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
+import {
+  Artifact,
+  ChatRef,
+  ChatTurnResult,
+  ConfigView,
+  DaemonConfig,
+  DaemonStatus,
+  RefreshResult,
+  ReviewListItem,
+  SendPreview,
+} from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -66,6 +76,27 @@ export const rerunReview = (key: string, withSource?: boolean) =>
       (withSource === undefined ? "" : `?source=${withSource ? "1" : "0"}`),
     { method: "POST" },
   );
+
+/**
+ * One turn of the conversation about this review. Minutes-long: the reviewer
+ * re-reads the code before answering. Whatever it revises is already applied
+ * to the artifact that comes back — there is nothing to accept.
+ */
+export const sendChatTurn = (
+  key: string,
+  body: { message: string; refs?: ChatRef[]; allowUserComments?: boolean },
+) =>
+  request<ChatTurnResult>(`/api/reviews/${encodeURIComponent(key)}/chat`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+/** Put the review back the way it was before the conversation. Keeps the chat. */
+export const resetReviewToPreChat = (key: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/reset`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 
 export const fetchSendPreview = (key: string, event: string) =>
   request<SendPreview>(`/api/reviews/${encodeURIComponent(key)}/send-preview?event=${event}`);

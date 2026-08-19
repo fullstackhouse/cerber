@@ -199,6 +199,42 @@ get its opinion of the new code, hit **Re-review at the new head** in the
 cockpit (or `cerber review <pr> --force`) — comments you wrote or rewrote are
 carried into the fresh review.
 
+### Arguing with the review before you send it
+
+A draft you disagree with used to leave two options: rewrite it by hand, or
+re-review and hope. Neither lets you say *what was wrong*. So every review has
+a conversation attached — **Talk to the reviewer**, at the bottom of the
+walkthrough.
+
+Ask it why it said something, and it answers. Tell it the summary is restating
+the author's claims rather than what it verified, and it rewrites the summary.
+The reviewer revises the draft as it answers: there is no accept step, because
+you already asked for the change. What it changed shows up in the transcript
+(*"✎ rewrote the summary"*, *"✎ dropped the comment on line 250"*).
+
+- **It is the same reviewer.** A turn resumes the Claude session the review ran
+  in, so it still holds everything it read. Asking "did you actually check
+  that?" gets an answer from the run that did or didn't — not from a fresh
+  agent re-deriving an opinion from the diff.
+- **It reads the code to answer you.** The checkout cache is small, so by the
+  time you argue with a review its source is usually evicted; a turn re-clones
+  it. If it can't, the turn still runs and the reviewer is told it is working
+  blind rather than left to describe files from memory.
+- **It can say no.** The prompt tells it not to fold under push-back. If you
+  are wrong about something it checked, it says so and changes nothing.
+- **Your words are yours.** Comments you wrote or edited are off limits: it
+  will tell you one of them needs changing rather than rewriting it. Say so
+  explicitly and it will.
+- **Point at things.** *discuss* on any comment, chapter, or the summary drops
+  a reference into your next message.
+- **Reset** puts the review back the way the AI first wrote it and keeps the
+  conversation — you lose the edits, not the reasoning.
+
+Nothing in the conversation reaches GitHub. Send still builds its payload from
+the summary, comments and verdict alone, and is still one deliberate click. A
+review that has already been sent can't be argued with: that artifact is the
+record of what GitHub has.
+
 ## Status / roadmap
 
 Early, but all six planned phases have shipped.
