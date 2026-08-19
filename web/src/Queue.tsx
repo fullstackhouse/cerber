@@ -52,8 +52,23 @@ export function Queue() {
       b.updatedAt.localeCompare(a.updatedAt),
   );
 
+  const counts = reviews.reduce<Record<string, number>>((acc, r) => {
+    acc[r.status] = (acc[r.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const totalCost = reviews.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+
   return (
-    <table className="queue">
+    <>
+      <div className="queue-stats">
+        {STATUS_ORDER.filter((s) => counts[s]).map((s) => (
+          <span key={s} className={`status status-${s}`}>
+            {s}: {counts[s]}
+          </span>
+        ))}
+        {totalCost > 0 && <span className="muted">total review cost ${totalCost.toFixed(2)}</span>}
+      </div>
+      <table className="queue">
       <thead>
         <tr>
           <th>Status</th>
@@ -89,6 +104,7 @@ export function Queue() {
           </tr>
         ))}
       </tbody>
-    </table>
+      </table>
+    </>
   );
 }

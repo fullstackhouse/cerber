@@ -78,6 +78,14 @@ a {
 }
 
 /* Queue */
+.queue-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
 .queue {
   width: 100%;
   border-collapse: collapse;

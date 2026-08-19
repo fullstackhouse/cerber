@@ -7,25 +7,50 @@ import {
   artifactId,
 } from "../core/artifact.js";
 import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
-import { saveArtifact } from "../core/state.js";
+import { loadArtifact, saveArtifact } from "../core/state.js";
 import { extractJson, runClaude } from "./claude.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
 export interface ReviewOptions {
   model?: string;
   onProgress?: (message: string) => void;
+  /** Re-review even if a fresh artifact for the same head SHA exists. */
+  force?: boolean;
 }
+
+export interface ReviewResult {
+  artifact: Artifact;
+  /** True when an up-to-date artifact already existed and no AI run happened. */
+  skipped: boolean;
+}
+
+/** Statuses that a fresh artifact can keep without a re-run. */
+const FRESH_STATUSES = new Set(["ready", "reviewed", "sent", "skipped"]);
 
 /**
  * Fetch a PR, run the AI review, persist the artifact at each stage.
  * Everything stays local — nothing is ever written to GitHub.
  */
-export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Artifact> {
+export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<ReviewResult> {
   const log = opts.onProgress ?? (() => {});
   const now = () => new Date().toISOString();
 
   log(`Fetching ${ref.owner}/${ref.repo}#${ref.number}…`);
   const pr = await fetchPrInfo(ref);
+
+  if (!opts.force) {
+    const existing = await loadArtifact(artifactId(pr));
+    if (
+      existing &&
+      FRESH_STATUSES.has(existing.status) &&
+      existing.pr.headSha !== "" &&
+      existing.pr.headSha === pr.headSha
+    ) {
+      log(`Up to date (head ${pr.headSha.slice(0, 7)}, status ${existing.status}) — skipping. Use --force to re-review.`);
+      return { artifact: existing, skipped: true };
+    }
+  }
+
   const diff = await fetchPrDiff(ref);
 
   let artifact: Artifact = {
@@ -99,7 +124,25 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Ar
   }
 
   await saveArtifact(artifact);
-  return artifact;
+  return { artifact, skipped: false };
+}
+
+/** Run tasks with bounded concurrency, preserving order of results. */
+export async function pool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function runAiReview(

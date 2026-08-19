@@ -3,10 +3,10 @@ import { Command } from "commander";
 import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
-import { parsePrRef, submitReview } from "../core/gh.js";
+import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, eventForRecommendation } from "../core/send.js";
 import { cerberHome, listArtifacts, loadArtifact, updateArtifactByKey } from "../core/state.js";
-import { reviewPr } from "../runner/review.js";
+import { pool, reviewPr } from "../runner/review.js";
 import { startServer } from "../server/index.js";
 
 const program = new Command();
@@ -16,39 +16,75 @@ program
   .description(
     "AI code-review cockpit. Claude reviews PRs into local artifacts; nothing reaches GitHub until you explicitly send it.",
   )
-  .version("0.2.0");
+  .version("0.3.0");
 
 program
   .command("review")
   .description("Run an AI review of one or more PRs (local artifact only — no GitHub writes)")
-  .argument("<pr...>", "PR URL, owner/repo#number, or number (with --repo)")
-  .option("-R, --repo <owner/repo>", "repository for bare PR numbers")
+  .argument("[pr...]", "PR URL, owner/repo#number, or number (with --repo)")
+  .option("-R, --repo <owner/repo>", "repository for bare PR numbers / to scope --awaiting-me")
   .option("-m, --model <model>", "Claude model override (e.g. sonnet, opus)")
-  .action(async (prs: string[], opts: { repo?: string; model?: string }) => {
-    let failures = 0;
-    for (const input of prs) {
-      const ref = parsePrRef(input, opts.repo);
-      const label = `${ref.owner}/${ref.repo}#${ref.number}`;
-      try {
-        const artifact = await reviewPr(ref, {
-          model: opts.model,
-          onProgress: (m) => console.log(`[${label}] ${m}`),
-        });
-        const v = artifact.verdict;
-        console.log(`\n✔ ${label} — ${artifact.pr.title}`);
-        console.log(
-          `  verdict: ${v?.recommendation ?? "?"} (confidence ${v?.confidence ?? "?"}%), ` +
-            `${artifact.comments.length} draft comment(s)` +
-            (artifact.run?.costUsd != null ? `, cost $${artifact.run.costUsd.toFixed(2)}` : ""),
-        );
-        console.log(`  artifact: ${cerberHome()}/reviews — view with: cerber serve`);
-      } catch (err: unknown) {
-        failures++;
-        console.error(`\n✘ ${label} failed: ${err instanceof Error ? err.message : err}`);
+  .option("-a, --awaiting-me", "discover and review all open PRs awaiting your review")
+  .option("-P, --parallel <n>", "how many reviews to run concurrently", "3")
+  .option("-f, --force", "re-review even if the artifact is up to date with the PR head")
+  .action(
+    async (
+      prs: string[],
+      opts: { repo?: string; model?: string; awaitingMe?: boolean; parallel: string; force?: boolean },
+    ) => {
+      let refs: PrRef[];
+      if (opts.awaitingMe) {
+        const found = await searchAwaitingMe(opts.repo);
+        console.log(`Found ${found.length} open PR(s) awaiting your review${opts.repo ? ` in ${opts.repo}` : ""}.`);
+        for (const f of found) {
+          console.log(`  ${f.owner}/${f.repo}#${f.number} — ${f.title}`);
+        }
+        refs = found;
+      } else {
+        if (prs.length === 0) {
+          console.error("Pass PR references, or use --awaiting-me.");
+          process.exit(1);
+        }
+        refs = prs.map((input) => parsePrRef(input, opts.repo));
       }
-    }
-    if (failures > 0) process.exitCode = 1;
-  });
+      if (refs.length === 0) return;
+
+      const parallel = Math.max(1, Number(opts.parallel) || 1);
+      let failures = 0;
+      let skips = 0;
+      const rows: string[] = [];
+
+      await pool(refs, parallel, async (ref) => {
+        const label = `${ref.owner}/${ref.repo}#${ref.number}`;
+        try {
+          const { artifact, skipped } = await reviewPr(ref, {
+            model: opts.model,
+            force: opts.force,
+            onProgress: (m) => console.log(`[${label}] ${m}`),
+          });
+          if (skipped) {
+            skips++;
+            return;
+          }
+          const v = artifact.verdict;
+          rows.push(
+            `✔ ${label.padEnd(40)} ${v ? `${v.recommendation} ${v.confidence}%` : "?"}`.padEnd(65) +
+              `${artifact.comments.length} comment(s)` +
+              (artifact.run?.costUsd != null ? `, $${artifact.run.costUsd.toFixed(2)}` : ""),
+          );
+        } catch (err: unknown) {
+          failures++;
+          rows.push(`✘ ${label} failed: ${err instanceof Error ? err.message : err}`);
+        }
+      });
+
+      console.log("");
+      for (const row of rows) console.log(row);
+      if (skips > 0) console.log(`(${skips} already up to date — use --force to re-review)`);
+      console.log(`\nArtifacts in ${cerberHome()}/reviews — view with: cerber serve`);
+      if (failures > 0) process.exitCode = 1;
+    },
+  );
 
 program
   .command("list")

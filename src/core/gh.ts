@@ -81,6 +81,53 @@ export async function fetchPrDiff(ref: PrRef): Promise<string> {
   return gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
 }
 
+export interface DiscoveredPr extends PrRef {
+  title: string;
+  url: string;
+  updatedAt: string;
+  isDraft: boolean;
+}
+
+/** Map `gh search prs` JSON output to PR refs. Drafts are excluded. */
+export function mapSearchResults(
+  raw: { number: number; title: string; url: string; updatedAt: string; isDraft: boolean; repository: { nameWithOwner: string } }[],
+): DiscoveredPr[] {
+  return raw
+    .filter((r) => !r.isDraft)
+    .flatMap((r) => {
+      const [owner, repo] = r.repository.nameWithOwner.split("/");
+      if (!owner || !repo) return [];
+      return [
+        {
+          owner,
+          repo,
+          number: r.number,
+          title: r.title,
+          url: r.url,
+          updatedAt: r.updatedAt,
+          isDraft: r.isDraft,
+        },
+      ];
+    });
+}
+
+/** Open, non-draft PRs where the current gh user's review is requested. */
+export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
+  const args = [
+    "search",
+    "prs",
+    "--review-requested=@me",
+    "--state=open",
+    "--limit",
+    String(limit),
+    "--json",
+    "number,title,repository,isDraft,url,updatedAt",
+  ];
+  if (repoFilter) args.push("--repo", repoFilter);
+  const out = await gh(args);
+  return mapSearchResults(JSON.parse(out));
+}
+
 /**
  * THE ONLY GITHUB WRITE IN CERBER.
  * Submits a review in one shot. Must only ever be called from an explicit
