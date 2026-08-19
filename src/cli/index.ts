@@ -148,7 +148,7 @@ program
 
 program
   .command("serve")
-  .description("Start the local review cockpit (read-only in this version)")
+  .description("Start the local review cockpit")
   .option("-p, --port <port>", "port", "4820")
   .option("-H, --host <host>", "host to bind", "127.0.0.1")
   .action(async (opts: { port: string; host: string }) => {
