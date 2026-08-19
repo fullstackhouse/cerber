@@ -186,6 +186,12 @@ export const PendingChatSchema = z.object({
   message: z.string(),
   refs: ChatTurnSchema.shape.refs,
   startedAt: z.string(),
+  /**
+   * What the turn has been doing, in its own words — "reading src/core/diff.ts",
+   * "searching for carryOverComments". The answer takes minutes and this is the
+   * only honest account of them; it is thrown away when the answer lands.
+   */
+  progress: z.array(z.string()).default([]),
   /** Why the turn failed. Null while it is still running. */
   error: z.string().nullable().default(null),
 });

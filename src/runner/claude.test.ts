@@ -2,11 +2,13 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildClaudeArgs, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { buildClaudeArgs, extractJson, readEvents, runClaude, unauthenticatedEnv } from "./claude.js";
 
 describe("buildClaudeArgs", () => {
-  it("asks for headless JSON output", () => {
-    expect(buildClaudeArgs({})).toEqual(["-p", "--output-format", "json"]);
+  it("asks for a streamed run, so it can be watched while it works", () => {
+    // --verbose is not decoration: the CLI refuses stream-json with --print
+    // without it.
+    expect(buildClaudeArgs({})).toEqual(["-p", "--output-format", "stream-json", "--verbose"]);
   });
 
   it("passes tool restrictions through as comma-separated lists", () => {
@@ -18,7 +20,8 @@ describe("buildClaudeArgs", () => {
     expect(args).toEqual([
       "-p",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       "--model",
       "opus",
       "--allowedTools",
@@ -38,7 +41,8 @@ describe("buildClaudeArgs", () => {
     expect(buildClaudeArgs({ allowedTools: [], disallowedTools: [] })).toEqual([
       "-p",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
     ]);
   });
 
@@ -46,7 +50,8 @@ describe("buildClaudeArgs", () => {
     expect(buildClaudeArgs({ resumeSessionId: "sess-123" })).toEqual([
       "-p",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       "--resume",
       "sess-123",
     ]);
@@ -103,11 +108,11 @@ describe("runClaude", () => {
     );
   });
 
-  /** A stand-in `claude` that prints one canned JSON wrapper and exits. */
-  async function stubClaude(wrapper: unknown, run: (bin: string) => Promise<void>) {
+  /** A stand-in `claude` that streams the given events, one per line, and exits. */
+  async function stubClaude(events: unknown[], run: (bin: string) => Promise<void>) {
     const bin = path.join(os.tmpdir(), `cerber-stub-${process.pid}-${Math.random().toString(36).slice(2)}.sh`);
-    const json = JSON.stringify(wrapper).replace(/'/g, `'\\''`);
-    await fs.writeFile(bin, `#!/bin/sh\ncat > /dev/null\nprintf '%s' '${json}'\n`, { mode: 0o755 });
+    const lines = events.map((e) => JSON.stringify(e)).join("\n").replace(/'/g, `'\\''`);
+    await fs.writeFile(bin, `#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '${lines}'\n`, { mode: 0o755 });
     try {
       await run(bin);
     } finally {
@@ -117,7 +122,7 @@ describe("runClaude", () => {
 
   it("hands back the session id, so a later turn can resume this conversation", async () => {
     await stubClaude(
-      { result: "ok", total_cost_usd: 1.5, session_id: "sess-abc", modelUsage: { opus: {} } },
+      [{ type: "result", result: "ok", total_cost_usd: 1.5, session_id: "sess-abc", modelUsage: { opus: {} } }],
       async (bin) => {
         const result = await runClaude("hi", { bin });
         expect(result.sessionId).toBe("sess-abc");
@@ -127,10 +132,62 @@ describe("runClaude", () => {
     );
   });
 
-  it("reports no session rather than guessing when the wrapper omits one", async () => {
-    await stubClaude({ result: "ok" }, async (bin) => {
+  it("reports no session rather than guessing when the run omits one", async () => {
+    await stubClaude([{ type: "result", result: "ok" }], async (bin) => {
       expect((await runClaude("hi", { bin })).sessionId).toBeNull();
     });
+  });
+
+  it("reports each event as it arrives, not once the run is over", async () => {
+    const events = [
+      { type: "system", subtype: "init" },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "/x/a.ts" } }] } },
+      { type: "result", result: "ok", session_id: "s" },
+    ];
+    await stubClaude(events, async (bin) => {
+      const seen: string[] = [];
+      await runClaude("hi", { bin, onEvent: (e) => seen.push(e.type) });
+      expect(seen).toEqual(["system", "assistant", "result"]);
+    });
+  });
+
+  it("survives a listener that throws — the answer is the point, not the narration", async () => {
+    await stubClaude([{ type: "result", result: "ok" }], async (bin) => {
+      const result = await runClaude("hi", {
+        bin,
+        onEvent: () => {
+          throw new Error("boom");
+        },
+      });
+      expect(result.text).toBe("ok");
+    });
+  });
+
+  it("fails loudly when a run ends without a result event", async () => {
+    await stubClaude([{ type: "system", subtype: "init" }], async (bin) => {
+      await expect(runClaude("hi", { bin })).rejects.toThrow(/no result event/);
+    });
+  });
+});
+
+describe("readEvents", () => {
+  it("keeps a half-arrived event back until the rest of it turns up", () => {
+    // A tool result can be megabytes: one event routinely spans several chunks.
+    const first = readEvents('{"type":"a"}\n{"type":"b"');
+    expect(first.events.map((e) => e.type)).toEqual(["a"]);
+    expect(first.rest).toBe('{"type":"b"');
+    expect(readEvents(first.rest + '}\n').events.map((e) => e.type)).toEqual(["b"]);
+  });
+
+  it("skips a line it cannot parse rather than failing the run over it", () => {
+    // The result comes from the closing event; dying here would throw away a
+    // finished review over a stray byte.
+    const { events } = readEvents('not json\n{"type":"result"}\n');
+    expect(events.map((e) => e.type)).toEqual(["result"]);
+  });
+
+  it("ignores JSON that is not an event", () => {
+    expect(readEvents('{"no":"type"}\n42\n').events).toEqual([]);
   });
 });
 

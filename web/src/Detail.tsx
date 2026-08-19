@@ -491,7 +491,21 @@ function ChatPanel({
                   )}
                 </div>
               ) : (
-                <div className="chat-waiting">Thinking… it re-reads the code before answering.</div>
+                <div className="chat-waiting">
+                  {/* What it is doing right now, in its own words. The last
+                      line is the live one; the rest is how it got there. */}
+                  {pending.progress.length > 0 ? (
+                    <ol className="chat-progress">
+                      {pending.progress.map((line, i) => (
+                        <li key={i} className={i === pending.progress.length - 1 ? "now" : undefined}>
+                          {line}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    "Thinking… it re-reads the code before answering."
+                  )}
+                </div>
               )}
             </div>
           )}

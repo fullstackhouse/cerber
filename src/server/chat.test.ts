@@ -89,8 +89,8 @@ function deferred() {
 }
 
 /** Wait for the detached turn's write to land. */
-async function until(predicate: (a: Artifact) => boolean) {
-  for (let i = 0; i < 100; i++) {
+async function until(predicate: (a: Artifact) => boolean, tries = 100) {
+  for (let i = 0; i < tries; i++) {
     if (predicate(await read())) return;
     await new Promise((r) => setTimeout(r, 5));
   }
@@ -192,6 +192,30 @@ describe("POST /api/reviews/:key/chat", () => {
     expect(failed.chat).toHaveLength(0);
   });
 
+  it("puts what the turn is doing on the artifact while it does it", async () => {
+    // The whole point of the detached turn: minutes of silence become minutes
+    // of "reading src/core/refresh.ts".
+    await write(artifact());
+    let resolve!: (r: ChatTurnResult) => void;
+    turn.mockImplementation((_a: Artifact, _m: string, opts: { onProgress?: (s: string) => void }) => {
+      opts.onProgress?.("reading src/core/refresh.ts");
+      opts.onProgress?.("searching for carryOverComments");
+      return new Promise<ChatTurnResult>((r) => (resolve = r));
+    });
+
+    await post(`/api/reviews/${KEY}/chat`, { message: "did you check refresh?" });
+
+    await until((a) => (a.pendingChat?.progress.length ?? 0) >= 2, 600);
+    expect((await read()).pendingChat?.progress).toEqual([
+      "reading src/core/refresh.ts",
+      "searching for carryOverComments",
+    ]);
+
+    // And it goes away with the question it was describing.
+    resolve({ artifact: artifact(), applied: [], refused: [] });
+    await until((a) => a.pendingChat === null);
+  });
+
   it("refuses a second turn while one is still being answered", async () => {
     await write(artifact());
     deferred();
@@ -205,7 +229,7 @@ describe("POST /api/reviews/:key/chat", () => {
   });
 
   it("lets the user ask again once a turn has failed", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", error: "boom" } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: "boom" } }));
     deferred();
     const res = await post(`/api/reviews/${KEY}/chat`, { message: "why?" });
     expect(res.status).toBe(202);
@@ -215,14 +239,14 @@ describe("POST /api/reviews/:key/chat", () => {
 
 describe("DELETE /api/reviews/:key/chat/pending", () => {
   it("clears a turn that failed", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", error: "boom" } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: "boom" } }));
     const res = await del(`/api/reviews/${KEY}/chat/pending`);
     expect(res.status).toBe(200);
     expect((await res.json()).pendingChat).toBeNull();
   });
 
   it("refuses one still being answered — it would come back on the next write", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", error: null } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: null } }));
     const res = await del(`/api/reviews/${KEY}/chat/pending`);
     expect(res.status).toBe(409);
     expect((await read()).pendingChat?.message).toBe("why?");
@@ -261,7 +285,7 @@ describe("POST /api/reviews/:key/chat/reset", () => {
     await write(
       artifact({
         preChat: { at: "x", summary: "first", chapters: [], comments: [], verdict: null },
-        pendingChat: { message: "why?", refs: [], startedAt: "t", error: null },
+        pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: null },
       }),
     );
     const res = await post(`/api/reviews/${KEY}/chat/reset`, {});

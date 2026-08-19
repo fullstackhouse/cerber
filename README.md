@@ -228,6 +228,11 @@ you already asked for the change. What it changed shows up in the transcript
   the tab, or sit behind a proxy that times connections out at 60s — the answer
   still lands on the review, and a turn that fails says so against the question
   that caused it.
+- **You can watch it work.** Those minutes aren't a spinner: the run narrates
+  itself under your question — *thinking…*, *reading src/core/refresh.ts*,
+  *searching for carryOverComments in src*, *not allowed to use Bash* — so you
+  can tell a turn that is checking your claim from one that is about to answer
+  from memory. `cerber review` and the daemon log print the same lines.
 - **Your words are yours.** Comments you wrote or edited are off limits: it
   will tell you one of them needs changing rather than rewriting it. Say so
   explicitly and it will.

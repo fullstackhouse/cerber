@@ -129,6 +129,8 @@ export interface PendingChat {
   message: string;
   refs: ChatRef[];
   startedAt: string;
+  /** What the turn has been doing, in its own words. Grows while you wait. */
+  progress: string[];
   /** Why the turn failed. Null while it is still being answered. */
   error: string | null;
 }

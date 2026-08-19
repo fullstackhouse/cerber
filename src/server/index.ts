@@ -25,6 +25,7 @@ import { isReviewRunning } from "../runner/inflight.js";
 import { reviewPr } from "../runner/review.js";
 import { runChatTurn } from "../runner/chat.js";
 import { mergeConcurrentEdits, restoreReview } from "../core/revise.js";
+import { progressWriter } from "./progress.js";
 import { ChatTurnSchema } from "../core/artifact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -400,9 +401,14 @@ export async function buildApp(
         message: request.message,
         refs: request.refs ?? [],
         startedAt: new Date().toISOString(),
+        progress: [],
         error: null,
       },
     }));
+
+    // The turn narrates itself as it reads the code; those lines go onto the
+    // artifact so the cockpit's poll can show them instead of a spinner.
+    const progress = progressWriter(key);
 
     // Minutes-long, like a re-review: run it detached and let the cockpit poll.
     // Holding the request open is fine on localhost and fails behind a reverse
@@ -411,9 +417,15 @@ export async function buildApp(
     void runChatTurn(artifact, request.message, {
       refs: request.refs,
       allowUserComments: request.allowUserComments,
-      onProgress: (m) => console.log(`[chat ${artifact.id}] ${m}`),
+      onProgress: (m) => {
+        console.log(`[chat ${artifact.id}] ${m}`);
+        progress.push(m);
+      },
     })
       .then(async (result) => {
+        // Let the narration finish writing first: an append that read the
+        // artifact before this point would otherwise land on top of the answer.
+        await progress.stop();
         // The cockpit stays live throughout, so fold the result onto whatever
         // is on disk now rather than overwriting it — an edit the user made
         // while waiting must not vanish when the answer lands.
@@ -425,8 +437,10 @@ export async function buildApp(
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[chat ${artifact.id}] failed: ${message}`);
+        await progress.stop();
         // Nobody is holding a response to hand this to any more, so the failure
-        // lives on the artifact against the question that caused it.
+        // lives on the artifact against the question that caused it — under
+        // whatever the turn had managed to do before it died.
         await updateArtifactByKey(key, (a) => ({
           ...a,
           pendingChat: a.pendingChat ? { ...a.pendingChat, error: message } : null,
