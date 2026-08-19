@@ -59,6 +59,13 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
+The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
+and the strip under the table explains whatever it lands on — the verdict's own
+reasoning, what the run read, how it sits against the auto-send bar — so most
+rows can be judged without opening them. `↵` opens one, `r` drafts (or
+re-drafts) it. Inside a review, `[` and `]` walk to the previous/next PR still
+awaiting you, `n` steps through the chapters, and `s` sends.
+
 ### It reviews the code, not just the diff
 
 Cerber checks the PR's head out locally and lets the review read it. That
