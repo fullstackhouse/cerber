@@ -1,6 +1,7 @@
 import { html } from "diff2html";
-import { useEffect, useMemo, useState } from "react";
-import { patchForFiles, unclaimedFiles } from "../../src/core/diff";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { newSideLines, patchForFiles, unclaimedFiles } from "../../src/core/diff";
 import {
   addComment,
   deleteComment,
@@ -9,12 +10,27 @@ import {
   fetchSendPreview,
   patchComment,
   patchReview,
+  refreshReview,
+  rerunReview,
   sendReview,
 } from "./api";
 import { Markdown } from "./Markdown";
-import { Artifact, Chapter, ReviewComment, SendPreview } from "./types";
+import { Artifact, Chapter, RefreshResult, ReviewComment, SendPreview } from "./types";
 
-function DiffBlock({ patch }: { patch: string }) {
+/**
+ * Diff rendered by diff2html, with review comments injected inline under the
+ * diff row they point at (like the GitHub PR view). Comments whose row can't
+ * be found in the rendered HTML fall back to normal cards below the diff.
+ */
+function DiffBlock({
+  patch,
+  comments,
+  renderComment,
+}: {
+  patch: string;
+  comments: ReviewComment[];
+  renderComment: (c: ReviewComment) => ReactNode;
+}) {
   const rendered = useMemo(
     () =>
       patch.trim()
@@ -22,8 +38,57 @@ function DiffBlock({ patch }: { patch: string }) {
         : "",
     [patch],
   );
+  const ref = useRef<HTMLDivElement>(null);
+  const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    root.innerHTML = rendered;
+
+    const byFile = new Map<string, Element>();
+    for (const wrapper of root.querySelectorAll(".d2h-file-wrapper")) {
+      const name = wrapper.querySelector(".d2h-file-name")?.textContent?.trim();
+      if (name) byFile.set(name, wrapper);
+    }
+
+    const placed: { id: string; el: HTMLElement }[] = [];
+    // When several comments target the same line, insert each after the last.
+    const anchors = new Map<Element, Element>();
+    for (const c of comments) {
+      if (c.line == null) continue;
+      const wrapper = byFile.get(c.path);
+      if (!wrapper) continue;
+      const row = Array.from(wrapper.querySelectorAll(".d2h-diff-tbody > tr")).find(
+        (tr) => tr.querySelector(".line-num2")?.textContent?.trim() === String(c.line),
+      );
+      if (!row) continue;
+      const tr = document.createElement("tr");
+      tr.className = "inline-comment-row";
+      const td = document.createElement("td");
+      td.colSpan = 2;
+      const holder = document.createElement("div");
+      td.appendChild(holder);
+      tr.appendChild(td);
+      (anchors.get(row) ?? row).after(tr);
+      anchors.set(row, tr);
+      placed.push({ id: c.id, el: holder });
+    }
+    setSlots(placed);
+  }, [rendered, comments]);
+
   if (!rendered) return <p className="muted">No diff for this chapter.</p>;
-  return <div className="diff" dangerouslySetInnerHTML={{ __html: rendered }} />;
+  const unplaced = comments.filter((c) => !slots.some((s) => s.id === c.id));
+  return (
+    <>
+      <div className="diff" ref={ref} />
+      {slots.map(({ id, el }) => {
+        const c = comments.find((x) => x.id === id);
+        return c ? createPortal(renderComment(c), el, id) : null;
+      })}
+      {unplaced.map((c) => renderComment(c))}
+    </>
+  );
 }
 
 function CommentCard({
@@ -48,6 +113,15 @@ function CommentCard({
         <span className="muted">({comment.origin})</span>
         {comment.status === "dropped" && <span className="badge badge-muted"> dropped</span>}
         {comment.status === "approved" && <span className="badge badge-green"> approved</span>}
+        {comment.drifted && (
+          <span className="badge badge-warn" title="The code this comment points at changed in a newer commit. It will post in the review body instead of inline.">
+            {" "}
+            code changed — posts in body
+          </span>
+        )}
+        {!comment.drifted && comment.originalLine != null && comment.originalLine !== comment.line && (
+          <span className="muted" title="This comment followed its code to a new line."> (was :{comment.originalLine})</span>
+        )}
         {!readOnly && (
           <span className="comment-actions">
             {editing ? (
@@ -181,9 +255,23 @@ function ChapterSection({
 }) {
   const [open, setOpen] = useState(true);
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
+  // Comments that point at a line present in the diff render inline under that
+  // line (like GitHub); the rest render as cards above the diff.
+  const anchorable = useMemo(() => newSideLines(patch), [patch]);
+  const inline = comments.filter((c) => c.line != null && anchorable.get(c.path)?.has(c.line));
+  const floating = comments.filter((c) => !inline.includes(c));
+  const renderComment = (c: ReviewComment) => (
+    <CommentCard
+      key={c.id}
+      comment={c}
+      onUpdate={(p) => onUpdateComment(c.id, p)}
+      onDelete={() => onDeleteComment(c.id)}
+      readOnly={readOnly}
+    />
+  );
   return (
     <section className="chapter">
-      <h3 onClick={() => setOpen(!open)} className="chapter-title">
+      <h3 onClick={() => setOpen(!open)} className={`chapter-title${open ? " chapter-title-open" : ""}`}>
         {open ? "▾" : "▸"} {chapter.title}{" "}
         <span className="muted">
           ({chapter.files.length} file{chapter.files.length === 1 ? "" : "s"}
@@ -193,19 +281,11 @@ function ChapterSection({
       {open && (
         <>
           <Markdown className="chapter-explanation" text={chapter.explanation} />
-          {comments.map((c) => (
-            <CommentCard
-              key={c.id}
-              comment={c}
-              onUpdate={(p) => onUpdateComment(c.id, p)}
-              onDelete={() => onDeleteComment(c.id)}
-              readOnly={readOnly}
-            />
-          ))}
+          {floating.map(renderComment)}
           {!readOnly && chapter.files.length > 0 && (
             <AddComment files={chapter.files} chapterId={chapter.id} onAdd={onAddComment} />
           )}
-          <DiffBlock patch={patch} />
+          <DiffBlock patch={patch} comments={inline} renderComment={renderComment} />
         </>
       )}
     </section>
@@ -230,13 +310,11 @@ function SendPanel({
   const [event, setEvent] = useState<string>(defaultEvent);
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [showBody, setShowBody] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSendPreview(reviewKey, event).then(setPreview).catch((e) => setError(String(e)));
-    setConfirming(false);
   }, [reviewKey, event, artifact]);
 
   if (artifact.sent) {
@@ -259,61 +337,53 @@ function SendPanel({
 
   return (
     <div className="send-panel">
-      <h2>Send</h2>
-      <p className="muted">
-        Nothing has been sent to GitHub. Review the drafts above, then send explicitly.
-        Dropped comments stay local; comments without a valid diff line are folded into the review
-        body.
-      </p>
+      <div className="send-head">
+        <h2>Send to GitHub</h2>
+        <span className="muted">
+          the send button posts straight away · dropped comments stay local · off-diff comments
+          fold into the body
+        </span>
+      </div>
       <div className="send-controls">
-        <select value={event} onChange={(e) => setEvent(e.target.value)}>
-          <option value="COMMENT">Comment</option>
-          <option value="APPROVE">Approve</option>
-          <option value="REQUEST_CHANGES">Request changes</option>
-        </select>
+        <label className="send-as">
+          Send as
+          <select value={event} onChange={(e) => setEvent(e.target.value)}>
+            <option value="COMMENT">Comment</option>
+            <option value="APPROVE">Approve</option>
+            <option value="REQUEST_CHANGES">Request changes</option>
+          </select>
+        </label>
         {preview && (
           <span className="muted">
             {preview.comments.length} inline comment{preview.comments.length === 1 ? "" : "s"}
             {preview.folded.length > 0 && <> + {preview.folded.length} folded into body</>}
           </span>
         )}
+        <span className="send-spacer" />
         <button onClick={() => setShowBody(!showBody)}>
           {showBody ? "hide" : "preview"} body
         </button>
         <a href={exportUrl(reviewKey)} className="export-link">
           export .md
         </a>
-        {!confirming ? (
-          <button className="send-btn" onClick={() => setConfirming(true)}>
-            Send review to GitHub…
-          </button>
-        ) : (
-          <span className="confirm-group">
-            <strong>
-              Really send {event} to {artifact.pr.owner}/{artifact.pr.repo}#{artifact.pr.number}?
-            </strong>
-            <button
-              className="send-btn send-btn-confirm"
-              disabled={sending}
-              onClick={async () => {
-                setSending(true);
-                setError(null);
-                try {
-                  const updated = await sendReview(reviewKey, event);
-                  onSent(updated);
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setSending(false);
-                  setConfirming(false);
-                }
-              }}
-            >
-              {sending ? "Sending…" : "Yes, send it"}
-            </button>
-            <button onClick={() => setConfirming(false)}>cancel</button>
-          </span>
-        )}
+        <button
+          className="send-btn"
+          disabled={sending}
+          onClick={async () => {
+            setSending(true);
+            setError(null);
+            try {
+              const updated = await sendReview(reviewKey, event);
+              onSent(updated);
+            } catch (e) {
+              setError(String(e));
+            } finally {
+              setSending(false);
+            }
+          }}
+        >
+          {sending ? "Sending…" : `Send ${event} to #${artifact.pr.number}`}
+        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {showBody && preview && <pre className="body-preview">{preview.body}</pre>}
@@ -321,16 +391,121 @@ function SendPanel({
   );
 }
 
+function FreshnessBanner({
+  artifact,
+  freshness,
+  rerunning,
+  onRerun,
+}: {
+  artifact: Artifact;
+  freshness: RefreshResult | null;
+  rerunning: boolean;
+  onRerun: () => void;
+}) {
+  const running = artifact.status === "running";
+  const state = freshness?.prState ?? artifact.pr.state;
+  const closed = state === "CLOSED" || state === "MERGED";
+  const refresh = artifact.refresh;
+  const movedHere = freshness?.changed ? refresh : null;
+
+  if (running) {
+    return (
+      <div className="freshness freshness-running">
+        <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates itself
+        when the run lands — it takes a few minutes.
+      </div>
+    );
+  }
+  if (!closed && !movedHere) return null;
+
+  return (
+    <div className="freshness">
+      {closed && (
+        <div>
+          <strong>This PR is {state === "MERGED" ? "merged" : "closed"}.</strong> A review can still
+          be sent, but nobody is waiting for it.
+        </div>
+      )}
+      {movedHere && (
+        <div>
+          <strong>The PR moved on since this review.</strong> Now at{" "}
+          <code>{movedHere.toSha.slice(0, 7)}</code>, reviewed at{" "}
+          <code>{movedHere.fromSha.slice(0, 7)}</code>.{" "}
+          {movedHere.moved > 0 && <>{movedHere.moved} comment(s) followed the code. </>}
+          {movedHere.drifted > 0 && (
+            <>
+              {movedHere.drifted} could not — the code they point at is gone, so they will post in
+              the review body instead of inline.{" "}
+            </>
+          )}
+          The summary and verdict still describe the commit that was reviewed.
+          {!artifact.sent && (
+            <button className="rerun-btn" disabled={rerunning} onClick={onRerun}>
+              {rerunning ? "starting…" : "Re-review at the new head"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Detail({ reviewKey }: { reviewKey: string }) {
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [freshness, setFreshness] = useState<RefreshResult | null>(null);
+  const [rerunning, setRerunning] = useState(false);
 
   useEffect(() => {
-    fetchReview(reviewKey).then(setArtifact).catch((e) => setError(String(e)));
+    let cancelled = false;
+    setFreshness(null);
+    fetchReview(reviewKey)
+      .then((a) => {
+        if (cancelled) return;
+        setArtifact(a);
+        // Opening a review checks GitHub for new commits and pulls the comments
+        // forward onto them, so what you read is anchored to current code.
+        return refreshReview(reviewKey).then((r) => {
+          if (cancelled) return;
+          setFreshness(r);
+          if (r.changed) setArtifact(r.artifact);
+        });
+      })
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
   }, [reviewKey]);
+
+  // While an AI run is in flight, follow it until it lands.
+  useEffect(() => {
+    if (artifact?.status !== "running") return;
+    const timer = setInterval(() => {
+      fetchReview(reviewKey)
+        .then((a) => {
+          setArtifact(a);
+          if (a.status !== "running") setRerunning(false);
+        })
+        .catch(() => {
+          // Transient — the next tick tries again.
+        });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [artifact?.status, reviewKey]);
 
   if (error) return <p className="error">{error}</p>;
   if (!artifact) return <p className="muted">Loading…</p>;
+
+  const onRerun = () => {
+    setRerunning(true);
+    setError(null);
+    rerunReview(reviewKey)
+      .then(setArtifact)
+      .catch((e) => {
+        setError(String(e));
+        setRerunning(false);
+      });
+  };
 
   const readOnly = artifact.sent != null;
   const apply = (p: Promise<Artifact>) => p.then(setArtifact).catch((e) => setError(String(e)));
@@ -382,6 +557,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           <Markdown text={artifact.verdict.reasoning} />
         </div>
       )}
+
+      <FreshnessBanner
+        artifact={artifact}
+        freshness={freshness}
+        rerunning={rerunning}
+        onRerun={onRerun}
+      />
 
       {artifact.run?.error && <div className="error">Run failed: {artifact.run.error}</div>}
 
@@ -440,6 +622,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       {!readOnly && (
         <p className="muted post-actions">
+          Or set the local queue status without sending anything:{" "}
           <button onClick={() => apply(patchReview(reviewKey, { status: "reviewed" }))}>
             mark reviewed
           </button>{" "}

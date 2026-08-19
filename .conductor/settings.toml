@@ -1,0 +1,17 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "pnpm install"
+# Each workspace serves the cockpit on its own CONDUCTOR_PORT.
+run_mode = "concurrent"
+
+# The cockpit reads review artifacts from the user's ~/.cerber — local only.
+[scripts.run.cockpit]
+command = "pnpm build && pnpm dev serve --port $CONDUCTOR_PORT"
+available_in = ["local"]
+default = true
+icon = "eye"
+
+[scripts.run.checks]
+command = "pnpm typecheck && pnpm test"
+icon = "circle-check"

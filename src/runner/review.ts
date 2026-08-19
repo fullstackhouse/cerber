@@ -7,8 +7,10 @@ import {
   artifactId,
 } from "../core/artifact.js";
 import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
+import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { extractJson, runClaude } from "./claude.js";
+import { ReviewInProgressError, beginReview, endReview } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
 export interface ReviewOptions {
@@ -32,14 +34,23 @@ const FRESH_STATUSES = new Set(["ready", "reviewed", "sent", "skipped"]);
  * Everything stays local — nothing is ever written to GitHub.
  */
 export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<ReviewResult> {
+  beginReview(artifactId(ref));
+  try {
+    return await runReview(ref, opts);
+  } finally {
+    endReview(artifactId(ref));
+  }
+}
+
+async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult> {
   const log = opts.onProgress ?? (() => {});
   const now = () => new Date().toISOString();
 
   log(`Fetching ${ref.owner}/${ref.repo}#${ref.number}…`);
   const pr = await fetchPrInfo(ref);
 
+  const existing = await loadArtifact(artifactId(pr));
   if (!opts.force) {
-    const existing = await loadArtifact(artifactId(pr));
     if (
       existing &&
       FRESH_STATUSES.has(existing.status) &&
@@ -57,7 +68,7 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
     schemaVersion: SCHEMA_VERSION,
     id: artifactId(pr),
     status: "running",
-    createdAt: now(),
+    createdAt: existing?.createdAt ?? now(),
     updatedAt: now(),
     pr,
     diff,
@@ -67,6 +78,7 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
     verdict: null,
     run: { model: opts.model ?? null, startedAt: now(), finishedAt: null, costUsd: null, error: null },
     sent: null,
+    refresh: null,
     calibration: null,
   };
   await saveArtifact(artifact);
@@ -100,6 +112,8 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
         origin: "ai" as const,
         status: "draft" as const,
         editedByUser: false,
+        originalLine: null,
+        drifted: false,
       })),
       verdict: review.ai.verdict,
       run: {
@@ -110,6 +124,19 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
         error: null,
       },
     };
+
+    // A re-review regenerates the AI's comments, but the human's own comments
+    // and their rewrites of AI ones are work the run must not throw away.
+    if (existing) {
+      const { comments, carried, drifted } = carryOverComments(existing, artifact);
+      if (carried > 0) {
+        artifact = { ...artifact, comments };
+        log(
+          `Carried over ${carried} comment(s) you wrote or edited` +
+            (drifted > 0 ? `; ${drifted} no longer match the diff and will post in the body.` : "."),
+        );
+      }
+    }
   } catch (err: unknown) {
     artifact = {
       ...artifact,

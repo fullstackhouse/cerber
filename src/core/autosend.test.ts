@@ -21,6 +21,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
       baseRefName: "main",
       headRefName: "f",
       headSha: "abc",
+      state: "OPEN" as const,
       additions: 0,
       deletions: 0,
       changedFiles: 0,
@@ -32,6 +33,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     verdict: { recommendation: "approve", confidence: 95, reasoning: "clean" },
     run: null,
     sent: null,
+    refresh: null,
     calibration: null,
     ...overrides,
   };
@@ -72,10 +74,10 @@ describe("computeCalibration", () => {
   it("counts AI comment outcomes and user additions", () => {
     const a = makeArtifact({
       comments: [
-        { id: "1", path: "f", line: 1, body: "x", chapterId: null, origin: "ai", status: "draft", editedByUser: false },
-        { id: "2", path: "f", line: 2, body: "y", chapterId: null, origin: "ai", status: "dropped", editedByUser: false },
-        { id: "3", path: "f", line: 3, body: "z", chapterId: null, origin: "ai", status: "approved", editedByUser: true },
-        { id: "4", path: "f", line: null, body: "mine", chapterId: null, origin: "user", status: "draft", editedByUser: false },
+        { id: "1", path: "f", line: 1, body: "x", chapterId: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "f", line: 2, body: "y", chapterId: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "3", path: "f", line: 3, body: "z", chapterId: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false },
+        { id: "4", path: "f", line: null, body: "mine", chapterId: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     expect(computeCalibration(a, "COMMENT")).toEqual({

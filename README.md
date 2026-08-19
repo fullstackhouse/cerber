@@ -5,8 +5,8 @@ a summary, a chaptered walkthrough of the changes, draft inline comments, and a
 verdict with a confidence score. You go through it in a local web cockpit.
 
 **Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
-writes happen when you hit Send (coming in a later phase) — reviewing is 100%
-local and read-only.
+write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
+reviewing is 100% local and read-only.
 
 Named after Cerberus, the gatekeeper — and a sibling of
 [cezar](https://github.com/open-mercato/cezar): cezar runs coding agents,
@@ -48,14 +48,28 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
+### When the PR moves under you
+
+A review is written against one commit, but authors keep pushing. Opening a
+review checks the PR's head and pulls the review forward: comments follow their
+code to its new line numbers, and any whose code is gone are flagged and post
+in the review body instead of inline — GitHub rejects an entire review over one
+comment on a line that is no longer in the diff. Sends carry the reviewed
+commit's SHA, so inline comments land where they were written.
+
+The AI's summary and verdict still describe the commit that was reviewed. To
+get its opinion of the new code, hit **Re-review at the new head** in the
+cockpit (or `cerber review <pr> --force`) — comments you wrote or rewrote are
+carried into the fresh review.
+
 ## Status / roadmap
 
-Early. Current phase: review + read-only cockpit.
+Early, but all six planned phases have shipped.
 
 1. ✅ `cerber review <pr>` + artifact schema + cockpit (read-only)
 2. ✅ Comment editing in the cockpit (edit/approve/drop/add), verdict override,
-   gated **Send** (double-confirm; posts the review via your `gh` — the only
-   GitHub write in the codebase) + `cerber export` to markdown
+   gated **Send** (one deliberate click; posts the review via your `gh` — the
+   only GitHub write in the codebase) + `cerber export` to markdown
 3. ✅ `--awaiting-me` discovery, parallel runs (`--parallel`, default 3),
    freshness skip (same head SHA → no re-run; `--force` overrides), queue stats
 4. ✅ Daemon/VPS mode: `cerber serve --daemon` polls for PRs awaiting your
@@ -64,6 +78,9 @@ Early. Current phase: review + read-only cockpit.
 5. ✅ Confidence calibration (`cerber stats`), shadow-mode auto-send (default
    in daemon: logs what would be sent), opt-in `--auto-send` (approve-only,
    `--auto-send-threshold`, default 90%)
+6. ✅ Reviews keep up with the PR: opening one re-anchors its comments onto new
+   commits, flags the ones whose code is gone, and offers a re-review that
+   keeps everything you wrote
 
 ## Running on a VPS
 

@@ -12,12 +12,12 @@ export function buildReviewPrompt(pr: PrInfo, diff: string): { prompt: string; t
 Respond with ONLY a JSON object (no markdown fences, no prose before or after) matching exactly this shape:
 
 {
-  "summary": "markdown — what this PR actually does and why, written top-down: problem first, then the solution, then notable technical details. 1-3 paragraphs.",
+  "summary": "markdown — what this PR actually does and why, written top-down: problem first in plain language, then the solution, then notable technical details. A reader should be able to stop after any paragraph with a correct, just less detailed, picture. 1-3 paragraphs.",
   "chapters": [
     {
       "id": "short-kebab-id",
       "title": "Human title of this logical group of changes",
-      "explanation": "markdown — what this group changes and why, what to pay attention to",
+      "explanation": "markdown — 2-3 plain sentences: what this group changes, why, and what to look at closely",
       "files": ["path/to/file.ts", "path/other.ts"]
     }
   ],
@@ -25,7 +25,7 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
     {
       "path": "path/to/file.ts",
       "line": 42,
-      "body": "markdown — the review comment. Concrete, actionable, kind.",
+      "body": "markdown — the review comment. First sentence states the problem plainly; then the evidence or fix. Concrete, actionable, kind.",
       "chapterId": "short-kebab-id"
     }
   ],
@@ -35,6 +35,13 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
     "reasoning": "why this recommendation, and what makes you more/less sure"
   }
 }
+
+Writing style (applies to every markdown field):
+- Write like one human explaining to another: plain words, short sentences, no jargon. Someone who has NOT read the diff should follow every sentence.
+- Lead with the point. State the claim first, support it after. No hedging chains, no em-dash clause stacks.
+- Keep comments to ~3 sentences unless a code suggestion needs more. Length must buy clarity, not cover uncertainty — if you are unsure, say so in one plain sentence.
+- Do NOT imitate the PR description's writing style. Keep this plain register even when the PR itself is dense or writerly.
+- Describe the effect a person would see before the mechanism behind it. Not: "A stray closing code fence with prose on the same line left the block open, rendering the conditions below as code." But: "Also fixes a markdown typo: a code block was never closed, so everything after it displayed as code."
 
 Rules:
 - Group ALL changed files into chapters that tell the story of the PR (schema first, then logic, then tests, etc). Every changed file must appear in exactly one chapter.

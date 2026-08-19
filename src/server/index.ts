@@ -9,9 +9,17 @@ import { randomUUID } from "node:crypto";
 import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
-import { submitReview } from "../core/gh.js";
+import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { refreshArtifact } from "../core/refresh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
-import { listArtifacts, loadArtifactByKey, updateArtifactByKey } from "../core/state.js";
+import {
+  listArtifacts,
+  loadArtifactByKey,
+  reconcileRunning,
+  updateArtifactByKey,
+} from "../core/state.js";
+import { isReviewRunning } from "../runner/inflight.js";
+import { reviewPr } from "../runner/review.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -139,6 +147,8 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
           origin: "user" as const,
           status: "draft" as const,
           editedByUser: false,
+          originalLine: null,
+          drifted: false,
         },
       ],
     }));
@@ -154,6 +164,83 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
     }));
     if (!updated) return c.json({ error: "not found" }, 404);
     return c.json(updated);
+  });
+
+  // ---- Freshness: pull a review forward onto the PR's current head ----
+  // Read-only against GitHub (pr view + pr diff); writes only the local artifact.
+
+  app.post("/api/reviews/:key/refresh", async (c) => {
+    const artifact = await loadArtifactByKey(c.req.param("key"));
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+
+    let pr;
+    try {
+      pr = await fetchPrInfo(ref);
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+
+    const stale = artifact.pr.headSha !== "" && artifact.pr.headSha !== pr.headSha;
+    // A sent review is a record of what was posted — never rewrite it. A running
+    // one is mid-run and would be overwritten from under the runner.
+    if (!stale || artifact.sent || artifact.status === "running") {
+      return c.json({ stale, changed: false, prState: pr.state, artifact });
+    }
+
+    try {
+      const diff = await fetchPrDiff(ref);
+      const result = refreshArtifact(artifact, pr, diff);
+      const saved = await updateArtifactByKey(c.req.param("key"), () => result.artifact);
+      return c.json({
+        stale: true,
+        changed: result.changed,
+        prState: pr.state,
+        moved: result.moved,
+        drifted: result.drifted,
+        artifact: saved,
+      });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+  });
+
+  // ---- Re-review: start an AI run for a PR that has moved on ----
+
+  app.post("/api/reviews/:key/rerun", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    if (isReviewRunning(artifact.id)) {
+      return c.json({ error: "a review of this PR is already running" }, 409);
+    }
+
+    const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+    // Mark it running before responding, so the cockpit's next poll can't catch
+    // the old "ready" status and conclude the run already finished.
+    const running = await updateArtifactByKey(key, (a) => ({
+      ...a,
+      status: "running" as const,
+      run: { model: null, startedAt: new Date().toISOString(), finishedAt: null, costUsd: null, error: null },
+    }));
+
+    // Minutes-long: run it detached and let the cockpit poll the artifact.
+    void reviewPr(ref, { force: true, onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`) })
+      .catch(async (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[rerun ${artifact.id}] failed: ${message}`);
+        // The runner marks the artifact failed once it owns it; a failure before
+        // that (fetching the PR, or a run already in flight) would otherwise
+        // leave it stuck at "running" with nothing to clear it.
+        await updateArtifactByKey(key, (a) =>
+          a.status === "running"
+            ? { ...a, status: "failed" as const, run: a.run ? { ...a.run, error: message } : null }
+            : a,
+        ).catch(() => {});
+      });
+
+    return c.json(running, 202);
   });
 
   // ---- Export (local file download) ----
@@ -189,7 +276,7 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
     try {
       const { url } = await submitReview(
         { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number },
-        { event: payload.event, body: payload.body, comments: payload.comments },
+        { event: payload.event, body: payload.body, comments: payload.comments, commitId: payload.commitId },
       );
       const updated = await updateArtifactByKey(c.req.param("key"), (a) => ({
         ...a,
@@ -234,6 +321,10 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
 }
 
 export async function startServer(opts: ServeOptions): Promise<void> {
+  const cleared = await reconcileRunning();
+  if (cleared > 0) {
+    console.log(`Cleared ${cleared} review(s) left mid-run by a previous process — re-review to retry.`);
+  }
   const app = await buildApp(opts);
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
     const tokenHint = opts.token ? `/?token=${opts.token}` : "";
