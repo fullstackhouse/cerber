@@ -1,4 +1,4 @@
-import { Artifact, ConfigView, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
+import { Artifact, ConfigView, DaemonConfig, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -85,4 +85,11 @@ export const updateTrustRule = (rule: string, remove = false) =>
   request<ConfigView>("/api/config/trust", {
     method: "POST",
     body: JSON.stringify({ rule, remove }),
+  });
+
+/** Flip the inbox knobs. The daemon picks the change up on its next poll. */
+export const updateDaemonConfig = (patch: Partial<DaemonConfig>) =>
+  request<ConfigView>("/api/config/daemon", {
+    method: "POST",
+    body: JSON.stringify(patch),
   });

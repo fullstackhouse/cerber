@@ -7,6 +7,27 @@ auto-send that the user explicitly enabled with --auto-send — approve-only,
 confidence-threshold-gated, every decision logged to autosend.ndjson. No
 pending reviews, no comments, no reactions — reviewing is read-only.**
 
+## Product principles
+
+- Fewest clicks wins every tie. A capability ships **on by default with a switch
+  to turn it off**, never off with a switch to turn it on — source-backed
+  review, the checkout, poll and auto-review all landed that way. The single
+  deliberate exception is the GitHub write path: Send stays a human click and
+  auto-send stays opt-in.
+- Never ship a default that half-works. If the obvious path (open cerber → see
+  the PRs awaiting you, drafts already written) needs a manual step to be
+  useful, the default is wrong; fix the default instead of documenting the step.
+- Don't re-ask for a confirmation the user just gave. A second "are you sure" on
+  the action they requested is friction wearing safety's coat.
+- Secure by default, and don't offer the insecure shape at all. Where safety and
+  convenience genuinely collide, cerber refuses the unsafe option outright
+  rather than shipping it behind a warning (see the repo-trust refusal below).
+- Review prose is written for someone who has NOT read the diff: plain words,
+  effect before mechanism ("a code block was never closed, so everything after
+  it displayed as code" — not the parser-level account). The rules live in
+  `src/runner/prompt.ts` and were tuned against real reviews — change them from
+  evidence, not taste.
+
 ## Architecture
 
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
@@ -24,7 +45,11 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
   only; `--no-source` reviews the diff alone, with every tool off and an empty cwd
-- `src/server/` — Hono API + static cockpit serving
+- `src/server/` — Hono API + static cockpit serving, plus the inbox loop
+  (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
+  `awaiting` stub artifacts, drafts a review for each unless
+  `daemon.autoReview` is off, archives merged/closed PRs. Config's `daemon`
+  block is re-read every poll, so cockpit toggles apply without a restart
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`
 

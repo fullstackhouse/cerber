@@ -374,16 +374,21 @@ program
   });
 
 program
-  .command("serve")
-  .description("Start the review cockpit; --daemon keeps the queue warm by polling GitHub")
+  .command("serve", { isDefault: true })
+  .description(
+    "Start the review cockpit — an inbox: it polls GitHub for PRs awaiting your review and drafts " +
+      "a review for each, so they're ready when you open it. --no-poll / --no-auto-review to tame it.",
+  )
   .option("-p, --port <port>", "port", "4820")
   .option("-H, --host <host>", "host to bind (0.0.0.0 for VPS — requires --token)", "127.0.0.1")
   .option("-t, --token <token>", "require this token on every request (env: CERBER_TOKEN)")
-  .option("-d, --daemon", "poll for PRs awaiting your review and auto-review them (read-only)")
-  .option("-i, --interval <minutes>", "daemon poll interval", "5")
-  .option("-R, --repo <owner/repo>", "repo(s) the daemon watches (repeatable; default: all)", collect, [])
-  .option("-P, --parallel <n>", "daemon review concurrency", "3")
-  .option("-m, --model <model>", "Claude model override for daemon reviews")
+  .option("--no-poll", "don't poll GitHub for PRs awaiting your review (also disables auto-review)")
+  .option("--no-auto-review", "list awaiting PRs but don't review them until you click review")
+  .option("-d, --daemon", "(deprecated no-op — polling and auto-review are now the default)")
+  .option("-i, --interval <minutes>", "poll interval (default: config daemon.intervalMinutes, 5)")
+  .option("-R, --repo <owner/repo>", "repo(s) to watch (repeatable; default: config daemon.repos, all)", collect, [])
+  .option("-P, --parallel <n>", "review concurrency (default: config daemon.parallel, 3)")
+  .option("-m, --model <model>", "Claude model override for unattended reviews")
   .option(
     "--no-source",
     "review the diff alone, with no local checkout of the PR head (applies to daemon runs and cockpit re-reviews)",
@@ -403,10 +408,12 @@ program
       port: string;
       host: string;
       token?: string;
+      poll: boolean;
+      autoReview: boolean;
       daemon?: boolean;
-      interval: string;
+      interval?: string;
       repo: string[];
-      parallel: string;
+      parallel?: string;
       model?: string;
       source: boolean;
       trust: boolean;
@@ -430,29 +437,44 @@ program
             `  Every decision is logged to ${cerberHome()}/autosend.ndjson. COMMENT/REQUEST_CHANGES always wait for a human.`,
         );
       }
-      // Trust means "run this PR's code". A human clicking review accepted that
-      // per PR; a daemon does it unattended, on whatever lands in the queue.
-      if (opts.daemon && opts.trust) {
-        const rules = (await loadConfig()).trust;
-        if (rules.length > 0) {
-          console.log(
-            `⚠ ${rules.length} trust rule(s) in ${configPath()}: this daemon will run commands from matching PRs ` +
-              `automatically, with nobody watching. Pass --no-trust to keep every review read-only.`,
-          );
-        }
+      if (opts.daemon) {
+        console.log("Note: --daemon is deprecated — polling and auto-review are on by default now.");
       }
-      const daemon = opts.daemon
+
+      // Config holds the defaults and is re-read by the daemon on every poll
+      // (so the cockpit's Settings toggles apply live); a --no-* flag caps
+      // this run only, and --no-poll skips the loop entirely.
+      const config = await loadConfig();
+      const d = config.daemon;
+
+      // Trust means "run this PR's code". A human clicking review accepted that
+      // per PR; auto-review does it unattended, on whatever lands in the queue.
+      if (opts.poll && d.poll && opts.autoReview && d.autoReview && opts.trust && config.trust.length > 0) {
+        console.log(
+          `⚠ ${config.trust.length} trust rule(s) in ${configPath()}: unattended reviews will run commands from ` +
+            `matching PRs, with nobody watching. Pass --no-trust to keep every review read-only, ` +
+            `or --no-auto-review to only review on click.`,
+        );
+      }
+
+      const daemon = opts.poll
         ? startDaemon({
-            repos: opts.repo,
-            intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
-            parallel: Math.max(1, Number(opts.parallel) || 1),
+            repos: opts.repo.length > 0 ? opts.repo : d.repos,
+            intervalMs:
+              Math.max(1, opts.interval !== undefined ? Number(opts.interval) || d.intervalMinutes : d.intervalMinutes) *
+              60_000,
+            parallel: Math.max(1, opts.parallel !== undefined ? Number(opts.parallel) || d.parallel : d.parallel),
             model: opts.model,
             withSource: opts.source,
             trust: opts.trust ? undefined : false,
+            autoReview: opts.autoReview,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
         : undefined;
+      if (!opts.poll) {
+        console.log("Polling is off (--no-poll) — the queue only shows what you review by hand.");
+      }
       await startServer({
         port: Number(opts.port),
         host: opts.host,

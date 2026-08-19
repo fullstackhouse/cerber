@@ -112,11 +112,21 @@ export interface DiscoveredPr extends PrRef {
   url: string;
   updatedAt: string;
   isDraft: boolean;
+  /** Who opened it — the queue shows whose code an unattended run would execute. */
+  author: string;
 }
 
 /** Map `gh search prs` JSON output to PR refs. Drafts are excluded. */
 export function mapSearchResults(
-  raw: { number: number; title: string; url: string; updatedAt: string; isDraft: boolean; repository: { nameWithOwner: string } }[],
+  raw: {
+    number: number;
+    title: string;
+    url: string;
+    updatedAt: string;
+    isDraft: boolean;
+    repository: { nameWithOwner: string };
+    author?: { login?: string };
+  }[],
 ): DiscoveredPr[] {
   return raw
     .filter((r) => !r.isDraft)
@@ -132,6 +142,7 @@ export function mapSearchResults(
           url: r.url,
           updatedAt: r.updatedAt,
           isDraft: r.isDraft,
+          author: r.author?.login ?? "",
         },
       ];
     });
@@ -147,7 +158,7 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
     "--limit",
     String(limit),
     "--json",
-    "number,title,repository,isDraft,url,updatedAt",
+    "number,title,repository,isDraft,url,updatedAt,author",
   ];
   if (repoFilter) args.push("--repo", repoFilter);
   const out = await gh(args);

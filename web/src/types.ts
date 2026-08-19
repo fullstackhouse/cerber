@@ -12,6 +12,8 @@ export interface ReviewListItem {
     owner: string;
     repo: string;
     number: number;
+    /** Merged/closed PRs are archived out of the default queue view. */
+    state?: "OPEN" | "CLOSED" | "MERGED";
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -106,11 +108,18 @@ export type DaemonStatus =
       polling: boolean;
       repos: string[];
       intervalMs: number;
+      /** False when the config's poll toggle idles the loop. */
+      pollEnabled: boolean;
+      autoReview: boolean;
+      /** Unattended reviews may run PR code: auto-review on + trust rules set. */
+      trustedRuns: boolean;
       polls: number;
       errors: number;
       lastPollAt: string | null;
       nextPollAt: string | null;
       lastSummary: string | null;
+      /** GitHub discovery is failing (gh unauthed, offline); local queue still works. */
+      lastPollError: string | null;
       autoSend: "shadow" | "on";
       autoSendThreshold: number;
       autoSent: number;
@@ -131,7 +140,16 @@ export interface TrustEntry {
   denies: boolean;
 }
 
+export interface DaemonConfig {
+  poll: boolean;
+  autoReview: boolean;
+  intervalMinutes: number;
+  parallel: number;
+  repos: string[];
+}
+
 export interface ConfigView {
   path: string;
   trust: TrustEntry[];
+  daemon: DaemonConfig;
 }

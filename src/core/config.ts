@@ -12,6 +12,24 @@ import { TrustRuleError, parseTrustRule } from "./trust.js";
  * Rules stay one-line strings rather than objects: the same syntax you type at
  * `cerber trust`, readable in a diff, and short enough to explain in a tooltip.
  */
+/**
+ * The background loop `cerber serve` runs. Both knobs default ON — the cockpit
+ * is an inbox: open it and the PRs awaiting your review are already there,
+ * drafts and all. Flip them here (or in the cockpit's Settings), or per-run
+ * with `--no-poll` / `--no-auto-review`.
+ */
+export const DaemonConfigSchema = z.object({
+  /** Discover PRs awaiting your review and list them as `awaiting`. */
+  poll: z.boolean().default(true),
+  /** Draft an AI review for whatever lands in the queue. Never sends. */
+  autoReview: z.boolean().default(true),
+  intervalMinutes: z.number().int().positive().default(5),
+  parallel: z.number().int().positive().default(3),
+  /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
+  repos: z.array(z.string()).default([]),
+});
+export type DaemonConfig = z.infer<typeof DaemonConfigSchema>;
+
 export const ConfigSchema = z.object({
   /** Whose PRs may be reviewed by running code. See core/trust.ts for syntax. */
   trust: z
@@ -29,10 +47,11 @@ export const ConfigSchema = z.object({
         }
       });
     }),
+  daemon: DaemonConfigSchema.default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
-export const DEFAULT_CONFIG: Config = { trust: [] };
+export const DEFAULT_CONFIG: Config = ConfigSchema.parse({});
 
 export function configPath(): string {
   return path.join(cerberHome(), "config.json");
@@ -44,7 +63,7 @@ export async function loadConfig(): Promise<Config> {
     throw err;
   });
 
-  if (raw === null) return { ...DEFAULT_CONFIG };
+  if (raw === null) return ConfigSchema.parse({});
 
   try {
     return ConfigSchema.parse(JSON.parse(raw));
@@ -67,8 +86,9 @@ function describeConfigError(err: unknown): string {
   return `  ${err instanceof Error ? err.message : String(err)}`;
 }
 
-/** Write atomically — the cockpit and a `cerber trust` can both be writing. */
-export async function saveConfig(config: Config): Promise<string> {
+/** Write atomically — the cockpit and a `cerber trust` can both be writing.
+ *  Accepts schema input (defaults fill the gaps), so callers may omit blocks. */
+export async function saveConfig(config: z.input<typeof ConfigSchema>): Promise<string> {
   const file = configPath();
   await fs.mkdir(cerberHome(), { recursive: true });
   const tmp = `${file}.tmp`;

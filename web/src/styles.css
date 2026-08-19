@@ -206,6 +206,38 @@ a {
   border-color: rgba(207, 34, 46, 0.4);
 }
 
+.status-awaiting {
+  background: #fff8c5;
+  border-color: rgba(154, 103, 0, 0.4);
+}
+
+.review-now {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+.row-archived {
+  opacity: 0.6;
+}
+
+.archived {
+  margin-top: 20px;
+}
+
+.archived-toggle {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.inbox-toggle {
+  display: block;
+  margin: 6px 0;
+}
+
 .badge {
   font-size: 12px;
   padding: 2px 8px;

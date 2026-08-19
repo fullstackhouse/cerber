@@ -10,7 +10,8 @@ import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
-import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { z } from "zod";
+import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
@@ -80,8 +81,33 @@ export async function buildApp(
   app.get("/api/config", async (c) => {
     try {
       const config = await loadConfig();
-      return c.json({ path: configPath(), trust: trustView(config.trust) });
+      return c.json({ path: configPath(), trust: trustView(config.trust), daemon: config.daemon });
     } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // The inbox knobs. The daemon re-reads the config every poll, so a toggle
+  // here applies on the next tick without restarting serve.
+  app.post("/api/config/daemon", async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "body must be JSON" }, 400);
+    }
+    try {
+      const config = await loadConfig();
+      const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
+      await saveConfig({ ...config, daemon });
+      return c.json({ path: configPath(), trust: trustView(config.trust), daemon });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) {
+        return c.json(
+          { error: err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") },
+          400,
+        );
+      }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
@@ -116,7 +142,9 @@ export async function buildApp(
       });
       const trust = remove === true ? without : [...without, canonical];
       await saveConfig({ ...config, trust });
-      return c.json({ path: configPath(), trust: trustView(trust) });
+      // Full ConfigView — the cockpit replaces its config state with this
+      // wholesale, so omitting daemon would crash the Settings toggles.
+      return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon });
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -137,6 +165,7 @@ export async function buildApp(
           owner: a.pr.owner,
           repo: a.pr.repo,
           number: a.pr.number,
+          state: a.pr.state,
           additions: a.pr.additions,
           deletions: a.pr.deletions,
           changedFiles: a.pr.changedFiles,
@@ -413,6 +442,12 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
     const tokenHint = opts.token ? `/?token=${opts.token}` : "";
     console.log(`cerber cockpit: http://${opts.host}:${info.port}${tokenHint}`);
-    if (opts.daemon) console.log("daemon: polling for PRs awaiting your review");
+    if (opts.daemon) {
+      const s = opts.daemon.status();
+      console.log(
+        `inbox: polling every ${Math.round(s.intervalMs / 60_000)}m` +
+          `${s.autoReview ? ", drafting a review for each PR awaiting you" : " (auto-review off — click review in the queue)"}`,
+      );
+    }
   });
 }
