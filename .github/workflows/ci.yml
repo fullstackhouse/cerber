@@ -45,4 +45,6 @@ jobs:
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - name: Publish to npm with OIDC
-        run: npm publish --provenance --access public
+        # NOTE: add --provenance back once the repo is public (provenance
+        # attestation requires a public source repo).
+        run: npm publish --access public
