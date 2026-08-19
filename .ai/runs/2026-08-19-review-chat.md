@@ -114,9 +114,9 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 1: Session capture and resume plumbing
 
-- [ ] 1.1 runClaude returns sessionId; buildClaudeArgs emits --resume
-- [ ] 1.2 RunInfo.sessionId persisted by review.ts
-- [ ] 1.3 Tests for arg construction and wrapper parsing
+- [x] 1.1 runClaude returns sessionId; buildClaudeArgs emits --resume — c54ebe2
+- [x] 1.2 RunInfo.sessionId persisted by review.ts — c54ebe2
+- [x] 1.3 Tests for arg construction and wrapper parsing — c54ebe2
 
 ### Phase 2: Chat schema and revision core
 
