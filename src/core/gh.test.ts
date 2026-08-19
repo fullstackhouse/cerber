@@ -11,9 +11,9 @@ describe("parsePrRef", () => {
   });
 
   it("parses owner/repo#number", () => {
-    expect(parsePrRef("open-mercato/cezar#7")).toEqual({
+    expect(parsePrRef("open-mercato/backoffice#7")).toEqual({
       owner: "open-mercato",
-      repo: "cezar",
+      repo: "backoffice",
       number: 7,
     });
   });
