@@ -100,11 +100,13 @@ function Row({
       <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
         {r.pr.repo}#{r.pr.number}
       </span>
+      <span className="col-author" title={r.pr.author}>
+        {r.pr.author}
+      </span>
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      <span className="col-author">{r.pr.author}</span>
-      <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
+      <span className="col-age">{ageLabel(r.updatedAt)}</span>
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -116,7 +118,7 @@ function Row({
           "—"
         )}
       </span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
     </div>
   );
 }
@@ -129,14 +131,16 @@ function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
       <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
         {r.pr.repo}#{r.pr.number}
       </span>
+      <span className="col-author" title={r.pr.author}>
+        {r.pr.author}
+      </span>
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      <span className="col-author">{r.pr.author}</span>
-      <span className="col-verdict">{verdict}</span>
+      <span className="col-age">{ageLabel(r.updatedAt)}</span>
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      <span className="col-verdict">{verdict}</span>
     </div>
   );
 }
@@ -331,12 +335,12 @@ export function Queue() {
           <div className="table-head">
             <span className="col-caret" />
             <span className="col-slug">repo#pr</span>
-            <span className="col-title">title</span>
             <span className="col-author">author</span>
-            <span className="col-verdict">verdict</span>
+            <span className="col-title">title</span>
+            <span className="col-age">upd</span>
             <span className="col-comments">c</span>
             <span className="col-size">size</span>
-            <span className="col-age">upd</span>
+            <span className="col-verdict">verdict</span>
           </div>
 
           {rows.length === 0 ? (

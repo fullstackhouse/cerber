@@ -494,16 +494,18 @@ button {
   white-space: nowrap;
 }
 .col-author {
-  width: 76px;
+  width: 104px;
   flex-shrink: 0;
   color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Last column: the answer the row arrived at, against the right edge. */
 .col-verdict {
-  width: 132px;
+  width: 136px;
   flex-shrink: 0;
+  text-align: right;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
