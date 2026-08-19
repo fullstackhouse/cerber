@@ -2,7 +2,10 @@
 import { Command } from "commander";
 import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
+import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
+import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
 import {
@@ -34,10 +37,27 @@ program
   .option("-a, --awaiting-me", "discover and review all open PRs awaiting your review")
   .option("-P, --parallel <n>", "how many reviews to run concurrently", "3")
   .option("-f, --force", "re-review even if the artifact is up to date with the PR head")
+  .option(
+    "--no-source",
+    "review the diff alone: skip the local checkout of the PR head. Faster and cheaper, but the AI cannot see past the changed lines",
+  )
+  .option(
+    "-t, --trust",
+    "let the review run commands in the checkout (tests, typecheck, git log) whatever the trust config says",
+  )
+  .option("--no-trust", "keep the review read-only even if a trust rule matches")
   .action(
     async (
       prs: string[],
-      opts: { repo?: string; model?: string; awaitingMe?: boolean; parallel: string; force?: boolean },
+      opts: {
+        repo?: string;
+        model?: string;
+        awaitingMe?: boolean;
+        parallel: string;
+        force?: boolean;
+        source: boolean;
+        trust?: boolean;
+      },
     ) => {
       let refs: PrRef[];
       if (opts.awaitingMe) {
@@ -67,6 +87,8 @@ program
           const { artifact, skipped } = await reviewPr(ref, {
             model: opts.model,
             force: opts.force,
+            withSource: opts.source,
+            trust: opts.trust,
             onProgress: (m) => console.log(`[${label}] ${m}`),
           });
           if (skipped) {
@@ -77,7 +99,7 @@ program
           rows.push(
             `✔ ${label.padEnd(40)} ${v ? `${v.recommendation} ${v.confidence}%` : "?"}`.padEnd(65) +
               `${artifact.comments.length} comment(s)` +
-              (artifact.run?.costUsd != null ? `, $${artifact.run.costUsd.toFixed(2)}` : ""),
+              (artifact.run?.costUsd != null ? `, ≈$${artifact.run.costUsd.toFixed(2)}` : ""),
           );
         } catch (err: unknown) {
           failures++;
@@ -89,6 +111,11 @@ program
       for (const row of rows) console.log(row);
       if (skips > 0) console.log(`(${skips} already up to date — use --force to re-review)`);
       console.log(`\nArtifacts in ${cerberHome()}/reviews — view with: cerber serve`);
+      if (rows.some((r) => r.includes("≈$"))) {
+        console.log(
+          "(≈$ is what the tokens would cost at API rates — on a Claude subscription they draw on your usage limits, not your card.)",
+        );
+      }
       if (failures > 0) process.exitCode = 1;
     },
   );
@@ -192,6 +219,107 @@ program
   });
 
 program
+  .command("trust")
+  .description(
+    "Show, add, or remove the people whose PRs a review may run (~/.cerber/config.json)",
+  )
+  .argument(
+    "[pattern]",
+    "@org/*, @org/team, @login, or !pattern to deny — omit to list what is trusted today",
+  )
+  .option("-d, --delete", "remove this rule instead of adding it")
+  .action(async (pattern: string | undefined, opts: { delete?: boolean }) => {
+    const config = await loadConfig();
+
+    if (pattern) {
+      let rule;
+      try {
+        rule = parseTrustRule(pattern);
+      } catch (err: unknown) {
+        console.error(err instanceof TrustRuleError ? err.message : String(err));
+        process.exit(1);
+      }
+      if (!rule) {
+        console.error(`Not a trust rule: "${pattern}"`);
+        process.exit(1);
+      }
+      const canonical = describeRule(rule);
+      const without = config.trust.filter((line) => {
+        const parsed = parseTrustRule(line);
+        return !parsed || describeRule(parsed) !== canonical;
+      });
+      if (opts.delete) {
+        if (without.length === config.trust.length) {
+          console.error(`Not in the trust list: ${canonical}`);
+          process.exit(1);
+        }
+        await saveConfig({ ...config, trust: without });
+        console.log(`Removed ${canonical}. Those PRs are reviewed read-only again.`);
+        return;
+      }
+      await saveConfig({ ...config, trust: [...without, canonical] });
+      console.log(`Trusted: ${explainRule(rule)}\n  → ${configPath()}`);
+      console.log("Reviews of matching PRs may run tests, typechecks and git commands in the checkout.");
+      return;
+    }
+
+    if (config.trust.length === 0) {
+      console.log(
+        `Nothing is trusted: every review reads the checkout and runs nothing.\n` +
+          `Trust people — never a repo, since anyone can open a PR against one:\n` +
+          `  cerber trust @your-org/*         # everyone in the org\n` +
+          `  cerber trust @your-org/devs      # one GitHub team\n` +
+          `  cerber trust @teammate           # one person\n` +
+          `Rules live in ${configPath()}, and in the cockpit under Settings.`,
+      );
+      return;
+    }
+
+    console.log(`Trusted people (${configPath()}):`);
+    for (const line of config.trust) {
+      const rule = parseTrustRule(line);
+      if (rule) console.log(`  ${describeRule(rule).padEnd(28)} ${explainRule(rule)}`);
+    }
+    console.log(
+      "\nEveryone else's PRs are reviewed read-only. Remove one with: cerber trust <pattern> --delete",
+    );
+  });
+
+program
+  .command("prune")
+  .description("Delete cached source checkouts in ~/.cerber/src (they re-fetch on the next --with-source review)")
+  .option("--all", "delete every checkout, including ones for reviews still awaiting you")
+  .action(async (opts: { all?: boolean }) => {
+    const checkouts = await listCheckouts();
+    if (checkouts.length === 0) {
+      console.log(`No source checkouts in ${cerberHome()}/src.`);
+      return;
+    }
+    const artifacts = new Map((await listArtifacts()).map((a) => [a.id, a]));
+    const mb = (bytes: number) => {
+      const value = bytes / 1024 / 1024;
+      return `${value.toFixed(value < 10 ? 1 : 0)} MB`;
+    };
+
+    let freed = 0;
+    let kept = 0;
+    for (const checkout of checkouts) {
+      const artifact = artifacts.get(checkout.id);
+      // A review you have not sent yet is still live work — its checkout makes
+      // the next re-review cheap, so only --all takes it.
+      const done = !artifact || artifact.sent != null || artifact.pr.state !== "OPEN";
+      if (!opts.all && !done) {
+        kept++;
+        continue;
+      }
+      await removeCheckout(checkout.dir);
+      freed += checkout.bytes;
+      console.log(`removed ${checkout.id.padEnd(40)} ${mb(checkout.bytes)}`);
+    }
+    console.log(`\nFreed ${mb(freed)}${kept > 0 ? `; kept ${kept} for open reviews (--all removes them too)` : ""}.`);
+  });
+
+program
   .command("stats")
   .description("How well-calibrated the AI reviews are: verdict agreement and comment survival by confidence")
   .action(async () => {
@@ -257,6 +385,14 @@ program
   .option("-P, --parallel <n>", "daemon review concurrency", "3")
   .option("-m, --model <model>", "Claude model override for daemon reviews")
   .option(
+    "--no-source",
+    "review the diff alone, with no local checkout of the PR head (applies to daemon runs and cockpit re-reviews)",
+  )
+  .option(
+    "--no-trust",
+    "ignore the configured trust rules: every review here stays read-only, even for repos you trust",
+  )
+  .option(
     "--auto-send",
     "ACTUALLY auto-send APPROVE verdicts at/above --auto-send-threshold (default: shadow mode, which only logs what would be sent)",
   )
@@ -272,6 +408,8 @@ program
       repo: string[];
       parallel: string;
       model?: string;
+      source: boolean;
+      trust: boolean;
       autoSend?: boolean;
       autoSendThreshold: string;
       insecure?: boolean;
@@ -292,17 +430,37 @@ program
             `  Every decision is logged to ${cerberHome()}/autosend.ndjson. COMMENT/REQUEST_CHANGES always wait for a human.`,
         );
       }
+      // Trust means "run this PR's code". A human clicking review accepted that
+      // per PR; a daemon does it unattended, on whatever lands in the queue.
+      if (opts.daemon && opts.trust) {
+        const rules = (await loadConfig()).trust;
+        if (rules.length > 0) {
+          console.log(
+            `⚠ ${rules.length} trust rule(s) in ${configPath()}: this daemon will run commands from matching PRs ` +
+              `automatically, with nobody watching. Pass --no-trust to keep every review read-only.`,
+          );
+        }
+      }
       const daemon = opts.daemon
         ? startDaemon({
             repos: opts.repo,
             intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
             parallel: Math.max(1, Number(opts.parallel) || 1),
             model: opts.model,
+            withSource: opts.source,
+            trust: opts.trust ? undefined : false,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
         : undefined;
-      await startServer({ port: Number(opts.port), host: opts.host, token, daemon });
+      await startServer({
+        port: Number(opts.port),
+        host: opts.host,
+        token,
+        daemon,
+        withSource: opts.source,
+        trust: opts.trust ? undefined : false,
+      });
     },
   );
 

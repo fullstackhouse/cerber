@@ -1,4 +1,4 @@
-import { Artifact, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
+import { Artifact, ConfigView, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -55,9 +55,17 @@ export const deleteComment = (key: string, id: string) =>
 export const refreshReview = (key: string) =>
   request<RefreshResult>(`/api/reviews/${encodeURIComponent(key)}/refresh`, { method: "POST" });
 
-/** Start a fresh AI review of the PR's current head. Returns while it runs. */
-export const rerunReview = (key: string) =>
-  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/rerun`, { method: "POST" });
+/**
+ * Start a fresh AI review of the PR's current head. Returns while it runs.
+ * `withSource` overrides the server default: the run checks the head out and
+ * reads the code around the diff.
+ */
+export const rerunReview = (key: string, withSource?: boolean) =>
+  request<Artifact>(
+    `/api/reviews/${encodeURIComponent(key)}/rerun` +
+      (withSource === undefined ? "" : `?source=${withSource ? "1" : "0"}`),
+    { method: "POST" },
+  );
 
 export const fetchSendPreview = (key: string, event: string) =>
   request<SendPreview>(`/api/reviews/${encodeURIComponent(key)}/send-preview?event=${event}`);
@@ -69,3 +77,12 @@ export const sendReview = (key: string, event: string) =>
   });
 
 export const exportUrl = (key: string) => `/api/reviews/${encodeURIComponent(key)}/export`;
+
+export const fetchConfig = () => request<ConfigView>("/api/config");
+
+/** Add a trust rule, or remove it. Returns the config as it now stands. */
+export const updateTrustRule = (rule: string, remove = false) =>
+  request<ConfigView>("/api/config/trust", {
+    method: "POST",
+    body: JSON.stringify({ rule, remove }),
+  });

@@ -94,7 +94,14 @@ export function Queue() {
             {s}: {counts[s]}
           </span>
         ))}
-        {totalCost > 0 && <span className="muted">total review cost ${totalCost.toFixed(2)}</span>}
+        {totalCost > 0 && (
+          <span
+            className="muted"
+            title="What these reviews would cost at API token rates. Riding a Claude subscription, they draw on your usage limits instead."
+          >
+            ≈${totalCost.toFixed(2)} at API rates
+          </span>
+        )}
       </div>
       <table className="queue">
       <thead>

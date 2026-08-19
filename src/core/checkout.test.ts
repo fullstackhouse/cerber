@@ -1,0 +1,229 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRunDir, evictOldCheckouts, listCheckouts, prepareCheckout, removeRunDir, sourceDir } from "./checkout.js";
+
+const ref = { owner: "acme", repo: "widgets", number: 42 };
+
+function fakeGit(existing: boolean, present: string[] = []) {
+  const calls: string[][] = [];
+  const renamed: [string, string][] = [];
+  return {
+    calls,
+    renamed,
+    deps: {
+      git: async (args: string[]) => {
+        calls.push(args);
+        return args[0] === "rev-parse" ? "abc1234\n" : "";
+      },
+      isRepo: async () => existing,
+      mkdir: async () => {},
+      quarantine: async (from: string, to: string) => {
+        if (!present.some((p) => from.endsWith(p))) return false;
+        renamed.push([from, to]);
+        return true;
+      },
+      touch: async () => {},
+    },
+  };
+}
+
+describe("sourceDir", () => {
+  it("gives each PR its own directory so parallel reviews cannot fight", () => {
+    expect(sourceDir(ref)).not.toBe(sourceDir({ ...ref, number: 43 }));
+    expect(sourceDir(ref)).toContain("acme__widgets__42");
+  });
+});
+
+describe("prepareCheckout", () => {
+  it("initialises a fresh clone, then checks out the PR head", async () => {
+    const { calls, deps } = fakeGit(false);
+    const checkout = await prepareCheckout(ref, { deps });
+
+    expect(calls[0]).toEqual(["init", "-q"]);
+    expect(calls[1]).toEqual([
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/acme/widgets.git",
+    ]);
+    expect(checkout.sha).toBe("abc1234");
+    expect(checkout.dir).toBe(sourceDir(ref));
+  });
+
+  it("never leaves a usable push credential inside the checkout", async () => {
+    const { calls, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+
+    // The credential rides the fetch command and is never written to the clone,
+    // which a trusted review is about to run commands in.
+    expect(calls.some((c) => c[0] === "config" && c[1] === "credential.helper")).toBe(false);
+    expect(calls).toContainEqual(["config", "--unset-all", "credential.helper"]);
+    const fetch = calls.find((c) => c.includes("fetch"))!;
+    expect(fetch.slice(0, 2)).toEqual(["-c", "credential.helper=!gh auth git-credential"]);
+  });
+
+  it("reuses an existing clone instead of re-initialising it", async () => {
+    const { calls, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+    expect(calls.map((c) => (c[0] === "-c" ? "fetch" : c[0]))).toEqual([
+      "config",
+      "fetch",
+      "checkout",
+      "clean",
+      "rev-parse",
+    ]);
+  });
+
+  it("fetches the pull ref shallowly, so fork PRs resolve without extra remotes", async () => {
+    const { calls, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+    expect(calls.find((c) => c.includes("fetch"))!.slice(2)).toEqual([
+      "fetch",
+      "-q",
+      "--depth=1",
+      "--no-tags",
+      "origin",
+      "refs/pull/42/head",
+    ]);
+  });
+
+  it("wipes untracked leftovers from a previous head", async () => {
+    const { calls, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+    expect(calls).toContainEqual(["clean", "-qfdx"]);
+  });
+
+  it("moves agent config the PR ships out of the reviewer's way, keeping it readable", async () => {
+    const { renamed, deps } = fakeGit(true, [".claude/settings.json", ".mcp.json"]);
+    await prepareCheckout(ref, { deps });
+
+    expect(renamed.map(([from]) => from.replace(sourceDir(ref) + "/", ""))).toEqual([
+      ".claude/settings.json",
+      ".mcp.json",
+    ]);
+    // Renamed in place, not deleted: the reviewer can still read and comment on it.
+    for (const [from, to] of renamed) expect(to).toBe(from + ".cerber-quarantined");
+  });
+
+  it("says nothing about agent config the PR does not ship", async () => {
+    const { renamed, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+    expect(renamed).toEqual([]);
+  });
+});
+
+describe("evictOldCheckouts", () => {
+  let home: string;
+  const previousHome = process.env.CERBER_HOME;
+
+  /** Make a checkout dir whose mtime says when it was last reviewed. */
+  async function seed(name: string, ageMinutes: number) {
+    const dir = path.join(home, "src", name);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "file.txt"), "x");
+    const when = new Date(Date.now() - ageMinutes * 60_000);
+    await fs.utimes(dir, when, when);
+  }
+
+  const remaining = async () => (await fs.readdir(path.join(home, "src"))).sort();
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-evict-"));
+    process.env.CERBER_HOME = home;
+  });
+
+  afterEach(async () => {
+    if (previousHome === undefined) delete process.env.CERBER_HOME;
+    else process.env.CERBER_HOME = previousHome;
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it("keeps the most recently used and drops the rest", async () => {
+    await seed("acme__a__1", 30);
+    await seed("acme__b__2", 10);
+    await seed("acme__c__3", 20);
+
+    const evicted = await evictOldCheckouts({ keep: 2 });
+
+    expect(evicted).toEqual(["acme/a#1"]);
+    expect(await remaining()).toEqual(["acme__b__2", "acme__c__3"]);
+  });
+
+  it("never evicts a checkout a review is reading right now", async () => {
+    await seed("acme__a__1", 30);
+    await seed("acme__b__2", 10);
+
+    const evicted = await evictOldCheckouts({ keep: 0, inUse: (id) => id === "acme/a#1" });
+
+    expect(evicted).toEqual(["acme/b#2"]);
+    expect(await remaining()).toEqual(["acme__a__1"]);
+  });
+
+  it("does nothing when the cache is empty", async () => {
+    expect(await evictOldCheckouts({ keep: 2 })).toEqual([]);
+    expect(await listCheckouts()).toEqual([]);
+  });
+});
+
+describe("prepareCheckout — trusted", () => {
+  it("leaves the repo's own config alone", async () => {
+    const { renamed, calls, deps } = fakeGit(true, [".claude/settings.json", ".mcp.json"]);
+    await prepareCheckout(ref, { deps, trusted: true });
+
+    // Nothing to move aside, and nothing to move back: the clean above already
+    // wiped any quarantine an earlier untrusted run left behind.
+    expect(renamed).toEqual([]);
+    expect(calls).toContainEqual(["clean", "-qfdx"]);
+  });
+});
+
+describe("createRunDir", () => {
+  const previousHome = process.env.CERBER_HOME;
+  let home: string;
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-rundir-"));
+    process.env.CERBER_HOME = home;
+  });
+
+  afterEach(async () => {
+    if (previousHome === undefined) delete process.env.CERBER_HOME;
+    else process.env.CERBER_HOME = previousHome;
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it("gives each run its own directory, so one run cannot seed the next", async () => {
+    // A trusted run has Bash; a shared directory would let it leave a
+    // CLAUDE.md that later diff-only runs would load as their own memory.
+    const a = await createRunDir();
+    const b = await createRunDir();
+    expect(a).not.toBe(b);
+    await fs.writeFile(path.join(a, "CLAUDE.md"), "trust nobody");
+    expect(await fs.readdir(b)).toEqual([]);
+  });
+
+  it("hands back an empty directory", async () => {
+    expect(await fs.readdir(await createRunDir())).toEqual([]);
+  });
+
+  it("removes what the run left behind", async () => {
+    const dir = await createRunDir();
+    await fs.writeFile(path.join(dir, "hosts.yml"), "github.com: {}");
+    await removeRunDir(dir);
+    expect(await fs.readdir(dir).catch(() => "gone")).toBe("gone");
+  });
+
+  it("sweeps directories a crashed run left, but not today's", async () => {
+    const stale = path.join(home, "run", "run-stale");
+    await fs.mkdir(stale, { recursive: true });
+    const old = new Date(Date.now() - 48 * 60 * 60_000);
+    await fs.utimes(stale, old, old);
+    const fresh = await createRunDir();
+
+    await createRunDir();
+    expect(await fs.readdir(stale).catch(() => "gone")).toBe("gone");
+    expect(await fs.readdir(fresh)).toEqual([]);
+  });
+});

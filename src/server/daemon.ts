@@ -12,6 +12,10 @@ export interface DaemonOptions {
   intervalMs: number;
   parallel: number;
   model?: string;
+  /** False reviews the diff alone, with no local checkout. Defaults to on. */
+  withSource?: boolean;
+  /** Overrides the configured trust rules for every run; undefined defers to them. */
+  trust?: boolean;
   /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
@@ -93,6 +97,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         try {
           const result = await reviewPr(ref, {
             model: opts.model,
+            withSource: opts.withSource,
+            trust: opts.trust,
             onProgress: (m) => log(`[${label}] ${m}`),
           });
           if (result.skipped) skipped++;

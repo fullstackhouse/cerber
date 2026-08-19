@@ -72,6 +72,8 @@ export interface Artifact {
     finishedAt: string | null;
     costUsd: number | null;
     error: string | null;
+    withSource?: boolean;
+    trusted?: boolean;
   } | null;
   sent: {
     at: string;
@@ -120,4 +122,16 @@ export interface SendPreview {
   body: string;
   comments: { path: string; line: number; side: "RIGHT"; body: string }[];
   folded: ReviewComment[];
+}
+
+export interface TrustEntry {
+  /** The rule as written: "@acme/*", "@acme/devs", "@someone", "!@acme/devs". */
+  rule: string;
+  explanation: string;
+  denies: boolean;
+}
+
+export interface ConfigView {
+  path: string;
+  trust: TrustEntry[];
 }

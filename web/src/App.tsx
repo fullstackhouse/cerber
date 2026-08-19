@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Detail } from "./Detail";
 import { Queue } from "./Queue";
+import { Settings } from "./Settings";
 
-function parseHash(): { view: "queue" } | { view: "detail"; key: string } {
+function parseHash(): { view: "queue" } | { view: "settings" } | { view: "detail"; key: string } {
   const hash = window.location.hash;
   const m = hash.match(/^#\/r\/(.+)$/);
   if (m) return { view: "detail", key: decodeURIComponent(m[1]!) };
+  if (hash === "#/settings") return { view: "settings" };
   return { view: "queue" };
 }
 
@@ -25,8 +27,17 @@ export function App() {
           🐕 cerber
         </a>
         <span className="tagline">nothing reaches GitHub until you say so</span>
+        <a href="#/settings" className="topbar-link">
+          settings
+        </a>
       </header>
-      {route.view === "queue" ? <Queue /> : <Detail reviewKey={route.key} />}
+      {route.view === "queue" ? (
+        <Queue />
+      ) : route.view === "settings" ? (
+        <Settings />
+      ) : (
+        <Detail reviewKey={route.key} />
+      )}
     </div>
   );
 }

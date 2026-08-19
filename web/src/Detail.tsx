@@ -442,7 +442,7 @@ function FreshnessBanner({
           )}
           The summary and verdict still describe the commit that was reviewed.
           {!artifact.sent && (
-            <button className="rerun-btn" disabled={rerunning} onClick={onRerun}>
+            <button className="rerun-btn" disabled={rerunning} onClick={() => onRerun()}>
               {rerunning ? "starting…" : "Re-review at the new head"}
             </button>
           )}
@@ -498,10 +498,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   if (error) return <p className="error">{error}</p>;
   if (!artifact) return <p className="muted">Loading…</p>;
 
-  const onRerun = () => {
+  const onRerun = (withSource?: boolean) => {
     setRerunning(true);
     setError(null);
-    rerunReview(reviewKey)
+    rerunReview(reviewKey, withSource)
       .then(setArtifact)
       .catch((e) => {
         setError(String(e));
@@ -537,8 +537,30 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         {artifact.pr.author} · {artifact.pr.headRefName} → {artifact.pr.baseRefName} ·{" "}
         {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
         <span className="del">-{artifact.pr.deletions}</span>
-        {artifact.run?.costUsd != null && <> · review cost ${artifact.run.costUsd.toFixed(2)}</>} ·
-        status: <strong>{artifact.status}</strong>
+        {artifact.run?.costUsd != null && (
+          <span title="What this review would cost at API token rates. Riding a Claude subscription, it draws on your usage limits instead.">
+            {" "}
+            · ≈${artifact.run.costUsd.toFixed(2)} at API rates
+          </span>
+        )}{" "}
+        ·{" "}
+        {artifact.run?.trusted
+          ? "ran the code"
+          : artifact.run?.withSource
+            ? "read the full source"
+            : "read the diff only"}{" "}
+        · status:{" "}
+        <strong>{artifact.status}</strong>
+        {!readOnly && artifact.status !== "running" && !artifact.run?.withSource && (
+          <button
+            className="rerun-btn"
+            disabled={rerunning}
+            title="Re-review with a local checkout of the PR head, so the AI can read the code around the diff instead of hedging over context it cannot see."
+            onClick={() => onRerun(true)}
+          >
+            {rerunning ? "starting…" : "Re-review with full source"}
+          </button>
+        )}
       </p>
 
       {artifact.verdict && (

@@ -10,7 +10,9 @@ import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
+import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   listArtifacts,
@@ -29,9 +31,15 @@ export interface ServeOptions {
   /** When set, every request must present this token (Bearer header, ?token= query, or the cookie it sets). */
   token?: string;
   daemon?: DaemonHandle;
+  /** False makes cockpit re-reviews diff-only (`serve --no-source`). Defaults to on. */
+  withSource?: boolean;
+  /** False keeps cockpit re-reviews read-only whatever the trust config says. */
+  trust?: boolean;
 }
 
-export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Promise<Hono> {
+export async function buildApp(
+  opts: Pick<ServeOptions, "token" | "daemon" | "withSource" | "trust">,
+): Promise<Hono> {
   const app = new Hono();
 
   if (opts.token) {
@@ -54,6 +62,65 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
   app.get("/api/daemon", (c) =>
     c.json(opts.daemon ? opts.daemon.status() : { enabled: false }),
   );
+
+  // ---- Config: trust rules, edited from the cockpit's Settings view ----
+
+  const trustView = (lines: string[]) =>
+    lines.flatMap((line) => {
+      try {
+        const rule = parseTrustRule(line);
+        return rule ? [{ rule: describeRule(rule), explanation: explainRule(rule), denies: rule.negated }] : [];
+      } catch {
+        // loadConfig rejects these, so reaching here means the file changed
+        // under us; showing the rest beats failing the whole screen.
+        return [];
+      }
+    });
+
+  app.get("/api/config", async (c) => {
+    try {
+      const config = await loadConfig();
+      return c.json({ path: configPath(), trust: trustView(config.trust) });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.post("/api/config/trust", async (c) => {
+    let body: { rule?: unknown; remove?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "body must be JSON" }, 400);
+    }
+    const { rule, remove } = body;
+    if (typeof rule !== "string" || !rule.trim()) {
+      return c.json({ error: "rule is required" }, 400);
+    }
+    let parsed;
+    try {
+      parsed = parseTrustRule(rule);
+    } catch (err: unknown) {
+      // The message explains what to write instead — show it verbatim.
+      if (err instanceof TrustRuleError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    if (!parsed) return c.json({ error: `not a trust rule: ${rule}` }, 400);
+
+    const canonical = describeRule(parsed);
+    try {
+      const config = await loadConfig();
+      const without = config.trust.filter((line) => {
+        const existing = parseTrustRule(line);
+        return !existing || describeRule(existing) !== canonical;
+      });
+      const trust = remove === true ? without : [...without, canonical];
+      await saveConfig({ ...config, trust });
+      return c.json({ path: configPath(), trust: trustView(trust) });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();
@@ -217,16 +284,33 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
     }
 
     const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+    // Source-backed unless the server was started with --no-source; ?source=1
+    // overrides that per re-review, ?source=0 opts one out.
+    const sourceParam = c.req.query("source");
+    const withSource = sourceParam == null ? opts.withSource : sourceParam !== "0";
     // Mark it running before responding, so the cockpit's next poll can't catch
     // the old "ready" status and conclude the run already finished.
     const running = await updateArtifactByKey(key, (a) => ({
       ...a,
       status: "running" as const,
-      run: { model: null, startedAt: new Date().toISOString(), finishedAt: null, costUsd: null, error: null },
+      run: {
+        model: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        costUsd: null,
+        error: null,
+        withSource: withSource !== false,
+        trusted: false,
+      },
     }));
 
     // Minutes-long: run it detached and let the cockpit poll the artifact.
-    void reviewPr(ref, { force: true, onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`) })
+    void reviewPr(ref, {
+      force: true,
+      withSource,
+      trust: opts.trust,
+      onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`),
+    })
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[rerun ${artifact.id}] failed: ${message}`);

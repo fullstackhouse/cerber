@@ -44,9 +44,136 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
   human's time
 - **Verdict** — approve / comment / request changes, with a 0–100 confidence
   score and reasoning
+- **Run metadata** — model, whether it read the source or only the diff, and
+  the token spend as an API-rate equivalent
 
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
+
+### It reviews the code, not just the diff
+
+Cerber checks the PR's head out locally and lets the review read it. That
+matters because a reviewer holding only a diff hedges over things it could have
+just looked up — *"I can't see the enclosing function, so this could be
+wrong"* — and burns its confidence score on missing context instead of on real
+uncertainty. With the source there, it opens the enclosing function, follows
+callers of a changed signature, checks whether a helper already exists, and
+sees whether a test covers the new path.
+
+On one real PR, same commit, the difference was: a speculative "this *looks
+like* it sits after an early return" became a concrete finding; a permission
+check the diff showed as a tidy gate turned out to hide a value the API
+response still ships; confidence went 72% → 82%. It burned 3.3× the tokens and
+took three minutes instead of one.
+
+Cerber rides your `claude` login, so a review isn't billed per run: on a Claude
+subscription it draws on your usage limits. The `≈$` figures in the CLI and
+cockpit are what those tokens would cost at API token rates — read them as
+"how much of the plan did this eat", not as an invoice.
+
+If you want the old behaviour — faster, lighter, blind past the changed lines:
+
+```bash
+cerber review owner/repo#123 --no-source
+cerber serve --daemon --no-source
+```
+
+The cockpit labels every review "read the full source" or "read the diff only",
+and offers a one-click **Re-review with full source** on the diff-only ones.
+
+Details worth knowing:
+
+- The checkout is a shallow (`--depth=1`) fetch of `refs/pull/N/head` from the
+  base repo, so fork PRs work with no extra remotes. Auth rides `gh`'s
+  credential helper, set on that clone only — your git config is untouched.
+- If git or `gh` can't produce a checkout, the run says so and reviews the diff
+  alone. A missing checkout never fails a review.
+- The run is read-only unless you have trusted the PR (see below): `Read`,
+  `Grep` and `Glob` are the only tools it gets. Without a checkout it gets none,
+  and runs in an empty directory, so it can never read whatever project cerber
+  happens to be started from and mistake it for the PR.
+- PR content is untrusted, and `claude -p` skips the workspace-trust prompt, so
+  cerber does the distrusting itself: a `.claude/settings.json` or `.mcp.json`
+  in the checkout is renamed aside (still readable, no longer loaded), hooks
+  and non-cerber MCP servers are off, and the prompt tells the reviewer that
+  instructions found in files are material to review, not directions to follow.
+  What a hostile PR can still do is skew the review text — it cannot run
+  anything, write anything, or reach the network. Read the verdict, don't
+  rubber-stamp it. (All of this applies to PRs you have *not* trusted; a
+  trusted one is deliberately given the run of the place.)
+- Checkouts live in `~/.cerber/src/<owner>__<repo>__<n>` and are reused by later
+  re-reviews. A big monorepo is a few hundred MB per PR, so the cache keeps only
+  the 8 most recently reviewed and evicts the rest as it goes — never one a
+  review is currently reading. `cerber prune` reclaims the space now;
+  `cerber prune --all` takes the ones for reviews still awaiting you too.
+
+### Trusted PRs: reviews that can run things
+
+Reading beats guessing, but running beats reading. A review that ran the test
+covering the change reports what happened; one that only read it guesses. So
+for PRs you already trust — a teammate's, or anything in your own repos —
+cerber can let the review run commands in the checkout: the test suite, a
+typecheck, `git log`/`git blame`, a build.
+
+Trust is about the *people*, and only about people — cerber has no way to
+trust a repository, because anyone can open a PR against one:
+
+```bash
+cerber trust @fullstackhouse/*      # anyone in the org
+cerber trust @fullstackhouse/devs   # anyone on that GitHub team
+cerber trust @teammate              # one person, by login
+cerber trust                        # show who is trusted today
+```
+
+Membership is resolved against GitHub when the review runs (your `gh` login
+needs `read:org`), and a lookup that fails counts as "not a member" — a check
+cerber could not complete never reads as trust. Writing a repo instead of a
+person is rejected, in the CLI, the cockpit, and on config load:
+
+```
+$ cerber trust acme/widgets
+"acme/widgets" is not a trust rule. Trust is about people, not repositories —
+anyone can open a PR against a repo you own, so trusting the repo would trust
+them too. Use @acme/* for everyone in that org, @acme/team for one team, or
+@login for a person.
+```
+
+Rules live in `~/.cerber/config.json`, and the cockpit has a **settings**
+screen that reads and writes the same file — each rule shown with what it
+actually grants. A `!` rule denies and beats every grant, so `@fullstackhouse/*`
+plus `!@fullstackhouse/contractors` does what it looks like. `--trust` and
+`--no-trust` override the config for one run; `cerber trust <pattern> --delete`
+removes a rule.
+
+A trusted review gets `Bash`, `WebFetch` and `WebSearch` on top of reading, and
+the repo's own `.claude` config applies — it behaves as if you had checked the
+branch out and opened it yourself. The cockpit labels it "ran the code" so you
+know which kind you are reading.
+
+It is handed no GitHub credentials, and that part is *enforced* rather than
+requested. `GH_CONFIG_DIR` points at a fresh empty directory, `GH_TOKEN` and
+`GITHUB_TOKEN` are blanked, the fetch credential rides the fetch command
+instead of being stored in the checkout, git's global and system config are
+switched off so a keychain helper cannot stand in, and the ssh route is closed
+too — no agent, no `~/.ssh/config`, no default identity — since otherwise a run
+could point the remote at `git@github.com` and ride your keys. Measured from
+inside a checkout: `git push` over https and over ssh, and `gh pr comment`, all
+fail to authenticate, while `git log` still works.
+
+**It is not a sandbox, and you should not read it as one.** A trusted run has
+`Bash` and your filesystem: it can write files in the checkout, and a
+determined one could read a key straight out of `~/.ssh` and use it itself.
+What cerber guarantees is that it *hands* the run nothing. The rest is what
+trusting a person means — which is why trust is spelled `@org/team`, and why
+the default is a review that cannot run anything at all.
+
+**What you are accepting.** A trusted review executes code from that PR on your
+machine — the branch's scripts, its dependencies, its test suite. That is the
+same exposure as checking the branch out and running the tests yourself, which
+is what you would otherwise do; it is not the same as reading a diff. Trust
+orgs and people, not the whole of GitHub. And note the daemon reviews
+unattended: with trust rules set, `cerber serve --daemon` will run matching PRs'
+code with nobody watching. It warns at startup, and `--no-trust` turns it off.
 
 ### When the PR moves under you
 

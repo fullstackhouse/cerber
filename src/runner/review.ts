@@ -3,14 +3,18 @@ import {
   AiReview,
   AiReviewSchema,
   Artifact,
+  PrInfo,
   SCHEMA_VERSION,
   artifactId,
 } from "../core/artifact.js";
-import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
+import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
+import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
-import { extractJson, runClaude } from "./claude.js";
-import { ReviewInProgressError, beginReview, endReview } from "./inflight.js";
+import { loadConfig } from "../core/config.js";
+import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
+import { extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
 export interface ReviewOptions {
@@ -18,7 +22,26 @@ export interface ReviewOptions {
   onProgress?: (message: string) => void;
   /** Re-review even if a fresh artifact for the same head SHA exists. */
   force?: boolean;
+  /**
+   * Check the PR head out locally and let the reviewer read it — on by
+   * default, because a reviewer that can only see the diff hedges over context
+   * it could have just looked up. Set false to review the diff alone: faster
+   * and cheaper, at the cost of everything outside the changed lines.
+   */
+  withSource?: boolean;
+  /**
+   * Override the configured trust rules for this run: true lets the review run
+   * commands in the checkout, false keeps it read-only.
+   */
+  trust?: boolean;
 }
+
+/** All an untrusted reviewer needs from a checkout — everything else stays off. */
+const READ_TOOLS = ["Read", "Grep", "Glob"];
+const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
+/** A trusted reviewer may run things. It still may not rewrite the PR. */
+const TRUSTED_TOOLS = [...READ_TOOLS, "Bash", "WebFetch", "WebSearch"];
+const TRUSTED_OFF_TOOLS = ["Edit", "Write", "NotebookEdit"];
 
 export interface ReviewResult {
   artifact: Artifact;
@@ -40,6 +63,45 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
   } finally {
     endReview(artifactId(ref));
   }
+}
+
+/**
+ * Trust is a claim about the people behind a PR, so it comes from the user:
+ * the rules in their config, or an explicit flag on this run. Nothing about
+ * the PR's own content can earn it.
+ */
+async function resolveTrust(
+  pr: PrInfo,
+  opts: ReviewOptions,
+  log: (message: string) => void,
+): Promise<boolean> {
+  if (opts.trust !== undefined) {
+    log(opts.trust ? "Trusted by --trust: the review may run commands." : "Untrusted by --no-trust.");
+    return opts.trust;
+  }
+  const rules = parseTrustRules((await loadConfig()).trust);
+  if (rules.length === 0) return false;
+
+  // A membership check that errors (no read:org scope, GitHub down) must read
+  // as "not a member" — never as trust we could not actually confirm.
+  const memberships = new Set<string>();
+  for (const query of membershipQueries(rules)) {
+    try {
+      const member = query.team
+        ? await isTeamMember(query.org, query.team, pr.author)
+        : await isOrgMember(query.org, pr.author);
+      if (member) memberships.add(query.key);
+    } catch (err: unknown) {
+      log(
+        `Could not check whether @${pr.author} is in ${query.key} ` +
+          `(${err instanceof Error ? err.message : err}) — treating as not a member.`,
+      );
+    }
+  }
+
+  const decision = decideTrust(rules, { author: pr.author, memberships });
+  if (decision.trusted) log(`Trusted (${decision.reason}): the review may run commands in the checkout.`);
+  return decision.trusted;
 }
 
 async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult> {
@@ -64,6 +126,31 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
 
   const diff = await fetchPrDiff(ref);
 
+  const trusted = await resolveTrust(pr, opts, log);
+
+  // A checkout is an optimisation, never a precondition: if git or gh can't
+  // produce one, fall back to the diff-only review rather than failing the run.
+  let source: string | null = null;
+  if (opts.withSource !== false) {
+    try {
+      const checkout = await prepareCheckout(ref, { log, trusted });
+      source = checkout.dir;
+      const evicted = await evictOldCheckouts({ inUse: isReviewRunning });
+      if (evicted.length > 0) log(`Evicted ${evicted.length} least-recently-used checkout(s) from the cache.`);
+      if (pr.headSha && checkout.sha !== pr.headSha) {
+        log(
+          `Note: the checkout is at ${checkout.sha.slice(0, 7)} but the PR head is ${pr.headSha.slice(0, 7)} — ` +
+            `the PR moved while we fetched.`,
+        );
+      }
+    } catch (err: unknown) {
+      log(
+        `Could not check out the source (${err instanceof Error ? err.message : err}) — ` +
+          `reviewing from the diff alone.`,
+      );
+    }
+  }
+
   let artifact: Artifact = {
     schemaVersion: SCHEMA_VERSION,
     id: artifactId(pr),
@@ -76,19 +163,31 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     chapters: [],
     comments: [],
     verdict: null,
-    run: { model: opts.model ?? null, startedAt: now(), finishedAt: null, costUsd: null, error: null },
+    run: {
+      model: opts.model ?? null,
+      startedAt: now(),
+      finishedAt: null,
+      costUsd: null,
+      error: null,
+      withSource: source !== null,
+      trusted: trusted && source !== null,
+    },
     sent: null,
     refresh: null,
     calibration: null,
   };
   await saveArtifact(artifact);
 
-  const { prompt, truncated } = buildReviewPrompt(pr, diff);
+  const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null, trusted });
   if (truncated) log("Warning: diff exceeds the context budget and was truncated.");
-  log(`Reviewing with Claude${opts.model ? ` (${opts.model})` : ""}… this can take a few minutes.`);
+  log(
+    `Reviewing with Claude${opts.model ? ` (${opts.model})` : ""}` +
+      `${source ? (trusted ? ", reading and running the full source" : ", reading the full source") : ""}` +
+      `… this can take a few minutes.`,
+  );
 
   try {
-    const review = await runAiReview(prompt, opts);
+    const review = await runAiReview(prompt, opts, source, trusted);
     // The prompt demands each file in exactly one chapter, but models drift:
     // keep a file only in the first chapter that claims it.
     const seen = new Set<string>();
@@ -122,6 +221,8 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         finishedAt: now(),
         costUsd: review.costUsd,
         error: null,
+        withSource: source !== null,
+        trusted: trusted && source !== null,
       },
     };
 
@@ -177,19 +278,46 @@ export async function pool<T, R>(
 async function runAiReview(
   prompt: string,
   opts: ReviewOptions,
+  source: string | null,
+  trusted: boolean,
 ): Promise<{ ai: AiReview; costUsd: number | null; model: string | null }> {
-  const first = await runClaude(prompt, { model: opts.model });
+  // This run's own empty directory: the cwd when there is no checkout (so no
+  // unrelated project's CLAUDE.md rides along) and the throwaway GH_CONFIG_DIR
+  // either way. A run has no business authenticating to GitHub, and a trusted
+  // one has Bash to try it with. Without a checkout, every tool stays off too.
+  const empty = await createRunDir();
+  const claudeOpts = {
+    model: opts.model,
+    cwd: source ?? empty,
+    env: unauthenticatedEnv(process.env, empty),
+    allowedTools: source ? (trusted ? TRUSTED_TOOLS : READ_TOOLS) : undefined,
+    disallowedTools: source
+      ? trusted
+        ? TRUSTED_OFF_TOOLS
+        : OFF_TOOLS
+      : [...OFF_TOOLS, ...READ_TOOLS],
+    // A trusted checkout gets to configure its own run, the way it would if
+    // the user had opened the repo themselves.
+    isolateWorkspace: !(source && trusted),
+  };
   try {
-    return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    opts.onProgress?.("Model output failed validation — retrying once…");
-    const second = await runClaude(buildRetryPrompt(prompt, first.text, message), { model: opts.model });
-    const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
-    return {
-      ai: AiReviewSchema.parse(extractJson(second.text)),
-      costUsd: cost > 0 ? cost : null,
-      model: second.model,
-    };
+    const first = await runClaude(prompt, claudeOpts);
+    try {
+      return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      opts.onProgress?.("Model output failed validation — retrying once…");
+      const second = await runClaude(buildRetryPrompt(prompt, first.text, message), claudeOpts);
+      const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
+      return {
+        ai: AiReviewSchema.parse(extractJson(second.text)),
+        costUsd: cost > 0 ? cost : null,
+        model: second.model,
+      };
+    }
+  } finally {
+    // Whatever the run left in there — a gh config, anything Bash wrote — dies
+    // with the run instead of greeting the next one.
+    await removeRunDir(empty);
   }
 }

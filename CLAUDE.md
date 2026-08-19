@@ -13,10 +13,17 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
   gh client (shells out to `gh`, no tokens handled), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
-  matching each comment's line *text*, never a fuzzy guess)
+  matching each comment's line *text*, never a fuzzy guess), source checkouts
+  (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
+  an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
+  trust rules (`trust.ts` — `@login`, `@org/team`, `@org/*`; people only, no
+  way to trust a repo; denials win) and settings
+  (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
+  the cockpit's settings screen)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
-  retry once on bad JSON)
+  retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
+  only; `--no-source` reviews the diff alone, with every tool off and an empty cwd
 - `src/server/` — Hono API + static cockpit serving
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`
@@ -34,9 +41,28 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 ## Don'ts
 
 - Don't add GitHub write calls anywhere except the (future) explicit send path
-- Don't add a database or config wizard — plain files, zero config
+- Don't add a database or config wizard — plain files, zero config. Settings
+  are one JSON file with a zod schema and sane defaults; absent must keep
+  working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
 - Don't let a re-review discard human work: comments the user wrote or edited
   are carried across (`carryOverComments`), never regenerated away
 - Don't start an AI run without claiming `runner/inflight` — the daemon's timer
   and the cockpit's button both write the same artifact file
+- Don't give the review run a tool it doesn't need. The default run reads and
+  nothing else, and treats everything in the checkout as untrusted PR content
+  rather than instructions. Only a PR the user trusted (`config.json`, `--trust`)
+  gets Bash — and never Edit/Write: a review reads and runs, it doesn't fix
+- Don't let a run hold GitHub credentials. Bash plus a stored credential would
+  make "nothing reaches GitHub without a Send" a request rather than a fact:
+  the fetch credential is per-command, and the run's env blanks the tokens,
+  disables git's global *and* system config (`GIT_CONFIG_NOSYSTEM`), and closes
+  ssh (no agent, no default identity). It is not a sandbox — say so rather than
+  implying one
+- Don't let anything but the user grant trust. Not the PR, not its author's
+  association, not a heuristic — trust is a claim about people, stated up front
+- Don't let a repo stand in for the people who can open PRs against it. A repo
+  takes PRs from anyone, so cerber refuses repo-shaped trust rules outright
+  rather than qualifying them; a failed membership lookup means "not a member"
+- Don't make the checkout a precondition — it's on by default, but if git or
+  `gh` can't produce one, log it and review the diff alone
