@@ -81,9 +81,10 @@ export function Settings() {
       <h1>Notifications</h1>
       <p>
         The cockpit spends its day as a background tab, so it tells you when a PR lands in the
-        queue: one desktop notification per poll, naming the PR — click it to open the review.
-        Nothing is announced while you're looking straight at the cockpit, and reviews you've
-        already seen never arrive twice.
+        queue: one desktop notification per poll. A single arrival names the PR and opens that
+        review when you click it; several landing at once fold into one notification that opens
+        the queue. Nothing is announced while you're looking straight at the cockpit, and a PR
+        this browser has already seen never arrives twice.
       </p>
       <label className="inbox-toggle">
         <input
