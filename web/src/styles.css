@@ -555,3 +555,12 @@ button:hover {
 .diff .d2h-file-header {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
+
+/* Syntax colouring: keep the hljs token colours, drop its block styling — the
+   row already owns its add/delete background. */
+.diff .hljs {
+  display: inline;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
