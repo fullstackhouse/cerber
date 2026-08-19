@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
 import {
   AiChatTurnSchema,
   Artifact,
@@ -6,7 +7,8 @@ import {
   Refusal,
   Revision,
 } from "../core/artifact.js";
-import { createRunDir, removeRunDir } from "../core/checkout.js";
+import { createRunDir, prepareCheckout, removeRunDir, sourceDir } from "../core/checkout.js";
+import { PrRef } from "../core/gh.js";
 import { applyRevisions, snapshotReview } from "../core/revise.js";
 import { extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 import { beginReview, endReview } from "./inflight.js";
@@ -32,12 +34,83 @@ const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", 
 const TRUSTED_TOOLS = [...READ_TOOLS, "Bash", "WebFetch", "WebSearch"];
 const TRUSTED_OFF_TOOLS = ["Edit", "Write", "NotebookEdit"];
 
+export interface ChatSource {
+  /** The readable checkout, or null when we could not produce one. */
+  dir: string | null;
+  /** What the checkout is at, when we have one. */
+  sha: string | null;
+  /** True when this turn had to re-clone an evicted checkout. */
+  recloned: boolean;
+}
+
+/**
+ * Put the reviewed source back under the chat turn, or say plainly that we
+ * could not.
+ *
+ * The checkout cache is small and evicts by least-recent use, so by the time
+ * someone argues with a review its source is often already gone. That matters
+ * more here than anywhere else: the turn resumes a session whose transcript
+ * still describes files it read, and Claude sessions are keyed by working
+ * directory. Resuming into a deleted one leaves a model that believes it can
+ * open the file and will otherwise describe it from memory.
+ *
+ * `prepareCheckout` is idempotent and restores the same deterministic path, so
+ * re-cloning is enough to make resume whole again. It also touches the
+ * directory, which is what keeps a checkout alive through a long conversation:
+ * eviction is by mtime, so every turn renews it.
+ */
+export async function ensureChatSource(
+  artifact: Artifact,
+  opts: { log?: (message: string) => void; prepare?: typeof prepareCheckout } = {},
+): Promise<ChatSource> {
+  const log = opts.log ?? (() => {});
+  const prepare = opts.prepare ?? prepareCheckout;
+  // A review that never had a checkout has nothing to restore, and re-cloning
+  // now would give the conversation context the review itself never had.
+  if (!artifact.run?.withSource) return { dir: null, sha: null, recloned: false };
+
+  const ref: PrRef = {
+    owner: artifact.pr.owner,
+    repo: artifact.pr.repo,
+    number: artifact.pr.number,
+  };
+  const existed = await isCheckedOut(sourceDir(ref));
+  try {
+    // The same trust the review ran under: a checkout prepared as trusted keeps
+    // the PR's own CLAUDE.md in place, and re-preparing with the wrong flag
+    // would either un-quarantine it or quarantine what the review could read.
+    const checkout = await prepare(ref, { log, trusted: artifact.run.trusted });
+    if (!existed) log("The checkout had been evicted — re-cloned it so this turn can read the code.");
+    return { dir: checkout.dir, sha: checkout.sha, recloned: !existed };
+  } catch (err: unknown) {
+    log(
+      `Could not restore the source (${err instanceof Error ? err.message : err}) — ` +
+        `this turn works from the review, the diff and the conversation alone.`,
+    );
+    return { dir: null, sha: null, recloned: false };
+  }
+}
+
+async function isCheckedOut(dir: string): Promise<boolean> {
+  return fs
+    .stat(dir)
+    .then((s) => s.isDirectory())
+    .catch(() => false);
+}
+
 export interface ChatTurnOptions {
   model?: string;
   /** What the user pointed at with "discuss this". */
   refs?: ChatTurn["refs"];
-  /** Path to the readable checkout, or null when there is none. */
+  /**
+   * Path to the readable checkout. Omit to let the turn restore it itself —
+   * which is what the cockpit does, since the cache will usually have evicted
+   * it by the time anyone argues with the review. Pass null to force a turn
+   * that reads nothing.
+   */
   source?: string | null;
+  /** The commit the checkout is at, when the caller supplied one. */
+  sourceSha?: string | null;
   /** The user vouched for this PR, so the turn may also run commands. */
   trusted?: boolean;
   /** Let this turn rewrite comments the user wrote — only on their say-so. */
@@ -82,8 +155,24 @@ async function turn(
   const newId = opts.newId ?? randomUUID;
   const run = opts.run ?? runClaude;
   const log = opts.onProgress ?? (() => {});
-  const source = opts.source ?? null;
-  const trusted = Boolean(opts.trusted) && source !== null;
+
+  // Restore the checkout unless the caller already resolved one (or asked for
+  // none). Doing it here, rather than making the cockpit remember, is what
+  // stops "the cache evicted it" from silently degrading every later turn.
+  const resolved =
+    opts.source === undefined
+      ? await ensureChatSource(artifact, { log })
+      : { dir: opts.source, sha: opts.sourceSha ?? null, recloned: false };
+  const source = resolved.dir;
+  const trusted = (opts.trusted ?? artifact.run?.trusted ?? false) && source !== null;
+
+  // A re-cloned checkout follows the PR, not the review: if the author pushed
+  // since, the files under the model are newer than the draft it is defending.
+  const moved =
+    source !== null && resolved.sha !== null && artifact.pr.headSha !== "" && resolved.sha !== artifact.pr.headSha
+      ? `Note: the review was written against ${artifact.pr.headSha.slice(0, 7)}, but the checkout is now at ${resolved.sha.slice(0, 7)} — the author has pushed since. Code you read may not be the code the review is about; say so when it matters.`
+      : undefined;
+  if (moved) log(moved);
 
   // The session is only worth resuming into the directory it was created in.
   // Without the checkout the transcript survives but Read and Grep do not, and
@@ -99,6 +188,7 @@ async function turn(
     source: source !== null,
     trusted,
     resumed: Boolean(resumeSessionId),
+    sourceNote: moved,
   });
 
   const empty = await createRunDir();

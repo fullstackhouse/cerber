@@ -124,6 +124,12 @@ export interface ChatPromptOptions {
    * diff again, and the model is told it is arriving cold.
    */
   resumed?: boolean;
+  /**
+   * Something about the source the model would otherwise assume away — most
+   * often that the checkout has moved past the commit the review was written
+   * against.
+   */
+  sourceNote?: string;
 }
 
 /** Human names for what the user pointed at, so the model can find it. */
@@ -207,8 +213,9 @@ export function buildChatPrompt(
     ? `\n## Diff\n\n\`\`\`diff\n${truncated ? artifact.diff.slice(0, MAX_DIFF_CHARS) + "\n[... diff truncated ...]" : artifact.diff}\n\`\`\`\n`
     : "";
 
+  const note = opts.sourceNote ? `\n${opts.sourceNote}\n` : "";
   const sourceSection = opts.source
-    ? (opts.trusted ? TRUSTED_SECTION : SOURCE_SECTION) + "\n"
+    ? (opts.trusted ? TRUSTED_SECTION : SOURCE_SECTION) + note + "\n"
     : `## No source checkout
 
 The repository is NOT available to you. Every tool is off. Answer from the diff, the review, and this conversation — and when the honest answer is "I would have to look at the file to be sure", say that rather than describing code you cannot open.

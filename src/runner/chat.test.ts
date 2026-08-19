@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Artifact, Comment, SCHEMA_VERSION } from "../core/artifact.js";
 import { isReviewRunning } from "./inflight.js";
 import { ClaudeOptions, ClaudeResult } from "./claude.js";
-import { runChatTurn } from "./chat.js";
+import { ensureChatSource, runChatTurn } from "./chat.js";
 import { buildChatPrompt } from "./prompt.js";
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -176,6 +179,76 @@ describe("buildChatPrompt", () => {
   });
 });
 
+describe("ensureChatSource", () => {
+  let home: string;
+  const original = process.env.CERBER_HOME;
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-chat-"));
+    process.env.CERBER_HOME = home;
+  });
+  afterEach(async () => {
+    if (original === undefined) delete process.env.CERBER_HOME;
+    else process.env.CERBER_HOME = original;
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  const checkoutDir = () => path.join(home, "src", "acme__widgets__42");
+
+  /** Stands in for prepareCheckout: records the call, creates the directory. */
+  function fakePrepare(sha = "abc") {
+    const calls: { trusted?: boolean }[] = [];
+    const prepare = async (_ref: unknown, o: { trusted?: boolean } = {}) => {
+      calls.push({ trusted: o.trusted });
+      await fs.mkdir(checkoutDir(), { recursive: true });
+      return { dir: checkoutDir(), sha };
+    };
+    return { calls, prepare: prepare as never };
+  }
+
+  it("reads nothing for a review that never had a checkout", async () => {
+    const a = artifact({ run: { ...artifact().run!, withSource: false } });
+    const { prepare, calls } = fakePrepare();
+    expect(await ensureChatSource(a, { prepare })).toEqual({ dir: null, sha: null, recloned: false });
+    // Cloning now would hand the conversation context the review itself never had.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("re-clones a checkout the cache has evicted", async () => {
+    const logs: string[] = [];
+    const { prepare } = fakePrepare();
+    const result = await ensureChatSource(artifact(), { prepare, log: (m) => logs.push(m) });
+    expect(result).toMatchObject({ dir: checkoutDir(), recloned: true });
+    expect(logs.join(" ")).toContain("had been evicted");
+  });
+
+  it("reuses a checkout that is still on disk", async () => {
+    await fs.mkdir(checkoutDir(), { recursive: true });
+    const { prepare } = fakePrepare();
+    expect(await ensureChatSource(artifact(), { prepare })).toMatchObject({ recloned: false });
+  });
+
+  it("prepares under the same trust the review ran with", async () => {
+    // Re-preparing with the wrong flag would un-quarantine the PR's own
+    // CLAUDE.md, or quarantine what a trusted review was allowed to read.
+    const { prepare, calls } = fakePrepare();
+    const a = artifact({ run: { ...artifact().run!, trusted: true } });
+    await ensureChatSource(a, { prepare });
+    expect(calls[0]!.trusted).toBe(true);
+  });
+
+  it("degrades to no source rather than failing the turn", async () => {
+    const logs: string[] = [];
+    const prepare = (async () => {
+      throw new Error("network down");
+    }) as never;
+    const result = await ensureChatSource(artifact(), { prepare, log: (m) => logs.push(m) });
+    expect(result.dir).toBeNull();
+    expect(logs.join(" ")).toContain("Could not restore the source");
+    expect(logs.join(" ")).toContain("network down");
+  });
+});
+
 describe("runChatTurn", () => {
   const ok = JSON.stringify({ reply: "Fair — rewritten.", revisions: [{ kind: "summary", body: "Now mine." }] });
 
@@ -338,6 +411,38 @@ describe("runChatTurn", () => {
     await expect(runChatTurn(a, "two", { source: "/tmp/src", run })).rejects.toThrow(/already running/);
     release!();
     await first;
+  });
+
+  it("warns the model when the checkout has moved past the reviewed commit", async () => {
+    const { run, calls } = fakeClaude(ok);
+    await runChatTurn(artifact(), "hm", {
+      source: "/tmp/src",
+      sourceSha: "def5678",
+      run,
+      now: clock,
+      newId: ids(),
+    });
+    expect(calls[0]!.prompt).toContain("the author has pushed since");
+    expect(calls[0]!.prompt).toContain("may not be the code the review is about");
+  });
+
+  it("says nothing about drift when the checkout matches the review", async () => {
+    const { run, calls } = fakeClaude(ok);
+    await runChatTurn(artifact(), "hm", {
+      source: "/tmp/src",
+      sourceSha: "abc",
+      run,
+      now: clock,
+      newId: ids(),
+    });
+    expect(calls[0]!.prompt).not.toContain("has pushed since");
+  });
+
+  it("inherits the review's trust rather than making its own decision", async () => {
+    const { run, calls } = fakeClaude(ok);
+    const a = artifact({ run: { ...artifact().run!, trusted: true } });
+    await runChatTurn(a, "hm", { source: "/tmp/src", run, now: clock, newId: ids() });
+    expect(calls[0]!.opts.allowedTools).toContain("Bash");
   });
 
   it("keeps the new session id so the next turn continues this conversation", async () => {
