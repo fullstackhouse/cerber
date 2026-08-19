@@ -143,10 +143,10 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 6: The cockpit
 
-- [ ] 6.1 Chat panel and api client
-- [ ] 6.2 Discuss-this on summary, chapter and comment
-- [ ] 6.3 Revision markers and the reset control
+- [x] 6.1 Chat panel and api client — a4fff08
+- [x] 6.2 Discuss-this on summary, chapter and comment — a4fff08
+- [x] 6.3 Revision markers and the reset control — a4fff08
 
 ### Phase 7: Docs
 
-- [ ] 7.1 README and CLAUDE.md architecture note
+- [x] 7.1 README and CLAUDE.md architecture note — a4fff08
