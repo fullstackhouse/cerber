@@ -83,9 +83,12 @@ function Row({
   onOpen: () => void;
 }) {
   const v = verdictCell(r);
+  // Settled locally: still in the queue (the PR is open and you may come back),
+  // but you have had your say — the row says so rather than reading as unread.
+  const settled = r.status === "reviewed" || r.status === "skipped";
   return (
     <div
-      className={`row${selected ? " row-on" : ""}`}
+      className={`row${selected ? " row-on" : ""}${settled ? " row-done" : ""}`}
       // Clicking a row opens it. The strip explains whatever the pointer is
       // over on the way there, so reading a row costs nothing either.
       onClick={onOpen}
@@ -106,7 +109,7 @@ function Row({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      {settled && <span className="tag tag-done">{r.status}</span>}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -119,6 +122,7 @@ function Row({
         )}
       </span>
       <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
+      <span className="col-age">{ageLabel(r.updatedAt)}</span>
     </div>
   );
 }
@@ -137,10 +141,10 @@ function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
       <span className="col-verdict">{verdict}</span>
+      <span className="col-age">{ageLabel(r.updatedAt)}</span>
     </div>
   );
 }
@@ -337,10 +341,10 @@ export function Queue() {
             <span className="col-slug">repo#pr</span>
             <span className="col-author">author</span>
             <span className="col-title">title</span>
-            <span className="col-age">upd</span>
             <span className="col-comments">c</span>
             <span className="col-size">size</span>
             <span className="col-verdict">verdict</span>
+            <span className="col-age">upd</span>
           </div>
 
           {rows.length === 0 ? (

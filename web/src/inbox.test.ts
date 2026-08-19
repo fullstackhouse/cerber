@@ -175,6 +175,12 @@ describe("strip", () => {
     expect(s.meta.some((m) => m.includes("auto-send"))).toBe(false);
   });
 
+  it("says what you already did with a row you settled", () => {
+    expect(strip(row({ status: "reviewed" }), daemon()).meta[0]).toBe("you marked this reviewed");
+    expect(strip(row({ status: "skipped" }), daemon()).meta[0]).toBe("you skipped this");
+    expect(strip(row(), daemon()).meta.some((m) => m.startsWith("you "))).toBe(false);
+  });
+
   it("surfaces the failure on a run that died", () => {
     const s = strip(row({ status: "failed", runError: "gh: not authenticated" }), daemon());
     expect(s.reasoning).toBe("gh: not authenticated");

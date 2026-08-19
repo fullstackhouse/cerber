@@ -140,6 +140,9 @@ export function strip(
   }
 
   const meta = [readMode(r)];
+  // What you did with it, when that isn't "nothing yet".
+  if (r.status === "reviewed") meta.unshift("you marked this reviewed");
+  if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
   meta.push(commentsPart(r));
   // Auto-send is approve-only, so the bar is only news on an approve verdict.
