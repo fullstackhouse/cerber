@@ -138,8 +138,8 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 5: Server endpoints
 
-- [ ] 5.1 POST chat and POST chat/reset
-- [ ] 5.2 Endpoint tests including the sent-review refusal
+- [x] 5.1 POST chat and POST chat/reset — 4f77ca2
+- [x] 5.2 Endpoint tests including the sent-review refusal — 4f77ca2
 
 ### Phase 6: The cockpit
 
