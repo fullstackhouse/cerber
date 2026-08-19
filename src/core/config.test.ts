@@ -19,8 +19,16 @@ describe("config", () => {
     await fs.rm(home, { recursive: true, force: true });
   });
 
-  it("trusts nobody when there is no config at all", async () => {
-    expect(await loadConfig()).toEqual({ trust: [] });
+  const DEFAULT_DAEMON = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 3, repos: [] };
+
+  it("trusts nobody and runs the full inbox when there is no config at all", async () => {
+    expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON });
+  });
+
+  it("keeps an inbox knob a hand-edit flipped, defaulting the rest", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"autoReview": false}}');
+    expect((await loadConfig()).daemon).toEqual({ ...DEFAULT_DAEMON, autoReview: false });
   });
 
   it("round-trips what the cockpit writes", async () => {
@@ -31,7 +39,10 @@ describe("config", () => {
   it("writes JSON a human can still read and edit", async () => {
     await saveConfig({ trust: ["@acme/*"] });
     const raw = await fs.readFile(configPath(), "utf8");
-    expect(raw).toBe('{\n  "trust": [\n    "@acme/*"\n  ]\n}\n');
+    expect(JSON.parse(raw)).toEqual({ trust: ["@acme/*"], daemon: DEFAULT_DAEMON });
+    // Pretty-printed, trailing newline — the file stays diffable and editable.
+    expect(raw).toMatch(/^\{\n {2}"trust": \[\n {4}"@acme\/\*"\n {2}\],\n/);
+    expect(raw.endsWith("\n")).toBe(true);
   });
 
   it("rejects a repo-shaped rule on the way in, with the fix in the message", async () => {

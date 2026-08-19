@@ -28,9 +28,17 @@ npx @fullstackhouse/cerber review 123 124 --repo owner/repo
 # See what's in the queue
 npx @fullstackhouse/cerber list
 
-# Open the cockpit
+# Open the cockpit — it's an inbox: it polls GitHub for PRs awaiting your
+# review and drafts a review for each, so they're ready when you arrive
 npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 ```
+
+`serve` does the whole loop by default: discover → draft → wait for you.
+Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
+PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
+same two switches in the cockpit's Settings, which persist in
+`~/.cerber/config.json` and apply on the next poll. Merged and closed PRs are
+archived out of the queue automatically.
 
 ## What a review looks like
 
@@ -75,7 +83,7 @@ If you want the old behaviour — faster, lighter, blind past the changed lines:
 
 ```bash
 cerber review owner/repo#123 --no-source
-cerber serve --daemon --no-source
+cerber serve --no-source
 ```
 
 The cockpit labels every review "read the full source" or "read the diff only",
@@ -171,9 +179,10 @@ the default is a review that cannot run anything at all.
 machine — the branch's scripts, its dependencies, its test suite. That is the
 same exposure as checking the branch out and running the tests yourself, which
 is what you would otherwise do; it is not the same as reading a diff. Trust
-orgs and people, not the whole of GitHub. And note the daemon reviews
-unattended: with trust rules set, `cerber serve --daemon` will run matching PRs'
-code with nobody watching. It warns at startup, and `--no-trust` turns it off.
+orgs and people, not the whole of GitHub. And note that `cerber serve` reviews
+unattended by default: with trust rules set, it will run matching PRs' code
+with nobody watching. It warns at startup, the cockpit shows a ⚡ badge while
+it's the case, and `--no-trust` (or `--no-auto-review`) turns it off.
 
 ### When the PR moves under you
 
@@ -199,9 +208,8 @@ Early, but all six planned phases have shipped.
    only GitHub write in the codebase) + `cerber export` to markdown
 3. ✅ `--awaiting-me` discovery, parallel runs (`--parallel`, default 3),
    freshness skip (same head SHA → no re-run; `--force` overrides), queue stats
-4. ✅ Daemon/VPS mode: `cerber serve --daemon` polls for PRs awaiting your
-   review and reviews them automatically (read-only); token auth for
-   non-localhost binds
+4. ✅ Inbox mode (now the default): `cerber serve` polls for PRs awaiting your
+   review and reviews them automatically; token auth for non-localhost binds
 5. ✅ Confidence calibration (`cerber stats`), shadow-mode auto-send (default
    in daemon: logs what would be sent), opt-in `--auto-send` (approve-only,
    `--auto-send-threshold`, default 90%)
@@ -212,11 +220,11 @@ Early, but all six planned phases have shipped.
 ## Running on a VPS
 
 ```bash
-cerber serve --daemon --host 0.0.0.0 --token "$(openssl rand -hex 16)" \
+cerber serve --host 0.0.0.0 --token "$(openssl rand -hex 16)" \
   --repo you/repo-a --repo you/repo-b --interval 10
 ```
 
-The daemon polls GitHub, reviews anything new (skipping PRs whose artifact
+The server polls GitHub, reviews anything new (skipping PRs whose artifact
 already matches the head SHA), and the cockpit is always warm — open it any
 minute and see pending/ready/sent reviews. Auth: `?token=…` once in the
 browser (sets a cookie) or `Authorization: Bearer …`. Binding a non-localhost

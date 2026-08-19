@@ -79,6 +79,20 @@ export async function readAutoSendLog(): Promise<AutoSendLogEntry[]> {
   }
 }
 
+/**
+ * Remove an artifact file. Only ever called on pure discovery stubs (status
+ * "awaiting", no comments) — anything a human or an AI run touched stays.
+ */
+export async function deleteArtifact(id: string): Promise<boolean> {
+  try {
+    await fs.unlink(artifactPath(id));
+    return true;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+}
+
 /** Load by key, apply a mutation, bump updatedAt, save. Returns the new artifact. */
 export async function updateArtifactByKey(
   key: string,

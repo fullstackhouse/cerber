@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, updateTrustRule } from "./api";
+import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { ConfigView } from "./types";
 
 const EXAMPLES = [
@@ -38,6 +38,35 @@ export function Settings() {
       <a href="#/" className="back">
         ← queue
       </a>
+      <h1>Inbox</h1>
+      <p>
+        By default cerber keeps the queue itself: it polls GitHub for PRs awaiting your review and
+        drafts a review for each, so they're ready when you open the cockpit. Nothing is ever sent
+        without you. Changes apply on the next poll — no restart.
+      </p>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={config.daemon.poll}
+          disabled={busy}
+          onChange={(e) => apply(updateDaemonConfig({ poll: e.target.checked }))}
+        />{" "}
+        poll GitHub for PRs awaiting my review (every {config.daemon.intervalMinutes}m)
+      </label>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={config.daemon.autoReview}
+          disabled={busy || !config.daemon.poll}
+          onChange={(e) => apply(updateDaemonConfig({ autoReview: e.target.checked }))}
+        />{" "}
+        draft a review automatically (off: awaiting PRs wait for a click)
+      </label>
+      <p className="muted">
+        Interval, concurrency and a repo filter live in <code>{config.path}</code> under{" "}
+        <code>daemon</code> — hand-editable, like everything here.
+      </p>
+
       <h1>Trusted PRs</h1>
 
       <p>
