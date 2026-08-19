@@ -126,9 +126,9 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 3: The chat prompt and turn runner
 
-- [ ] 3.1 buildChatPrompt
-- [ ] 3.2 runChatTurn with inflight claim and retry
-- [ ] 3.3 Tests for prompt contents, claim, and retry
+- [x] 3.1 buildChatPrompt — 65a6aec
+- [x] 3.2 runChatTurn with inflight claim and retry — 65a6aec
+- [x] 3.3 Tests for prompt contents, claim, and retry — 65a6aec
 
 ### Phase 4: Keeping the source readable
 
