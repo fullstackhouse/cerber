@@ -57,7 +57,11 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   `daemon.autoReview` is off, archives merged/closed PRs. Config's `daemon`
   block is re-read every poll, so cockpit toggles apply without a restart
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
-- `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`
+- `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
+  `notify.ts` is the arrival bell: it polls the queue from every screen and
+  raises a desktop notification for PRs this browser has never seen. Browser
+  state, not config — the permission is the browser's, so the switch and the
+  announced-keys record live in localStorage beside it
 
 ## Conventions
 

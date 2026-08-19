@@ -41,6 +41,14 @@ for reviews you sent, one for the ones you marked reviewed or skipped, one for
 merged and closed PRs — and PRs in archived repos are never picked up at all,
 since the repo is read-only and a review could never be sent.
 
+The cockpit is a background tab most of the day, so it tells you when the queue
+grows: a desktop notification naming the PR that arrived — click it to open the
+review — folded into one popup when several land at once. It stays quiet while
+you're looking straight at cerber, and a PR is announced once, ever. Only the
+browser can grant this, and only off a click, so the bell in the top bar is one:
+click it to be asked, click it again to stop. The switch is per-browser, and
+lives in that browser rather than in `~/.cerber/config.json`.
+
 ## What a review looks like
 
 Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with

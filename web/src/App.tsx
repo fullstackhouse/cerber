@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Detail } from "./Detail";
 import { Icon, Key, Logo } from "./Icon";
+import { NotifyState, useArrivalNotifications, useNotifyState } from "./notify";
 import { Queue } from "./Queue";
 import { Settings } from "./Settings";
 
@@ -12,8 +13,42 @@ function parseHash(): { view: "queue" } | { view: "settings" } | { view: "detail
   return { view: "queue" };
 }
 
+/** What the bell means right now, and what clicking it will do about that. */
+const BELL_TITLE: Record<NotifyState, string> = {
+  unsupported: "",
+  blocked:
+    "This browser blocked notifications for cerber. Turn them back on in its site settings — the padlock next to the address bar.",
+  off: "Notifications off. Click to be told when a PR lands in the queue.",
+  ask: "Click to be told when a PR lands in the queue — the browser will ask you first.",
+  on: "Telling you when a PR lands in the queue. Click to stop.",
+};
+
+/**
+ * The one switch for arrival notifications. Cerber wants them on, but only the
+ * browser can grant that and only off a click — so an un-asked bell reads as
+ * an offer rather than as "off".
+ */
+function NotifyBell() {
+  const [state, toggle] = useNotifyState();
+  if (state === "unsupported") return null;
+  return (
+    <button
+      className={`topbar-link bell bell-${state}`}
+      title={BELL_TITLE[state]}
+      aria-label={BELL_TITLE[state]}
+      aria-pressed={state === "on"}
+      onClick={toggle}
+    >
+      <Icon name={state === "on" ? "bell" : "bellOff"} size={15} />
+    </button>
+  );
+}
+
 export function App() {
   const [route, setRoute] = useState(parseHash());
+
+  // Watches the queue from every screen, including a review you have open.
+  useArrivalNotifications();
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -55,6 +90,7 @@ export function App() {
               </span>
             </>
           )}
+          <NotifyBell />
           <a href="#/settings" className="topbar-link" title="settings" aria-label="settings">
             <Icon name="settings" size={15} />
           </a>

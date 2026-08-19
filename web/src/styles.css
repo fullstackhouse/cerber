@@ -348,6 +348,30 @@ button {
   color: var(--fg);
 }
 
+/* The arrival bell sits in the same rail as the gear, so it has to shed the
+   button chrome the browser gives it. On until the browser says otherwise:
+   `ask` is an offer, not an off state, so it keeps the accent. */
+.bell {
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--line);
+  padding: 2px 0 0 14px;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bell-on,
+.bell-ask {
+  color: var(--accent);
+}
+
+.bell-blocked {
+  color: var(--fainter);
+  cursor: help;
+}
+
 /* ---- daemon bar ---- */
 
 .daemon-bar {
