@@ -73,6 +73,7 @@ export interface Artifact {
     costUsd: number | null;
     error: string | null;
     withSource?: boolean;
+    trusted?: boolean;
   } | null;
   sent: {
     at: string;

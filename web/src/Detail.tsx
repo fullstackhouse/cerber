@@ -538,7 +538,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
         <span className="del">-{artifact.pr.deletions}</span>
         {artifact.run?.costUsd != null && <> · review cost ${artifact.run.costUsd.toFixed(2)}</>} ·{" "}
-        {artifact.run?.withSource ? "read the full source" : "read the diff only"} · status:{" "}
+        {artifact.run?.trusted
+          ? "ran the code"
+          : artifact.run?.withSource
+            ? "read the full source"
+            : "read the diff only"}{" "}
+        · status:{" "}
         <strong>{artifact.status}</strong>
         {!readOnly && artifact.status !== "running" && !artifact.run?.withSource && (
           <button

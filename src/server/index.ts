@@ -31,9 +31,13 @@ export interface ServeOptions {
   daemon?: DaemonHandle;
   /** False makes cockpit re-reviews diff-only (`serve --no-source`). Defaults to on. */
   withSource?: boolean;
+  /** False keeps cockpit re-reviews read-only whatever ~/.cerber/trusted.txt says. */
+  trust?: boolean;
 }
 
-export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon" | "withSource">): Promise<Hono> {
+export async function buildApp(
+  opts: Pick<ServeOptions, "token" | "daemon" | "withSource" | "trust">,
+): Promise<Hono> {
   const app = new Hono();
 
   if (opts.token) {
@@ -235,11 +239,17 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon" | "wi
         costUsd: null,
         error: null,
         withSource: withSource !== false,
+        trusted: false,
       },
     }));
 
     // Minutes-long: run it detached and let the cockpit poll the artifact.
-    void reviewPr(ref, { force: true, withSource, onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`) })
+    void reviewPr(ref, {
+      force: true,
+      withSource,
+      trust: opts.trust,
+      onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`),
+    })
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[rerun ${artifact.id}] failed: ${message}`);

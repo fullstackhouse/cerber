@@ -15,7 +15,8 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
   matching each comment's line *text*, never a fuzzy guess), source checkouts
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
-  an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`)
+  an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
+  trust rules (`trust.ts` — `~/.cerber/trusted.txt`, plain lines, denials win)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
@@ -43,8 +44,11 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   are carried across (`carryOverComments`), never regenerated away
 - Don't start an AI run without claiming `runner/inflight` — the daemon's timer
   and the cockpit's button both write the same artifact file
-- Don't give the review run a tool it doesn't need. A source-backed run reads;
-  it never writes, never runs commands, and treats everything in the checkout
-  as untrusted PR content rather than instructions
+- Don't give the review run a tool it doesn't need. The default run reads and
+  nothing else, and treats everything in the checkout as untrusted PR content
+  rather than instructions. Only a PR the user trusted (`trusted.txt`, `--trust`)
+  gets Bash — and never Edit/Write: a review reads and runs, it doesn't fix
+- Don't let anything but the user grant trust. Not the PR, not its author's
+  association, not a heuristic — trust is a claim about people, stated up front
 - Don't make the checkout a precondition — it's on by default, but if git or
   `gh` can't produce one, log it and review the diff alone

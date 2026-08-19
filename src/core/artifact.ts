@@ -76,6 +76,8 @@ export const RunInfoSchema = z.object({
   error: z.string().nullable().default(null),
   /** The reviewer could read the repo at the PR head, not just the diff. */
   withSource: z.boolean().default(false),
+  /** The user vouched for this PR, so the reviewer could also run commands. */
+  trusted: z.boolean().default(false),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 

@@ -96,7 +96,12 @@ export async function neutralDir(): Promise<string> {
  */
 export async function prepareCheckout(
   ref: PrRef,
-  opts: { log?: (message: string) => void; deps?: Partial<CheckoutDeps> } = {},
+  opts: {
+    log?: (message: string) => void;
+    deps?: Partial<CheckoutDeps>;
+    /** A trusted review gets the repo as its author wrote it, config included. */
+    trusted?: boolean;
+  } = {},
 ): Promise<Checkout> {
   const deps = { ...realDeps, ...opts.deps };
   const log = opts.log ?? (() => {});
@@ -117,13 +122,22 @@ export async function prepareCheckout(
   await deps.git(["clean", "-qfdx"], dir);
 
   // Renamed rather than deleted: the reviewer can still read and comment on
-  // these files, but Claude Code won't load them as its own configuration.
+  // these files, but Claude Code won't load them as its own configuration. A
+  // trusted checkout puts them back — the same files a previous untrusted
+  // review of this PR may have moved aside.
   for (const file of AGENT_CONFIG_FILES) {
-    const moved = await deps.quarantine(
-      path.join(dir, file),
-      path.join(dir, file + QUARANTINE_SUFFIX),
-    );
-    if (moved) log(`Quarantined ${file} from the checkout — PR config never configures the reviewer.`);
+    const live = path.join(dir, file);
+    const aside = live + QUARANTINE_SUFFIX;
+    const moved = opts.trusted
+      ? await deps.quarantine(aside, live)
+      : await deps.quarantine(live, aside);
+    if (moved) {
+      log(
+        opts.trusted
+          ? `Restored ${file} — this repo is trusted, so its own config applies.`
+          : `Quarantined ${file} from the checkout — PR config never configures the reviewer.`,
+      );
+    }
   }
 
   const sha = (await deps.git(["rev-parse", "HEAD"], dir)).trim();

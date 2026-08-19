@@ -4,6 +4,7 @@ import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
+import { addTrustRule, loadTrustRules, trustFilePath } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
 import {
@@ -39,6 +40,11 @@ program
     "--no-source",
     "review the diff alone: skip the local checkout of the PR head. Faster and cheaper, but the AI cannot see past the changed lines",
   )
+  .option(
+    "-t, --trust",
+    "let the review run commands in the checkout (tests, typecheck, git log) regardless of ~/.cerber/trusted.txt",
+  )
+  .option("--no-trust", "keep the review read-only even if a trust rule matches")
   .action(
     async (
       prs: string[],
@@ -49,6 +55,7 @@ program
         parallel: string;
         force?: boolean;
         source: boolean;
+        trust?: boolean;
       },
     ) => {
       let refs: PrRef[];
@@ -80,6 +87,7 @@ program
             model: opts.model,
             force: opts.force,
             withSource: opts.source,
+            trust: opts.trust,
             onProgress: (m) => console.log(`[${label}] ${m}`),
           });
           if (skipped) {
@@ -205,6 +213,45 @@ program
   });
 
 program
+  .command("trust")
+  .description(
+    "Show or extend the list of PRs reviewed with commands allowed (~/.cerber/trusted.txt)",
+  )
+  .argument(
+    "[pattern]",
+    "owner/repo, owner, @author, or private — omit to list what is trusted today",
+  )
+  .action(async (pattern?: string) => {
+    if (pattern) {
+      const file = await addTrustRule(pattern);
+      console.log(`Trusted: ${pattern}\n  → ${file}`);
+      console.log(
+        "Reviews of matching PRs may now run tests, typechecks and git commands in the checkout.",
+      );
+      return;
+    }
+    const rules = await loadTrustRules();
+    if (rules.length === 0) {
+      console.log(
+        `Nothing is trusted: every review reads the checkout and runs nothing.\n` +
+          `Trust a repo, an owner, or a person with:\n` +
+          `  cerber trust fullstackhouse      # every repo in the org\n` +
+          `  cerber trust @teammate           # anything they authored\n` +
+          `  cerber trust private             # any private repo\n` +
+          `Rules live in ${trustFilePath()} — a plain file you can edit.`,
+      );
+      return;
+    }
+    console.log(`Trust rules (${trustFilePath()}):`);
+    for (const rule of rules) {
+      const what =
+        rule.kind === "private" ? "any private repo" : rule.kind === "author" ? `@${rule.pattern}` : rule.pattern;
+      console.log(`  ${rule.negated ? "denied " : "trusted"}  ${what}`);
+    }
+    console.log("\nReviews of matching PRs may run commands in the checkout. Everything else is read-only.");
+  });
+
+program
   .command("prune")
   .description("Delete cached source checkouts in ~/.cerber/src (they re-fetch on the next --with-source review)")
   .option("--all", "delete every checkout, including ones for reviews still awaiting you")
@@ -308,6 +355,10 @@ program
     "review the diff alone, with no local checkout of the PR head (applies to daemon runs and cockpit re-reviews)",
   )
   .option(
+    "--no-trust",
+    "ignore ~/.cerber/trusted.txt: every review here stays read-only, even for repos you trust",
+  )
+  .option(
     "--auto-send",
     "ACTUALLY auto-send APPROVE verdicts at/above --auto-send-threshold (default: shadow mode, which only logs what would be sent)",
   )
@@ -324,6 +375,7 @@ program
       parallel: string;
       model?: string;
       source: boolean;
+      trust: boolean;
       autoSend?: boolean;
       autoSendThreshold: string;
       insecure?: boolean;
@@ -344,6 +396,17 @@ program
             `  Every decision is logged to ${cerberHome()}/autosend.ndjson. COMMENT/REQUEST_CHANGES always wait for a human.`,
         );
       }
+      // Trust means "run this PR's code". A human clicking review accepted that
+      // per PR; a daemon does it unattended, on whatever lands in the queue.
+      if (opts.daemon && opts.trust) {
+        const rules = await loadTrustRules();
+        if (rules.length > 0) {
+          console.log(
+            `⚠ ${rules.length} trust rule(s) in ${trustFilePath()}: this daemon will run commands from matching PRs ` +
+              `automatically, with nobody watching. Pass --no-trust to keep every review read-only.`,
+          );
+        }
+      }
       const daemon = opts.daemon
         ? startDaemon({
             repos: opts.repo,
@@ -351,6 +414,7 @@ program
             parallel: Math.max(1, Number(opts.parallel) || 1),
             model: opts.model,
             withSource: opts.source,
+            trust: opts.trust ? undefined : false,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
@@ -361,6 +425,7 @@ program
         token,
         daemon,
         withSource: opts.source,
+        trust: opts.trust ? undefined : false,
       });
     },
   );

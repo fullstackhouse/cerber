@@ -78,6 +78,15 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
   });
 }
 
+/**
+ * Repo visibility, for the `private` trust rule. A separate call from
+ * `gh pr view` — only made when a trust rule actually asks about it.
+ */
+export async function fetchRepoIsPrivate(ref: Pick<PrRef, "owner" | "repo">): Promise<boolean> {
+  const out = await gh(["repo", "view", `${ref.owner}/${ref.repo}`, "--json", "isPrivate"]);
+  return JSON.parse(out).isPrivate === true;
+}
+
 export async function fetchPrDiff(ref: PrRef): Promise<string> {
   return gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
 }

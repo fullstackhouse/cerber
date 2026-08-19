@@ -149,3 +149,15 @@ describe("evictOldCheckouts", () => {
     expect(await listCheckouts()).toEqual([]);
   });
 });
+
+describe("prepareCheckout — trusted", () => {
+  it("puts back config an earlier untrusted review moved aside", async () => {
+    const { renamed, deps } = fakeGit(true, [".claude/settings.json.cerber-quarantined"]);
+    await prepareCheckout(ref, { deps, trusted: true });
+
+    expect(renamed).toHaveLength(1);
+    const [from, to] = renamed[0]!;
+    expect(from).toBe(to + ".cerber-quarantined");
+    expect(to.endsWith(".claude/settings.json")).toBe(true);
+  });
+});

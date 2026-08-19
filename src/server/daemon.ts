@@ -14,6 +14,8 @@ export interface DaemonOptions {
   model?: string;
   /** False reviews the diff alone, with no local checkout. Defaults to on. */
   withSource?: boolean;
+  /** Overrides ~/.cerber/trusted.txt for every run; undefined defers to it. */
+  trust?: boolean;
   /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
@@ -96,6 +98,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           const result = await reviewPr(ref, {
             model: opts.model,
             withSource: opts.withSource,
+            trust: opts.trust,
             onProgress: (m) => log(`[${label}] ${m}`),
           });
           if (result.skipped) skipped++;

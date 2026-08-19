@@ -50,3 +50,29 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("the rest of the change is in the checkout");
   });
 });
+
+describe("buildReviewPrompt — trusted", () => {
+  it("lets a trusted reviewer run things, and says what to spend them on", () => {
+    const { prompt } = buildReviewPrompt(pr, "d", { source: true, trusted: true });
+    expect(prompt).toContain("You may run commands");
+    expect(prompt).toContain("Spend commands where they change the verdict");
+  });
+
+  it("still forbids changing the code under review", () => {
+    const { prompt } = buildReviewPrompt(pr, "d", { source: true, trusted: true });
+    expect(prompt).toContain("Never modify the code under review");
+    expect(prompt).toContain("never commit, push, or otherwise write to GitHub");
+  });
+
+  it("drops the untrusted framing rather than stacking both", () => {
+    const { prompt } = buildReviewPrompt(pr, "d", { source: true, trusted: true });
+    expect(prompt).not.toContain("untrusted content written by the PR author");
+    expect(prompt).not.toContain("never run commands");
+  });
+
+  it("ignores trust when there is no checkout to run anything in", () => {
+    const { prompt } = buildReviewPrompt(pr, "d", { source: false, trusted: true });
+    expect(prompt).not.toContain("## Source checkout");
+    expect(prompt).not.toContain("You may run commands");
+  });
+});

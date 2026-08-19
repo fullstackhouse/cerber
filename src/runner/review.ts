@@ -3,13 +3,15 @@ import {
   AiReview,
   AiReviewSchema,
   Artifact,
+  PrInfo,
   SCHEMA_VERSION,
   artifactId,
 } from "../core/artifact.js";
 import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout.js";
-import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
+import { PrRef, fetchPrDiff, fetchPrInfo, fetchRepoIsPrivate } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
+import { decideTrust, loadTrustRules, needsVisibility } from "../core/trust.js";
 import { extractJson, runClaude } from "./claude.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
@@ -26,11 +28,19 @@ export interface ReviewOptions {
    * and cheaper, at the cost of everything outside the changed lines.
    */
   withSource?: boolean;
+  /**
+   * Override the trust rules in ~/.cerber/trusted.txt for this run: true lets
+   * the review run commands in the checkout, false keeps it read-only.
+   */
+  trust?: boolean;
 }
 
-/** All the reviewer ever needs from a checkout — everything else stays off. */
+/** All an untrusted reviewer needs from a checkout — everything else stays off. */
 const READ_TOOLS = ["Read", "Grep", "Glob"];
 const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
+/** A trusted reviewer may run things. It still may not rewrite the PR. */
+const TRUSTED_TOOLS = [...READ_TOOLS, "Bash", "WebFetch", "WebSearch"];
+const TRUSTED_OFF_TOOLS = ["Edit", "Write", "NotebookEdit"];
 
 export interface ReviewResult {
   artifact: Artifact;
@@ -52,6 +62,31 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
   } finally {
     endReview(artifactId(ref));
   }
+}
+
+/**
+ * Trust is a claim about the people behind a PR, so it comes from the user:
+ * the rules they wrote in ~/.cerber/trusted.txt, or an explicit flag on this
+ * run. Nothing about the PR's own content can earn it.
+ */
+async function resolveTrust(
+  pr: PrInfo,
+  opts: ReviewOptions,
+  log: (message: string) => void,
+): Promise<boolean> {
+  if (opts.trust !== undefined) {
+    log(opts.trust ? "Trusted by --trust: the review may run commands." : "Untrusted by --no-trust.");
+    return opts.trust;
+  }
+  const rules = await loadTrustRules();
+  if (rules.length === 0) return false;
+
+  const isPrivate = needsVisibility(rules)
+    ? await fetchRepoIsPrivate(pr).catch(() => undefined)
+    : undefined;
+  const decision = decideTrust(rules, { owner: pr.owner, repo: pr.repo, author: pr.author, isPrivate });
+  if (decision.trusted) log(`Trusted (${decision.reason}): the review may run commands in the checkout.`);
+  return decision.trusted;
 }
 
 async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult> {
@@ -76,12 +111,14 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
 
   const diff = await fetchPrDiff(ref);
 
+  const trusted = await resolveTrust(pr, opts, log);
+
   // A checkout is an optimisation, never a precondition: if git or gh can't
   // produce one, fall back to the diff-only review rather than failing the run.
   let source: string | null = null;
   if (opts.withSource !== false) {
     try {
-      const checkout = await prepareCheckout(ref, { log });
+      const checkout = await prepareCheckout(ref, { log, trusted });
       source = checkout.dir;
       const evicted = await evictOldCheckouts({ inUse: isReviewRunning });
       if (evicted.length > 0) log(`Evicted ${evicted.length} least-recently-used checkout(s) from the cache.`);
@@ -118,6 +155,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       costUsd: null,
       error: null,
       withSource: source !== null,
+      trusted: trusted && source !== null,
     },
     sent: null,
     refresh: null,
@@ -125,15 +163,16 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
   };
   await saveArtifact(artifact);
 
-  const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null });
+  const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null, trusted });
   if (truncated) log("Warning: diff exceeds the context budget and was truncated.");
   log(
     `Reviewing with Claude${opts.model ? ` (${opts.model})` : ""}` +
-      `${source ? ", reading the full source" : ""}… this can take a few minutes.`,
+      `${source ? (trusted ? ", reading and running the full source" : ", reading the full source") : ""}` +
+      `… this can take a few minutes.`,
   );
 
   try {
-    const review = await runAiReview(prompt, opts, source);
+    const review = await runAiReview(prompt, opts, source, trusted);
     // The prompt demands each file in exactly one chapter, but models drift:
     // keep a file only in the first chapter that claims it.
     const seen = new Set<string>();
@@ -168,6 +207,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         costUsd: review.costUsd,
         error: null,
         withSource: source !== null,
+        trusted: trusted && source !== null,
       },
     };
 
@@ -224,6 +264,7 @@ async function runAiReview(
   prompt: string,
   opts: ReviewOptions,
   source: string | null,
+  trusted: boolean,
 ): Promise<{ ai: AiReview; costUsd: number | null; model: string | null }> {
   // Without a checkout the run has nothing legitimate to read — cerber's own
   // cwd is not the reviewed repo — so every tool stays off, and it runs in an
@@ -231,9 +272,15 @@ async function runAiReview(
   const claudeOpts = {
     model: opts.model,
     cwd: source ?? (await neutralDir()),
-    allowedTools: source ? READ_TOOLS : undefined,
-    disallowedTools: source ? OFF_TOOLS : [...OFF_TOOLS, ...READ_TOOLS],
-    isolateWorkspace: true,
+    allowedTools: source ? (trusted ? TRUSTED_TOOLS : READ_TOOLS) : undefined,
+    disallowedTools: source
+      ? trusted
+        ? TRUSTED_OFF_TOOLS
+        : OFF_TOOLS
+      : [...OFF_TOOLS, ...READ_TOOLS],
+    // A trusted checkout gets to configure its own run, the way it would if
+    // the user had opened the repo themselves.
+    isolateWorkspace: !(source && trusted),
   };
   const first = await runClaude(prompt, claudeOpts);
   try {
