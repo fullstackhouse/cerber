@@ -26,6 +26,10 @@
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
+
+  /* How wide the console gets. Rows and diffs want the room a big display has;
+     prose caps itself at a readable measure regardless (see .prose). */
+  --measure: 1560px;
 }
 
 * {
@@ -63,13 +67,13 @@ h3 {
    the review head all line up down the page. Bars span the window; what is
    inside them does not. */
 .wrap {
-  max-width: 1180px;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 0 40px;
 }
 
 .bar-inner {
-  max-width: 1180px;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 0 40px;
   display: flex;
@@ -193,6 +197,7 @@ button {
   padding: 6px 10px;
   background: var(--surface);
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .btn:hover:not(:disabled) {
@@ -466,7 +471,7 @@ button {
   color: transparent;
 }
 .col-slug {
-  width: 138px;
+  width: 184px;
   flex-shrink: 0;
   color: var(--muted);
   overflow: hidden;
@@ -595,6 +600,15 @@ button {
 }
 
 /* ---- review: breadcrumb + head ---- */
+
+/* Which PR you are in, and the way out, stay on screen through a walkthrough
+   that can run for pages. --top-h is measured from this element (Detail.tsx). */
+.review-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--surface);
+}
 
 .crumb {
   border-bottom: 1px solid var(--line);
@@ -727,8 +741,18 @@ button {
   flex-shrink: 0;
   padding: 22px 20px 22px 0;
   position: sticky;
-  top: 0;
+  top: var(--top-h, 0px);
+  z-index: 5;
   align-self: flex-start;
+  max-height: calc(100vh - var(--top-h, 0px));
+  overflow-y: auto;
+}
+
+/* Jumping to a chapter or a comment must not park it under the sticky head. */
+.chapter,
+.comment,
+.verdict-bar {
+  scroll-margin-top: calc(var(--top-h, 0px) + 12px);
 }
 
 .rail-lab {
@@ -767,8 +791,66 @@ button {
   font-weight: 500;
 }
 
+.rail-group {
+  margin-bottom: 2px;
+}
+
+.rail-count {
+  font-size: 10.5px;
+  color: var(--fainter);
+}
+
+/* Every comment, where it is — so "3 keeping" is a list you can walk, not a
+   number you have to go hunting for in the diffs. */
+.rail-comment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  padding: 3px 0 3px 20px;
+  margin-left: -11px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+}
+
+.rail-comment:hover {
+  color: var(--fg);
+}
+
+.rail-comment-loc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-comment-dropped {
+  opacity: 0.55;
+}
+
+.rail-comment-dropped .rail-comment-loc {
+  text-decoration: line-through;
+}
+
 .rail-dot {
   font-size: 8px;
+}
+
+/* Arriving at a comment from the rail: say which one, briefly. */
+.comment-flash {
+  animation: comment-flash 1.8s ease-out;
+}
+
+@keyframes comment-flash {
+  0%,
+  60% {
+    background: var(--accent-wash);
+    box-shadow: inset 0 0 0 2px rgba(61, 79, 214, 0.45);
+  }
 }
 
 .rail-facts {
@@ -1133,6 +1215,11 @@ button {
   padding: 16px 18px;
 }
 
+/* When the verdict bar sits on top, the two read as one block. */
+.verdict-bar + .send-panel {
+  border-radius: 0 0 4px 4px;
+}
+
 .send-top {
   display: flex;
   align-items: baseline;
@@ -1248,12 +1335,39 @@ button {
   color: var(--green);
 }
 
-.send-meta {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 14px 0 0;
-  max-width: 640px;
-  line-height: 1.55;
+/* The verdict, decided where you decide to send — the event below follows it. */
+.verdict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: var(--surface);
+  padding: 10px 18px;
+  margin-top: 18px;
+}
+
+.verdict-bar .lab {
+  margin-right: 4px;
+}
+
+.verdict-bar .faint {
+  font-size: 10.5px;
+}
+
+/* Ways out that don't touch GitHub. They live in this panel because this is
+   where you are when you decide not to send — fenced off from the button. */
+.send-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-2);
+  font-size: 10.5px;
 }
 
 .body-preview {
@@ -1507,6 +1621,18 @@ button {
   border: 1px solid currentColor;
   background: rgba(20, 23, 26, 0.03);
   white-space: nowrap;
+}
+
+/* The chip doubles as the way down to where the verdict is decided. */
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+}
+
+.chip-btn:hover {
+  background: rgba(20, 23, 26, 0.07);
 }
 
 .tag {

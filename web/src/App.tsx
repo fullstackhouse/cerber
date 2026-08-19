@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Detail } from "./Detail";
-import { Key } from "./Icon";
+import { Icon, Key } from "./Icon";
 import { Queue } from "./Queue";
 import { Settings } from "./Settings";
 
@@ -54,8 +54,8 @@ export function App() {
               </span>
             </>
           )}
-          <a href="#/settings" className="topbar-link">
-            settings
+          <a href="#/settings" className="topbar-link" title="settings" aria-label="settings">
+            <Icon name="settings" size={15} />
           </a>
         </div>
       </header>

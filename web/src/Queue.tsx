@@ -86,14 +86,19 @@ function Row({
   return (
     <div
       className={`row${selected ? " row-on" : ""}`}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
+      // Clicking a row opens it. The strip explains whatever the pointer is
+      // over on the way there, so reading a row costs nothing either.
+      onClick={onOpen}
+      onMouseEnter={onSelect}
       role="button"
       tabIndex={-1}
     >
       <span className="col-caret">›</span>
+      {/* The column is repo#pr, not owner/repo#pr: one owner fills a queue, and
+          truncating "fullstackhouse/gro…" hides the part that identifies it.
+          The strip below and the tooltip still name the owner. */}
       <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
-        {r.pr.owner}/{r.pr.repo}#{r.pr.number}
+        {r.pr.repo}#{r.pr.number}
       </span>
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
@@ -120,8 +125,8 @@ function ArchivedRow({ r }: { r: ReviewListItem }) {
   return (
     <div className="row row-archived">
       <span className="col-caret" />
-      <span className="col-slug">
-        {r.pr.owner}/{r.pr.repo}#{r.pr.number}
+      <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
+        {r.pr.repo}#{r.pr.number}
       </span>
       <span className="col-title">{r.pr.title}</span>
       <span className="col-author">{r.pr.author}</span>

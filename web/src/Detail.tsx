@@ -56,6 +56,27 @@ const VERDICT_ICON: Record<Verdict["recommendation"], IconName> = {
   request_changes: "changes",
 };
 
+/** What a comment's dot in the rail says about it at a glance. */
+function commentTone(c: ReviewComment, verdictTone: string): string {
+  if (c.status === "dropped") return "none";
+  if (c.drifted) return "comment";
+  if (c.origin === "user") return "awaiting";
+  return verdictTone;
+}
+
+/**
+ * Jump to a comment that may not be in the DOM yet — its chapter might have
+ * been collapsed, and the diff it lives in mounts a frame or two later.
+ */
+function scrollToComment(id: string, tries = 20): void {
+  const el = document.getElementById(`c-${id}`);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  if (tries > 0) requestAnimationFrame(() => scrollToComment(id, tries - 1));
+}
+
 /** True while the user is typing — keyboard shortcuts stay out of the way. */
 function typing(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -144,12 +165,15 @@ function CommentCard({
   onDelete,
   onDiscuss,
   readOnly,
+  flash,
 }: {
   comment: ReviewComment;
   onUpdate: (patch: { body?: string; status?: string }) => void;
   onDelete: () => void;
   onDiscuss?: () => void;
   readOnly: boolean;
+  /** Just jumped to from the rail — say so, or it lands invisibly mid-diff. */
+  flash?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
@@ -159,7 +183,7 @@ function CommentCard({
   const tag = comment.origin === "user" ? "yours" : dropped ? "dropped" : kept ? "kept" : "drafted";
 
   return (
-    <div className={`comment comment-${comment.status}`}>
+    <div id={`c-${comment.id}`} className={`comment comment-${comment.status}${flash ? " comment-flash" : ""}`}>
       <div className="comment-head">
         <span className="comment-loc">
           {comment.path}
@@ -330,6 +354,7 @@ function ChapterSection({
   onDiscuss,
   readOnly,
   anchorRef,
+  flash,
 }: {
   chapter: Chapter;
   n: number;
@@ -337,6 +362,7 @@ function ChapterSection({
   comments: ReviewComment[];
   open: boolean;
   onToggle: () => void;
+  flash: string | null;
   onUpdateComment: (id: string, patch: { body?: string; status?: string }) => void;
   onDeleteComment: (id: string) => void;
   onAddComment: (c: { path: string; line: number | null; body: string; chapterId: string | null }) => void;
@@ -358,6 +384,7 @@ function ChapterSection({
       onDelete={() => onDeleteComment(c.id)}
       onDiscuss={onDiscuss && (() => onDiscuss({ target: "comment", id: c.id }))}
       readOnly={readOnly}
+      flash={flash === c.id}
     />
   );
 
@@ -630,10 +657,8 @@ function ChatPanel({
               <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
                 <Icon name="send" />
                 {inFlight ? "waiting for the answer…" : starting ? "sending…" : "send message"}
-              </button>
-              <span className="hint">
                 <Key>⌘↵</Key>
-              </span>
+              </button>
               <span className="grow" />
               {artifact.preChat && (
                 <button
@@ -677,6 +702,7 @@ function SendPanel({
   sending,
   onSend,
   error,
+  footer,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -686,6 +712,9 @@ function SendPanel({
   sending: boolean;
   onSend: () => void;
   error: string | null;
+  /** The ways out that don't touch GitHub — kept here because this is where
+      you are when you decide not to send, but fenced off from the button. */
+  footer: ReactNode;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -704,23 +733,24 @@ function SendPanel({
 
   if (artifact.sent) {
     return (
-      <div className="sent-strip">
-        <strong>✔ sent as {EVENT_LABEL[artifact.sent.event]}</strong>
-        <span className="faint">
-          {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
-          {artifact.sent.auto ? " · auto-sent by the daemon" : ""}
-        </span>
-        <span className="grow" />
-        {artifact.sent.url && (
-          <a href={artifact.sent.url} target="_blank" rel="noreferrer">
-            view on GitHub <Icon name="external" />
-          </a>
-        )}
-      </div>
+      <>
+        <div className="sent-strip">
+          <strong>✔ sent as {EVENT_LABEL[artifact.sent.event]}</strong>
+          <span className="faint">
+            {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
+            {artifact.sent.auto ? " · auto-sent by the daemon" : ""}
+          </span>
+          <span className="grow" />
+          {artifact.sent.url && (
+            <a href={artifact.sent.url} target="_blank" rel="noreferrer">
+              view on GitHub <Icon name="external" />
+            </a>
+          )}
+        </div>
+        <div className="post-actions">{footer}</div>
+      </>
     );
   }
-
-  const dropped = splitComments(artifact).dropped.length;
 
   return (
     <div className="send-panel">
@@ -776,13 +806,6 @@ function SendPanel({
         </div>
       </div>
 
-      <p className="send-meta">
-        {dropped > 0
-          ? `${dropped} dropped comment${dropped === 1 ? "" : "s"} stays local, along with the conversation. `
-          : "Dropped comments and the conversation stay local. "}
-        Posting happens the moment you click — there's no second confirmation.
-      </p>
-
       {error && <p className="error">{error}</p>}
       {showBody &&
         (previewError ? (
@@ -792,6 +815,8 @@ function SendPanel({
         ) : (
           <p className="faint">building the body…</p>
         ))}
+
+      <div className="send-footer">{footer}</div>
     </div>
   );
 }
@@ -873,9 +898,18 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
+  const verdictEl = useRef<HTMLDivElement | null>(null);
+  const topEl = useRef<HTMLDivElement | null>(null);
   const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // The comment the rail just sent you to, marked until you've had time to see it.
+  const [flash, setFlash] = useState<string | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(null), 1800);
+    return () => clearTimeout(timer);
+  }, [flash]);
 
   const discuss = (ref: ChatRef) => {
     setChatRefs((refs) =>
@@ -922,6 +956,23 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       .catch(() => {});
   }, []);
 
+  // The header is sticky and its height depends on how the title wraps, so
+  // everything that scrolls under it — the rail, a jumped-to chapter or
+  // comment — clears it by measurement rather than by a guessed constant.
+  useEffect(() => {
+    const el = topEl.current;
+    if (!el) return;
+    const apply = () =>
+      document.documentElement.style.setProperty("--top-h", `${el.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--top-h");
+    };
+  }, [artifact?.id]);
+
   // While AI work is in flight — a re-review, or a chat turn — follow it until
   // it lands. Both run detached, so the artifact is the only thing that knows.
   const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
@@ -962,16 +1013,27 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       : artifact.chapters;
   }, [artifact]);
 
-  const goChapter = (i: number) => {
+  const openChapter = (i: number) => {
     const ch = chapters[i];
-    if (!ch) return;
+    if (!ch) return null;
     setFocused(i);
     setCollapsed((s) => {
       const next = new Set(s);
       next.delete(ch.id);
       return next;
     });
-    chapterEls.current.get(ch.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return ch;
+  };
+
+  const goChapter = (i: number) => {
+    const ch = openChapter(i);
+    if (ch) chapterEls.current.get(ch.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const goComment = (chapterIndex: number, commentId: string) => {
+    openChapter(chapterIndex);
+    setFlash(commentId);
+    scrollToComment(commentId);
   };
 
   const event = eventOverride ?? eventForVerdict(artifact?.verdict);
@@ -1064,99 +1126,97 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
   return (
     <div className="review">
-      <div className="crumb">
-        <div className="bar-inner">
-          <a href="#/">← queue</a>
-          <span className="crumb-sep">/</span>
-          <span className="crumb-slug">{artifact.id}</span>
-          <span className="walk">
-            <button
-              className="walk-btn"
-              disabled={!prev}
-              title={prev ? `${prev.id} — ${prev.pr.title}` : "no more reviews this way"}
-              onClick={() => prev && (window.location.hash = `#/r/${encodeURIComponent(prev.key)}`)}
-            >
-              <Icon name="chevronLeft" />
-            </button>
-            <button
-              className="walk-btn"
-              disabled={!next}
-              title={next ? `${next.id} — ${next.pr.title}` : "no more reviews this way"}
-              onClick={() => next && (window.location.hash = `#/r/${encodeURIComponent(next.key)}`)}
-            >
-              <Icon name="chevronRight" />
-            </button>
-          </span>
-          {at >= 0 && (
-            <span className="faint">
-              {at + 1} of {walk.length} awaiting
+      {/* Which PR, which verdict and the way out of it stay put — a long
+          walkthrough should never leave you wondering what you are reading. */}
+      <div className="review-top" ref={topEl}>
+        <div className="crumb">
+          <div className="bar-inner">
+            <a href="#/">← queue</a>
+            <span className="crumb-sep">/</span>
+            <span className="crumb-slug">{artifact.id}</span>
+            <span className="walk">
+              <button
+                className="walk-btn"
+                disabled={!prev}
+                title={prev ? `[ — ${prev.id}: ${prev.pr.title}` : "no more reviews this way"}
+                onClick={() => prev && (window.location.hash = `#/r/${encodeURIComponent(prev.key)}`)}
+              >
+                <Icon name="chevronLeft" />
+              </button>
+              <button
+                className="walk-btn"
+                disabled={!next}
+                title={next ? `] — ${next.id}: ${next.pr.title}` : "no more reviews this way"}
+                onClick={() => next && (window.location.hash = `#/r/${encodeURIComponent(next.key)}`)}
+              >
+                <Icon name="chevronRight" />
+              </button>
             </span>
-          )}
-          <span className="faint crumb-next">
-            {next ? `next: ${next.pr.title}` : at >= 0 ? "last in the queue" : ""}
-          </span>
-          <span className="grow" />
-          <span className="hint">
-            <Key>[</Key>
-            <Key>]</Key>prev/next review
-          </span>
-          <span className="hint">
-            <Key>n</Key>next chapter
-          </span>
-          {!readOnly && (
-            <span className="hint">
-              <Key>s</Key>send
-            </span>
-          )}
-          <a href="#/settings" className="topbar-link">
-            settings
-          </a>
-        </div>
-      </div>
-
-      <div className="review-head">
-        <div className="wrap">
-          <div className="review-head-top">
-            <a className="review-title" href={artifact.pr.url} target="_blank" rel="noreferrer">
-              {artifact.pr.title}
-            </a>
-            {artifact.verdict && (
-              <span className={`chip tone-${tone}`}>
-                {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+            {at >= 0 && (
+              <span className="faint">
+                {at + 1} of {walk.length} awaiting
               </span>
             )}
+            <span className="faint crumb-next">
+              {next ? `next: ${next.pr.title}` : at >= 0 ? "last in the queue" : ""}
+            </span>
             <span className="grow" />
-            {artifact.verdict && !readOnly && (
-              <>
-                <span className="lab">verdict</span>
-                {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
-              </>
-            )}
+            <a href="#/settings" className="topbar-link" title="settings" aria-label="settings">
+              <Icon name="settings" size={15} />
+            </a>
           </div>
-          <div className="review-head-meta">
-            <span>{artifact.pr.author}</span>
-            <span className="crumb-sep">·</span>
-            <span>
-              {artifact.pr.headRefName} → {artifact.pr.baseRefName}
-              {artifact.pr.headSha ? ` · ${artifact.pr.headSha.slice(0, 7)}` : ""}
-            </span>
-            <span className="crumb-sep">·</span>
-            <span>
-              {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
-              <span className="del">−{artifact.pr.deletions}</span>
-            </span>
-            <span className="crumb-sep">·</span>
-            <span title="Whether the run read a local checkout of the PR head, or the diff alone.">
-              {readLabel}
-            </span>
-            {artifact.run?.costUsd != null && (
-              <>
-                <span className="crumb-sep">·</span>
-                <span title="What this review would cost at API token rates. Riding a Claude subscription, it draws on your usage limits instead.">
-                  ≈${artifact.run.costUsd.toFixed(2)} at API rates
-                </span>
-              </>
-            )}
+        </div>
+
+        <div className="review-head">
+          <div className="wrap">
+            <div className="review-head-top">
+              <a className="review-title" href={artifact.pr.url} target="_blank" rel="noreferrer">
+                {artifact.pr.title}
+              </a>
+              {artifact.verdict &&
+                (readOnly ? (
+                  <span className={`chip tone-${tone}`}>
+                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                  </span>
+                ) : (
+                  // The verdict is decided next to send, at the foot of the page.
+                  // Up here it is a fact you can jump to, not a control.
+                  <button
+                    className={`chip chip-btn tone-${tone}`}
+                    title="change it, or send — both are at the foot of the page"
+                    onClick={() => verdictEl.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  >
+                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                    <Icon name="down" size={12} />
+                  </button>
+                ))}
+              <span className="grow" />
+            </div>
+            <div className="review-head-meta">
+              <span>{artifact.pr.author}</span>
+              <span className="crumb-sep">·</span>
+              <span>
+                {artifact.pr.headRefName} → {artifact.pr.baseRefName}
+                {artifact.pr.headSha ? ` · ${artifact.pr.headSha.slice(0, 7)}` : ""}
+              </span>
+              <span className="crumb-sep">·</span>
+              <span>
+                {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
+                <span className="del">−{artifact.pr.deletions}</span>
+              </span>
+              <span className="crumb-sep">·</span>
+              <span title="Whether the run read a local checkout of the PR head, or the diff alone.">
+                {readLabel}
+              </span>
+              {artifact.run?.costUsd != null && (
+                <>
+                  <span className="crumb-sep">·</span>
+                  <span title="What this review would cost at API token rates. Riding a Claude subscription, it draws on your usage limits instead.">
+                    ≈${artifact.run.costUsd.toFixed(2)} at API rates
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1167,18 +1227,34 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             <>
               <div className="lab">walkthrough</div>
               {chapters.map((ch, i) => (
-                <button
-                  key={ch.id}
-                  className={`rail-item${!collapsed.has(ch.id) ? " rail-item-on" : ""}`}
-                  onClick={() => goChapter(i)}
-                >
-                  <span className="grow">
-                    {i + 1} · {ch.title}
-                  </span>
-                  <span className={`rail-dot tone-${tone}`}>
-                    {artifact.comments.some((c) => c.chapterId === ch.id) ? "●" : ""}
-                  </span>
-                </button>
+                <div key={ch.id} className="rail-group">
+                  <button
+                    className={`rail-item${!collapsed.has(ch.id) ? " rail-item-on" : ""}`}
+                    onClick={() => goChapter(i)}
+                  >
+                    <span className="grow">
+                      {i + 1} · {ch.title}
+                    </span>
+                    <span className="rail-count">{ch.files.length}f</span>
+                  </button>
+                  {/* Where the comments are, before you go looking for them. */}
+                  {artifact.comments
+                    .filter((c) => c.chapterId === ch.id)
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        className={`rail-comment${c.status === "dropped" ? " rail-comment-dropped" : ""}`}
+                        title={`${c.path}${c.line != null ? `:${c.line}` : ""} — ${c.body}`}
+                        onClick={() => goComment(i, c.id)}
+                      >
+                        <span className={`rail-dot tone-${commentTone(c, tone)}`}>●</span>
+                        <span className="rail-comment-loc">
+                          {c.path.split("/").pop()}
+                          {c.line != null ? `:${c.drifted ? "~" : ""}${c.line}` : ""}
+                        </span>
+                      </button>
+                    ))}
+                </div>
               ))}
             </>
           )}
@@ -1276,6 +1352,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               onAddComment={onAddComment}
               onDiscuss={readOnly ? undefined : discuss}
               readOnly={readOnly}
+              flash={flash}
               anchorRef={(el) => {
                 if (el) chapterEls.current.set(ch.id, el);
                 else chapterEls.current.delete(ch.id);
@@ -1315,6 +1392,15 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             inputRef={chatInput}
           />
 
+          {artifact.verdict && !readOnly && (
+            <div className="verdict-bar" ref={verdictEl}>
+              <span className="lab">verdict</span>
+              {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
+              <span className="grow" />
+              <span className="faint">what you send follows this unless you say otherwise</span>
+            </div>
+          )}
+
           <SendPanel
             artifact={artifact}
             reviewKey={reviewKey}
@@ -1324,30 +1410,28 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             sending={sending}
             onSend={doSend}
             error={sendError}
-          />
-
-          {/* Nothing here touches GitHub — kept out of the panel that does. */}
-          <div className="post-actions">
-            <span className="faint">not sending?</span>
-            {!readOnly && (
+            footer={
               <>
-                <button className="link" onClick={() => apply(patchReview(reviewKey, { status: "reviewed" }))}>
-                  <Icon name="check" />
-                  mark reviewed
-                </button>
-                <span className="crumb-sep">·</span>
-                <button className="link" onClick={() => apply(patchReview(reviewKey, { status: "skipped" }))}>
-                  <Icon name="skip" />
-                  skip
-                </button>
-                <span className="crumb-sep">·</span>
+                <span className="faint">not sending?</span>
+                {!readOnly && (
+                  <>
+                    <button className="btn btn-sm" onClick={() => apply(patchReview(reviewKey, { status: "reviewed" }))}>
+                      <Icon name="check" />
+                      mark reviewed
+                    </button>
+                    <button className="btn btn-sm" onClick={() => apply(patchReview(reviewKey, { status: "skipped" }))}>
+                      <Icon name="skip" />
+                      skip
+                    </button>
+                  </>
+                )}
+                <a className="btn btn-sm" href={exportUrl(reviewKey)}>
+                  <Icon name="download" />
+                  export .md
+                </a>
               </>
-            )}
-            <a className="link" href={exportUrl(reviewKey)}>
-              <Icon name="download" />
-              export .md
-            </a>
-          </div>
+            }
+          />
         </div>
       </div>
     </div>

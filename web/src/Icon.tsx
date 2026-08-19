@@ -18,6 +18,8 @@ const PATHS: Record<string, string[]> = {
   eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"],
   download: ["M12 3v12", "m7 12 5 5 5-5", "M5 21h14"],
   external: ["M14 4h6v6", "M20 4 10 14", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
+  settings: ["M20 7h-9", "M14 17H5"],
+  down: ["M12 5v13", "m6 12 6 6 6-6"],
 };
 
 /** Icons with a circle in them, drawn before the paths. */
@@ -25,6 +27,10 @@ const CIRCLES: Record<string, { cx: number; cy: number; r: number }[]> = {
   approve: [{ cx: 12, cy: 12, r: 9 }],
   changes: [{ cx: 12, cy: 12, r: 9 }],
   eye: [{ cx: 12, cy: 12, r: 3 }],
+  settings: [
+    { cx: 17, cy: 17, r: 3 },
+    { cx: 7, cy: 7, r: 3 },
+  ],
 };
 
 const EXTRA: Record<string, string[]> = {
