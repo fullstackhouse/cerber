@@ -8,9 +8,7 @@ verdict with a confidence score. You go through it in a local web cockpit.
 write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
 reviewing is 100% local and read-only.
 
-Named after Cerberus, the gatekeeper — and a sibling of
-[cezar](https://github.com/open-mercato/cezar): cezar runs coding agents,
-cerber guards what gets merged.
+Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
 ## Quick start
 
