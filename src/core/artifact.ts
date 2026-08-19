@@ -74,6 +74,8 @@ export const RunInfoSchema = z.object({
   finishedAt: z.string().nullable().default(null),
   costUsd: z.number().nullable().default(null),
   error: z.string().nullable().default(null),
+  /** The reviewer could read the repo at the PR head, not just the diff. */
+  withSource: z.boolean().default(false),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 

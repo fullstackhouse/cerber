@@ -72,6 +72,7 @@ export interface Artifact {
     finishedAt: string | null;
     costUsd: number | null;
     error: string | null;
+    withSource?: boolean;
   } | null;
   sent: {
     at: string;

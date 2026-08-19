@@ -29,9 +29,11 @@ export interface ServeOptions {
   /** When set, every request must present this token (Bearer header, ?token= query, or the cookie it sets). */
   token?: string;
   daemon?: DaemonHandle;
+  /** Cockpit re-reviews read a local checkout of the PR head, not the diff alone. */
+  withSource?: boolean;
 }
 
-export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Promise<Hono> {
+export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon" | "withSource">): Promise<Hono> {
   const app = new Hono();
 
   if (opts.token) {
@@ -217,16 +219,27 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Pr
     }
 
     const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+    // ?source=1 asks for a source-backed re-review even when the server wasn't
+    // started with --with-source; ?source=0 opts out of it.
+    const sourceParam = c.req.query("source");
+    const withSource = sourceParam == null ? opts.withSource : sourceParam !== "0";
     // Mark it running before responding, so the cockpit's next poll can't catch
     // the old "ready" status and conclude the run already finished.
     const running = await updateArtifactByKey(key, (a) => ({
       ...a,
       status: "running" as const,
-      run: { model: null, startedAt: new Date().toISOString(), finishedAt: null, costUsd: null, error: null },
+      run: {
+        model: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        costUsd: null,
+        error: null,
+        withSource: withSource === true,
+      },
     }));
 
     // Minutes-long: run it detached and let the cockpit poll the artifact.
-    void reviewPr(ref, { force: true, onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`) })
+    void reviewPr(ref, { force: true, withSource, onProgress: (m) => console.log(`[rerun ${artifact.id}] ${m}`) })
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[rerun ${artifact.id}] failed: ${message}`);

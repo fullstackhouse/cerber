@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
+import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
@@ -34,10 +35,21 @@ program
   .option("-a, --awaiting-me", "discover and review all open PRs awaiting your review")
   .option("-P, --parallel <n>", "how many reviews to run concurrently", "3")
   .option("-f, --force", "re-review even if the artifact is up to date with the PR head")
+  .option(
+    "-s, --with-source",
+    "check the PR head out locally so the reviewer can read the code around the diff (slower, pricier, better-grounded)",
+  )
   .action(
     async (
       prs: string[],
-      opts: { repo?: string; model?: string; awaitingMe?: boolean; parallel: string; force?: boolean },
+      opts: {
+        repo?: string;
+        model?: string;
+        awaitingMe?: boolean;
+        parallel: string;
+        force?: boolean;
+        withSource?: boolean;
+      },
     ) => {
       let refs: PrRef[];
       if (opts.awaitingMe) {
@@ -67,6 +79,7 @@ program
           const { artifact, skipped } = await reviewPr(ref, {
             model: opts.model,
             force: opts.force,
+            withSource: opts.withSource,
             onProgress: (m) => console.log(`[${label}] ${m}`),
           });
           if (skipped) {
@@ -192,6 +205,40 @@ program
   });
 
 program
+  .command("prune")
+  .description("Delete cached source checkouts in ~/.cerber/src (they re-fetch on the next --with-source review)")
+  .option("--all", "delete every checkout, including ones for reviews still awaiting you")
+  .action(async (opts: { all?: boolean }) => {
+    const checkouts = await listCheckouts();
+    if (checkouts.length === 0) {
+      console.log(`No source checkouts in ${cerberHome()}/src.`);
+      return;
+    }
+    const artifacts = new Map((await listArtifacts()).map((a) => [a.id, a]));
+    const mb = (bytes: number) => {
+      const value = bytes / 1024 / 1024;
+      return `${value.toFixed(value < 10 ? 1 : 0)} MB`;
+    };
+
+    let freed = 0;
+    let kept = 0;
+    for (const checkout of checkouts) {
+      const artifact = artifacts.get(checkout.id);
+      // A review you have not sent yet is still live work — its checkout makes
+      // the next re-review cheap, so only --all takes it.
+      const done = !artifact || artifact.sent != null || artifact.pr.state !== "OPEN";
+      if (!opts.all && !done) {
+        kept++;
+        continue;
+      }
+      await removeCheckout(checkout.dir);
+      freed += checkout.bytes;
+      console.log(`removed ${checkout.id.padEnd(40)} ${mb(checkout.bytes)}`);
+    }
+    console.log(`\nFreed ${mb(freed)}${kept > 0 ? `; kept ${kept} for open reviews (--all removes them too)` : ""}.`);
+  });
+
+program
   .command("stats")
   .description("How well-calibrated the AI reviews are: verdict agreement and comment survival by confidence")
   .action(async () => {
@@ -257,6 +304,10 @@ program
   .option("-P, --parallel <n>", "daemon review concurrency", "3")
   .option("-m, --model <model>", "Claude model override for daemon reviews")
   .option(
+    "-s, --with-source",
+    "let reviews read a local checkout of the PR head, not just the diff (applies to daemon runs and cockpit re-reviews)",
+  )
+  .option(
     "--auto-send",
     "ACTUALLY auto-send APPROVE verdicts at/above --auto-send-threshold (default: shadow mode, which only logs what would be sent)",
   )
@@ -272,6 +323,7 @@ program
       repo: string[];
       parallel: string;
       model?: string;
+      withSource?: boolean;
       autoSend?: boolean;
       autoSendThreshold: string;
       insecure?: boolean;
@@ -298,11 +350,18 @@ program
             intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
             parallel: Math.max(1, Number(opts.parallel) || 1),
             model: opts.model,
+            withSource: opts.withSource,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
         : undefined;
-      await startServer({ port: Number(opts.port), host: opts.host, token, daemon });
+      await startServer({
+        port: Number(opts.port),
+        host: opts.host,
+        token,
+        daemon,
+        withSource: opts.withSource,
+      });
     },
   );
 

@@ -12,6 +12,8 @@ export interface DaemonOptions {
   intervalMs: number;
   parallel: number;
   model?: string;
+  /** Review against a local checkout of the PR head, not the diff alone. */
+  withSource?: boolean;
   /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
@@ -93,6 +95,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         try {
           const result = await reviewPr(ref, {
             model: opts.model,
+            withSource: opts.withSource,
             onProgress: (m) => log(`[${label}] ${m}`),
           });
           if (result.skipped) skipped++;

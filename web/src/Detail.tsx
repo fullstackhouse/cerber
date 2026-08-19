@@ -442,7 +442,7 @@ function FreshnessBanner({
           )}
           The summary and verdict still describe the commit that was reviewed.
           {!artifact.sent && (
-            <button className="rerun-btn" disabled={rerunning} onClick={onRerun}>
+            <button className="rerun-btn" disabled={rerunning} onClick={() => onRerun()}>
               {rerunning ? "starting…" : "Re-review at the new head"}
             </button>
           )}
@@ -498,10 +498,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   if (error) return <p className="error">{error}</p>;
   if (!artifact) return <p className="muted">Loading…</p>;
 
-  const onRerun = () => {
+  const onRerun = (withSource?: boolean) => {
     setRerunning(true);
     setError(null);
-    rerunReview(reviewKey)
+    rerunReview(reviewKey, withSource)
       .then(setArtifact)
       .catch((e) => {
         setError(String(e));
@@ -537,8 +537,19 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         {artifact.pr.author} · {artifact.pr.headRefName} → {artifact.pr.baseRefName} ·{" "}
         {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
         <span className="del">-{artifact.pr.deletions}</span>
-        {artifact.run?.costUsd != null && <> · review cost ${artifact.run.costUsd.toFixed(2)}</>} ·
-        status: <strong>{artifact.status}</strong>
+        {artifact.run?.costUsd != null && <> · review cost ${artifact.run.costUsd.toFixed(2)}</>} ·{" "}
+        {artifact.run?.withSource ? "read the full source" : "read the diff only"} · status:{" "}
+        <strong>{artifact.status}</strong>
+        {!readOnly && artifact.status !== "running" && !artifact.run?.withSource && (
+          <button
+            className="rerun-btn"
+            disabled={rerunning}
+            title="Check the PR head out locally and re-review with the code around the diff — slower, but it stops the AI hedging over context it cannot see."
+            onClick={() => onRerun(true)}
+          >
+            {rerunning ? "starting…" : "Re-review with full source"}
+          </button>
+        )}
       </p>
 
       {artifact.verdict && (

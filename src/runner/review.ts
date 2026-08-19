@@ -6,6 +6,7 @@ import {
   SCHEMA_VERSION,
   artifactId,
 } from "../core/artifact.js";
+import { neutralDir, prepareCheckout } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
@@ -18,7 +19,17 @@ export interface ReviewOptions {
   onProgress?: (message: string) => void;
   /** Re-review even if a fresh artifact for the same head SHA exists. */
   force?: boolean;
+  /**
+   * Check the PR head out locally and let the reviewer read it, instead of
+   * reviewing the diff alone. Slower and pricier; buys context the diff can't
+   * give (enclosing functions, callers, existing helpers, tests elsewhere).
+   */
+  withSource?: boolean;
 }
+
+/** All the reviewer ever needs from a checkout — everything else stays off. */
+const READ_TOOLS = ["Read", "Grep", "Glob"];
+const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
 
 export interface ReviewResult {
   artifact: Artifact;
@@ -64,6 +75,27 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
 
   const diff = await fetchPrDiff(ref);
 
+  // A checkout is an optimisation, never a precondition: if git or gh can't
+  // produce one, fall back to the diff-only review rather than failing the run.
+  let source: string | null = null;
+  if (opts.withSource) {
+    try {
+      const checkout = await prepareCheckout(ref, { log });
+      source = checkout.dir;
+      if (pr.headSha && checkout.sha !== pr.headSha) {
+        log(
+          `Note: the checkout is at ${checkout.sha.slice(0, 7)} but the PR head is ${pr.headSha.slice(0, 7)} — ` +
+            `the PR moved while we fetched.`,
+        );
+      }
+    } catch (err: unknown) {
+      log(
+        `Could not check out the source (${err instanceof Error ? err.message : err}) — ` +
+          `reviewing from the diff alone.`,
+      );
+    }
+  }
+
   let artifact: Artifact = {
     schemaVersion: SCHEMA_VERSION,
     id: artifactId(pr),
@@ -76,19 +108,29 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     chapters: [],
     comments: [],
     verdict: null,
-    run: { model: opts.model ?? null, startedAt: now(), finishedAt: null, costUsd: null, error: null },
+    run: {
+      model: opts.model ?? null,
+      startedAt: now(),
+      finishedAt: null,
+      costUsd: null,
+      error: null,
+      withSource: source !== null,
+    },
     sent: null,
     refresh: null,
     calibration: null,
   };
   await saveArtifact(artifact);
 
-  const { prompt, truncated } = buildReviewPrompt(pr, diff);
+  const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null });
   if (truncated) log("Warning: diff exceeds the context budget and was truncated.");
-  log(`Reviewing with Claude${opts.model ? ` (${opts.model})` : ""}… this can take a few minutes.`);
+  log(
+    `Reviewing with Claude${opts.model ? ` (${opts.model})` : ""}` +
+      `${source ? ", reading the full source" : ""}… this can take a few minutes.`,
+  );
 
   try {
-    const review = await runAiReview(prompt, opts);
+    const review = await runAiReview(prompt, opts, source);
     // The prompt demands each file in exactly one chapter, but models drift:
     // keep a file only in the first chapter that claims it.
     const seen = new Set<string>();
@@ -122,6 +164,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         finishedAt: now(),
         costUsd: review.costUsd,
         error: null,
+        withSource: source !== null,
       },
     };
 
@@ -177,14 +220,25 @@ export async function pool<T, R>(
 async function runAiReview(
   prompt: string,
   opts: ReviewOptions,
+  source: string | null,
 ): Promise<{ ai: AiReview; costUsd: number | null; model: string | null }> {
-  const first = await runClaude(prompt, { model: opts.model });
+  // Without a checkout the run has nothing legitimate to read — cerber's own
+  // cwd is not the reviewed repo — so every tool stays off, and it runs in an
+  // empty directory so no unrelated project's CLAUDE.md rides along.
+  const claudeOpts = {
+    model: opts.model,
+    cwd: source ?? (await neutralDir()),
+    allowedTools: source ? READ_TOOLS : undefined,
+    disallowedTools: source ? OFF_TOOLS : [...OFF_TOOLS, ...READ_TOOLS],
+    isolateWorkspace: true,
+  };
+  const first = await runClaude(prompt, claudeOpts);
   try {
     return { ai: AiReviewSchema.parse(extractJson(first.text)), costUsd: first.costUsd, model: first.model };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     opts.onProgress?.("Model output failed validation — retrying once…");
-    const second = await runClaude(buildRetryPrompt(prompt, first.text, message), { model: opts.model });
+    const second = await runClaude(buildRetryPrompt(prompt, first.text, message), claudeOpts);
     const cost = (first.costUsd ?? 0) + (second.costUsd ?? 0);
     return {
       ai: AiReviewSchema.parse(extractJson(second.text)),
