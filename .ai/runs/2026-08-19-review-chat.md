@@ -111,6 +111,8 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ## Progress
 
+PR: #6
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Session capture and resume plumbing
