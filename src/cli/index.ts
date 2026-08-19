@@ -7,6 +7,7 @@ import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js
 import { ReviewEvent, buildReviewPayload, eventForRecommendation } from "../core/send.js";
 import { cerberHome, listArtifacts, loadArtifact, updateArtifactByKey } from "../core/state.js";
 import { pool, reviewPr } from "../runner/review.js";
+import { startDaemon } from "../server/daemon.js";
 import { startServer } from "../server/index.js";
 
 const program = new Command();
@@ -16,7 +17,7 @@ program
   .description(
     "AI code-review cockpit. Claude reviews PRs into local artifacts; nothing reaches GitHub until you explicitly send it.",
   )
-  .version("0.3.0");
+  .version("0.4.0");
 
 program
   .command("review")
@@ -184,12 +185,52 @@ program
 
 program
   .command("serve")
-  .description("Start the local review cockpit")
+  .description("Start the review cockpit; --daemon keeps the queue warm by polling GitHub")
   .option("-p, --port <port>", "port", "4820")
-  .option("-H, --host <host>", "host to bind", "127.0.0.1")
-  .action(async (opts: { port: string; host: string }) => {
-    await startServer({ port: Number(opts.port), host: opts.host });
-  });
+  .option("-H, --host <host>", "host to bind (0.0.0.0 for VPS — requires --token)", "127.0.0.1")
+  .option("-t, --token <token>", "require this token on every request (env: CERBER_TOKEN)")
+  .option("-d, --daemon", "poll for PRs awaiting your review and auto-review them (read-only)")
+  .option("-i, --interval <minutes>", "daemon poll interval", "5")
+  .option("-R, --repo <owner/repo>", "repo(s) the daemon watches (repeatable; default: all)", collect, [])
+  .option("-P, --parallel <n>", "daemon review concurrency", "3")
+  .option("-m, --model <model>", "Claude model override for daemon reviews")
+  .option("--insecure", "allow binding a non-localhost host without a token (NOT recommended)")
+  .action(
+    async (opts: {
+      port: string;
+      host: string;
+      token?: string;
+      daemon?: boolean;
+      interval: string;
+      repo: string[];
+      parallel: string;
+      model?: string;
+      insecure?: boolean;
+    }) => {
+      const token = opts.token ?? process.env.CERBER_TOKEN;
+      const isLocal = ["127.0.0.1", "localhost", "::1"].includes(opts.host);
+      if (!isLocal && !token && !opts.insecure) {
+        console.error(
+          `Refusing to bind ${opts.host} without auth: anyone reaching this port could send reviews as you.\n` +
+            `Pass --token <secret> (or CERBER_TOKEN), or --insecure if the network is trusted.`,
+        );
+        process.exit(1);
+      }
+      const daemon = opts.daemon
+        ? startDaemon({
+            repos: opts.repo,
+            intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
+            parallel: Math.max(1, Number(opts.parallel) || 1),
+            model: opts.model,
+          })
+        : undefined;
+      await startServer({ port: Number(opts.port), host: opts.host, token, daemon });
+    },
+  );
+
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
 
 program.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err);

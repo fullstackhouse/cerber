@@ -58,10 +58,25 @@ Early. Current phase: review + read-only cockpit.
    GitHub write in the codebase) + `cerber export` to markdown
 3. ✅ `--awaiting-me` discovery, parallel runs (`--parallel`, default 3),
    freshness skip (same head SHA → no re-run; `--force` overrides), queue stats
-4. Daemon/VPS mode: poll for PRs awaiting your review, review them
-   automatically, cockpit always warm
+4. ✅ Daemon/VPS mode: `cerber serve --daemon` polls for PRs awaiting your
+   review and reviews them automatically (read-only); token auth for
+   non-localhost binds
 5. Confidence calibration → shadow-mode auto-send → opt-in auto-send above a
    threshold
+
+## Running on a VPS
+
+```bash
+cerber serve --daemon --host 0.0.0.0 --token "$(openssl rand -hex 16)" \
+  --repo you/repo-a --repo you/repo-b --interval 10
+```
+
+The daemon polls GitHub, reviews anything new (skipping PRs whose artifact
+already matches the head SHA), and the cockpit is always warm — open it any
+minute and see pending/ready/sent reviews. Auth: `?token=…` once in the
+browser (sets a cookie) or `Authorization: Bearer …`. Binding a non-localhost
+host without a token is refused. The daemon never sends reviews — Send stays
+a human click.
 
 ## Development
 

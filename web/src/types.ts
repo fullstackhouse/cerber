@@ -75,6 +75,20 @@ export interface Artifact {
   } | null;
 }
 
+export type DaemonStatus =
+  | { enabled: false }
+  | {
+      enabled: true;
+      polling: boolean;
+      repos: string[];
+      intervalMs: number;
+      polls: number;
+      errors: number;
+      lastPollAt: string | null;
+      nextPollAt: string | null;
+      lastSummary: string | null;
+    };
+
 export interface SendPreview {
   event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
   body: string;

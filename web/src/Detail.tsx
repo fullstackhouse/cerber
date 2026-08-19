@@ -11,6 +11,7 @@ import {
   patchReview,
   sendReview,
 } from "./api";
+import { Markdown } from "./Markdown";
 import { Artifact, Chapter, ReviewComment, SendPreview } from "./types";
 
 function DiffBlock({ patch }: { patch: string }) {
@@ -93,7 +94,7 @@ function CommentCard({
           rows={Math.max(3, draft.split("\n").length)}
         />
       ) : (
-        <div className="comment-body">{comment.body}</div>
+        <Markdown className="comment-body" text={comment.body} />
       )}
     </div>
   );
@@ -191,7 +192,7 @@ function ChapterSection({
       </h3>
       {open && (
         <>
-          <p className="chapter-explanation">{chapter.explanation}</p>
+          <Markdown className="chapter-explanation" text={chapter.explanation} />
           {comments.map((c) => (
             <CommentCard
               key={c.id}
@@ -376,7 +377,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <option value="request_changes">request changes</option>
             </select>
           )}
-          <p>{artifact.verdict.reasoning}</p>
+          <Markdown text={artifact.verdict.reasoning} />
         </div>
       )}
 
@@ -384,7 +385,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       <section className="summary">
         <h2>Summary</h2>
-        <div className="summary-body">{artifact.summary || "(no summary)"}</div>
+        <Markdown className="summary-body" text={artifact.summary || "(no summary)"} />
       </section>
 
       <h2>Walkthrough</h2>

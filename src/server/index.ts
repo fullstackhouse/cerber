@@ -1,10 +1,12 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { submitReview } from "../core/gh.js";
@@ -16,10 +18,34 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export interface ServeOptions {
   port: number;
   host: string;
+  /** When set, every request must present this token (Bearer header, ?token= query, or the cookie it sets). */
+  token?: string;
+  daemon?: DaemonHandle;
 }
 
-export async function startServer(opts: ServeOptions): Promise<void> {
+export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon">): Promise<Hono> {
   const app = new Hono();
+
+  if (opts.token) {
+    const token = opts.token;
+    app.use("*", async (c, next) => {
+      const query = c.req.query("token");
+      const cookie = getCookie(c, "cerber_token");
+      const header = c.req.header("authorization");
+      if (query === token || cookie === token || header === `Bearer ${token}`) {
+        if (query === token && cookie !== token) {
+          // First visit via ?token=… — set the cookie so the SPA's asset and API requests pass.
+          setCookie(c, "cerber_token", token, { httpOnly: true, sameSite: "Strict", path: "/" });
+        }
+        return next();
+      }
+      return c.text("unauthorized — pass ?token=… or Authorization: Bearer …\n", 401);
+    });
+  }
+
+  app.get("/api/daemon", (c) =>
+    c.json(opts.daemon ? opts.daemon.status() : { enabled: false }),
+  );
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();
@@ -199,7 +225,14 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     );
   }
 
+  return app;
+}
+
+export async function startServer(opts: ServeOptions): Promise<void> {
+  const app = await buildApp(opts);
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
-    console.log(`cerber cockpit: http://${opts.host}:${info.port}`);
+    const tokenHint = opts.token ? `/?token=${opts.token}` : "";
+    console.log(`cerber cockpit: http://${opts.host}:${info.port}${tokenHint}`);
+    if (opts.daemon) console.log("daemon: polling for PRs awaiting your review");
   });
 }

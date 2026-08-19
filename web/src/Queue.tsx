@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchReviews } from "./api";
-import { ReviewListItem } from "./types";
+import { fetchDaemonStatus, fetchReviews } from "./api";
+import { DaemonStatus, ReviewListItem } from "./types";
 
 const STATUS_ORDER = ["ready", "running", "awaiting", "reviewed", "failed", "sent", "skipped"];
 
@@ -18,16 +18,38 @@ function VerdictBadge({ verdict }: { verdict: ReviewListItem["verdict"] }) {
   );
 }
 
+function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
+  if (!daemon?.enabled) return null;
+  return (
+    <div className="daemon-strip">
+      <span>
+        🟢 daemon polling every {Math.round(daemon.intervalMs / 60_000)}m
+        {daemon.repos.length > 0 ? ` (${daemon.repos.join(", ")})` : " (all repos)"}
+      </span>
+      {daemon.polling && <span>⏳ polling now…</span>}
+      {daemon.lastSummary && <span className="muted">last: {daemon.lastSummary}</span>}
+      {daemon.nextPollAt && !daemon.polling && (
+        <span className="muted">next: {new Date(daemon.nextPollAt).toLocaleTimeString()}</span>
+      )}
+    </div>
+  );
+}
+
 export function Queue() {
   const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
+  const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const load = () =>
+    const load = () => {
       fetchReviews()
         .then((r) => alive && setReviews(r))
         .catch((e) => alive && setError(String(e)));
+      fetchDaemonStatus()
+        .then((d) => alive && setDaemon(d))
+        .catch(() => {});
+    };
     load();
     const timer = setInterval(load, 10_000);
     return () => {
@@ -60,6 +82,7 @@ export function Queue() {
 
   return (
     <>
+      <DaemonStrip daemon={daemon} />
       <div className="queue-stats">
         {STATUS_ORDER.filter((s) => counts[s]).map((s) => (
           <span key={s} className={`status status-${s}`}>

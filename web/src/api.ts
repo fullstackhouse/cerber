@@ -1,4 +1,4 @@
-import { Artifact, ReviewListItem, SendPreview } from "./types";
+import { Artifact, DaemonStatus, ReviewListItem, SendPreview } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -19,6 +19,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const fetchReviews = () => request<ReviewListItem[]>("/api/reviews");
+
+export const fetchDaemonStatus = () => request<DaemonStatus>("/api/daemon");
 
 export const fetchReview = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}`);
