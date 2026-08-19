@@ -336,16 +336,44 @@ button {
   color: var(--faint);
 }
 
+/* The icon rail at the right end of the top bar. Centred rather than
+   baseline-aligned, so a link and a button holding the same icon sit on the
+   same line — the bell is a button and the gear is an anchor. */
 .topbar-link {
   font-size: 11px;
   color: var(--muted);
   text-decoration: none;
   border-left: 1px solid var(--line);
   padding-left: 14px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .topbar-link:hover {
   color: var(--fg);
+}
+
+/* The arrival bell sits in that rail too, so it only has to shed the chrome a
+   button comes with — the size and the alignment are .topbar-link's, which is
+   what keeps it level with the gear. On until the browser says otherwise:
+   `ask` is an offer, not an off state, so it keeps the accent. */
+.bell {
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--line);
+  padding: 0 0 0 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.bell-on,
+.bell-ask {
+  color: var(--accent);
+}
+
+.bell-blocked {
+  color: var(--fainter);
+  cursor: help;
 }
 
 /* ---- daemon bar ---- */

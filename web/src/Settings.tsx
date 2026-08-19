@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
+import { NotifyState, useNotifyState } from "./notify";
 import { ConfigView } from "./types";
 
 const EXAMPLES = [
@@ -12,7 +13,17 @@ const EXAMPLES = [
 /** Rule errors carry the guidance a person needs — show it, not "Error: ...". */
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** The checkbox says what ticking it does — including when it can't. */
+const NOTIFY_LABEL: Record<NotifyState, string> = {
+  unsupported: "this browser has no notifications to give",
+  blocked: "this browser has blocked notifications for cerber",
+  off: "tell me when a PR lands in the queue",
+  ask: "tell me when a PR lands in the queue (the browser will ask first)",
+  on: "tell me when a PR lands in the queue",
+};
+
 export function Settings() {
+  const [notify, toggleNotify] = useNotifyState();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +76,30 @@ export function Settings() {
       <p className="muted">
         Interval, concurrency and a repo filter live in <code>{config.path}</code> under{" "}
         <code>daemon</code> — hand-editable, like everything here.
+      </p>
+
+      <h1>Notifications</h1>
+      <p>
+        The cockpit spends its day as a background tab, so it tells you when a PR lands in the
+        queue: one desktop notification per poll. A single arrival names the PR and opens that
+        review when you click it; several landing at once fold into one notification that opens
+        the queue. Nothing is announced while you're looking straight at the cockpit, and a PR
+        this browser has already seen never arrives twice.
+      </p>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={notify === "on"}
+          disabled={notify === "unsupported" || notify === "blocked"}
+          onChange={toggleNotify}
+        />{" "}
+        {NOTIFY_LABEL[notify]}
+      </label>
+      <p className="muted">
+        This one is per-browser, not per-machine: the permission belongs to this browser, so the
+        switch lives here rather than in <code>{config.path}</code>. Granting it is the browser's
+        prompt, not cerber's — a browser that has blocked cerber has to be un-blocked from the
+        padlock next to the address bar.
       </p>
 
       <h1>Trusted PRs</h1>

@@ -20,6 +20,13 @@ const PATHS: Record<string, string[]> = {
   external: ["M14 4h6v6", "M20 4 10 14", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
   settings: ["M20 7h-9", "M14 17H5"],
   down: ["M12 5v13", "m6 12 6 6 6-6"],
+  bell: ["M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6", "M13.7 20a2 2 0 0 1-3.4 0"],
+  bellOff: [
+    "M8.5 3.6A6 6 0 0 1 18 9c0 1.7.2 2.9.6 3.9",
+    "M16.5 17H4s2-1 2-6a6 6 0 0 1 .7-2.8",
+    "M13.7 20a2 2 0 0 1-3.4 0",
+    "m3 3 18 18",
+  ],
 };
 
 /** Icons with a circle in them, drawn before the paths. */
