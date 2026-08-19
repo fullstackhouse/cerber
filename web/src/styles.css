@@ -473,19 +473,7 @@ button {
   font-weight: 500;
 }
 
-/* Settled by you, still in the queue: dealt with, not unread. */
-.row-done .col-title,
-.row-done .col-slug,
-.row-done .col-verdict {
-  opacity: 0.6;
-}
-
-.row-done:hover .col-title,
-.row-done:hover .col-slug,
-.row-done:hover .col-verdict {
-  opacity: 1;
-}
-
+/* What settled a review, on its row in the drawer. */
 .tag-done {
   flex-shrink: 0;
   color: var(--muted);

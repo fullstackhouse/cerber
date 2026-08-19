@@ -38,9 +38,10 @@ Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
 `~/.cerber/config.json` and apply on the next poll. The queue only lists what
-still wants you: a review you have sent drops into a drawer under it, merged
-and closed PRs into another, and PRs in archived repos are never picked up at
-all — the repo is read-only, so a review could never be sent.
+still wants you: anything you have settled drops into a drawer under it — one
+for reviews you sent, one for the ones you marked reviewed or skipped, one for
+merged and closed PRs — and PRs in archived repos are never picked up at all,
+since the repo is read-only and a review could never be sent.
 
 ## What a review looks like
 

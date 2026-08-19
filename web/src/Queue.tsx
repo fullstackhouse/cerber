@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
-import { Tab, TABS, ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell } from "./inbox";
+import { SETTLED, Tab, TABS, ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const openReview = (key: string) => {
@@ -83,12 +83,9 @@ function Row({
   onOpen: () => void;
 }) {
   const v = verdictCell(r);
-  // Settled locally: still in the queue (the PR is open and you may come back),
-  // but you have had your say — the row says so rather than reading as unread.
-  const settled = r.status === "reviewed" || r.status === "skipped";
   return (
     <div
-      className={`row${selected ? " row-on" : ""}${settled ? " row-done" : ""}`}
+      className={`row${selected ? " row-on" : ""}`}
       // Clicking a row opens it. The strip explains whatever the pointer is
       // over on the way there, so reading a row costs nothing either.
       onClick={onOpen}
@@ -109,7 +106,6 @@ function Row({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      {settled && <span className="tag tag-done">{r.status}</span>}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -128,7 +124,7 @@ function Row({
 }
 
 /** A row in one of the drawers: still openable, but out of the day's way. */
-function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
+function SettledRow({ r, verdict, tag }: { r: ReviewListItem; verdict: string; tag?: string }) {
   return (
     <div className="row row-settled" onClick={() => openReview(r.key)} role="button" tabIndex={-1}>
       <span className="col-caret" />
@@ -141,6 +137,7 @@ function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {tag && <span className="tag tag-done">{tag}</span>}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
       <span className="col-verdict">{verdict}</span>
@@ -149,7 +146,7 @@ function SettledRow({ r, verdict }: { r: ReviewListItem; verdict: string }) {
   );
 }
 
-/** One of the two collapsed drawers under the queue. */
+/** One of the collapsed drawers under the queue: work already dealt with. */
 function Drawer({
   open,
   onToggle,
@@ -177,6 +174,7 @@ export function Queue() {
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showSent, setShowSent] = useState(false);
+  const [showSettled, setShowSettled] = useState(false);
   const [starting, setStarting] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("all");
   // The cursor is a review, not a row number: the list re-sorts under it every
@@ -210,17 +208,16 @@ export function Queue() {
 
   const all = reviews ?? [];
   const archived = useMemo(() => sortReviews(all.filter(isArchived)), [all]);
-  // The queue is what still wants you. A sent review is a record of what you
-  // already did, so it drops into its own drawer instead of sitting between
-  // two drafts you haven't read.
-  const live = useMemo(
-    () => sortReviews(all.filter((r) => !isArchived(r) && r.status !== "sent")),
-    [all],
+  // The queue is what still wants you; everything you have dealt with drops
+  // into a drawer under it. Sent and settled stay apart because that is the
+  // line the whole tool is drawn along: one reached GitHub, the other didn't.
+  const open = useMemo(() => all.filter((r) => !isArchived(r)), [all]);
+  const live = useMemo(() => sortReviews(open.filter((r) => !SETTLED.includes(r.status))), [open]);
+  const settled = useMemo(
+    () => sortReviews(open.filter((r) => r.status === "reviewed" || r.status === "skipped")),
+    [open],
   );
-  const sent = useMemo(
-    () => sortReviews(all.filter((r) => !isArchived(r) && r.status === "sent")),
-    [all],
-  );
+  const sent = useMemo(() => sortReviews(open.filter((r) => r.status === "sent")), [open]);
   const rows = useMemo(
     () => (tab === "all" ? live : live.filter((r) => tabOf(r) === tab)),
     [live, tab],
@@ -426,8 +423,19 @@ export function Queue() {
         </div>
       )}
 
-      {(sent.length > 0 || archived.length > 0) && (
+      {(settled.length > 0 || sent.length > 0 || archived.length > 0) && (
         <div className="wrap drawers">
+          {settled.length > 0 && (
+            <Drawer
+              open={showSettled}
+              onToggle={() => setShowSettled(!showSettled)}
+              label={`settled — ${settled.length} you marked reviewed or skipped`}
+            >
+              {settled.map((r) => (
+                <SettledRow key={r.key} r={r} verdict={verdictCell(r).label} tag={r.status} />
+              ))}
+            </Drawer>
+          )}
           {sent.length > 0 && (
             <Drawer
               open={showSent}

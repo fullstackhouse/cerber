@@ -43,7 +43,7 @@ export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
 }
 
 /** Statuses that mean you have dealt with this review, one way or another. */
-const SETTLED = ["sent", "reviewed", "skipped"];
+export const SETTLED = ["sent", "reviewed", "skipped"];
 
 /**
  * The reviews the ‹ › arrows walk: open PRs that still want something from you.
