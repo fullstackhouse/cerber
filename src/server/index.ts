@@ -29,7 +29,7 @@ export interface ServeOptions {
   /** When set, every request must present this token (Bearer header, ?token= query, or the cookie it sets). */
   token?: string;
   daemon?: DaemonHandle;
-  /** Cockpit re-reviews read a local checkout of the PR head, not the diff alone. */
+  /** False makes cockpit re-reviews diff-only (`serve --no-source`). Defaults to on. */
   withSource?: boolean;
 }
 
@@ -219,8 +219,8 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon" | "wi
     }
 
     const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
-    // ?source=1 asks for a source-backed re-review even when the server wasn't
-    // started with --with-source; ?source=0 opts out of it.
+    // Source-backed unless the server was started with --no-source; ?source=1
+    // overrides that per re-review, ?source=0 opts one out.
     const sourceParam = c.req.query("source");
     const withSource = sourceParam == null ? opts.withSource : sourceParam !== "0";
     // Mark it running before responding, so the cockpit's next poll can't catch
@@ -234,7 +234,7 @@ export async function buildApp(opts: Pick<ServeOptions, "token" | "daemon" | "wi
         finishedAt: null,
         costUsd: null,
         error: null,
-        withSource: withSource === true,
+        withSource: withSource !== false,
       },
     }));
 

@@ -12,7 +12,7 @@ export interface DaemonOptions {
   intervalMs: number;
   parallel: number;
   model?: string;
-  /** Review against a local checkout of the PR head, not the diff alone. */
+  /** False reviews the diff alone, with no local checkout. Defaults to on. */
   withSource?: boolean;
   /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.

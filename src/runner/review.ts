@@ -6,12 +6,12 @@ import {
   SCHEMA_VERSION,
   artifactId,
 } from "../core/artifact.js";
-import { neutralDir, prepareCheckout } from "../core/checkout.js";
+import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { extractJson, runClaude } from "./claude.js";
-import { ReviewInProgressError, beginReview, endReview } from "./inflight.js";
+import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
 export interface ReviewOptions {
@@ -20,9 +20,10 @@ export interface ReviewOptions {
   /** Re-review even if a fresh artifact for the same head SHA exists. */
   force?: boolean;
   /**
-   * Check the PR head out locally and let the reviewer read it, instead of
-   * reviewing the diff alone. Slower and pricier; buys context the diff can't
-   * give (enclosing functions, callers, existing helpers, tests elsewhere).
+   * Check the PR head out locally and let the reviewer read it — on by
+   * default, because a reviewer that can only see the diff hedges over context
+   * it could have just looked up. Set false to review the diff alone: faster
+   * and cheaper, at the cost of everything outside the changed lines.
    */
   withSource?: boolean;
 }
@@ -78,10 +79,12 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
   // A checkout is an optimisation, never a precondition: if git or gh can't
   // produce one, fall back to the diff-only review rather than failing the run.
   let source: string | null = null;
-  if (opts.withSource) {
+  if (opts.withSource !== false) {
     try {
       const checkout = await prepareCheckout(ref, { log });
       source = checkout.dir;
+      const evicted = await evictOldCheckouts({ inUse: isReviewRunning });
+      if (evicted.length > 0) log(`Evicted ${evicted.length} least-recently-used checkout(s) from the cache.`);
       if (pr.headSha && checkout.sha !== pr.headSha) {
         log(
           `Note: the checkout is at ${checkout.sha.slice(0, 7)} but the PR head is ${pr.headSha.slice(0, 7)} — ` +

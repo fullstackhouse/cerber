@@ -48,33 +48,39 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
-### Reviewing the code, not just the diff
+### It reviews the code, not just the diff
 
-By default the reviewer sees only the unified diff — the same thing you see on
-GitHub, minus the ability to click through to the rest of the file. That is
-fast and cheap, but it makes the AI hedge: *"I can't see the enclosing
-function, so this could be wrong."*
+Cerber checks the PR's head out locally and lets the review read it. That
+matters because a reviewer holding only a diff hedges over things it could have
+just looked up — *"I can't see the enclosing function, so this could be
+wrong"* — and burns its confidence score on missing context instead of on real
+uncertainty. With the source there, it opens the enclosing function, follows
+callers of a changed signature, checks whether a helper already exists, and
+sees whether a test covers the new path.
 
-Add `--with-source` and cerber checks the PR head out locally first, then lets
-the review read it:
+On one real PR, same commit, the difference was: a speculative "this *looks
+like* it sits after an early return" became a concrete finding; a permission
+check the diff showed as a tidy gate turned out to hide a value the API
+response still ships; confidence went 72% → 82%. It cost 3.3× as much and took
+three minutes instead of one.
+
+If you want the old behaviour — faster, cheaper, blind past the changed lines:
 
 ```bash
-cerber review owner/repo#123 --with-source
-cerber serve --daemon --with-source     # every daemon run and cockpit re-review
+cerber review owner/repo#123 --no-source
+cerber serve --daemon --no-source
 ```
 
-The run can then open the enclosing function, follow callers of a changed
-signature, check whether a helper already exists, and see whether a test covers
-the new path — instead of guessing at any of it. It is slower and costs more
-per review; the cockpit labels every review "read the full source" or "read the
-diff only" so you know which one you are reading, and offers a one-click
-**Re-review with full source** on the diff-only ones.
+The cockpit labels every review "read the full source" or "read the diff only",
+and offers a one-click **Re-review with full source** on the diff-only ones.
 
 Details worth knowing:
 
 - The checkout is a shallow (`--depth=1`) fetch of `refs/pull/N/head` from the
   base repo, so fork PRs work with no extra remotes. Auth rides `gh`'s
   credential helper, set on that clone only — your git config is untouched.
+- If git or `gh` can't produce a checkout, the run says so and reviews the diff
+  alone. A missing checkout never fails a review.
 - The run is read-only: `Read`, `Grep` and `Glob` are the only tools it gets.
   Without a checkout it gets none, and runs in an empty directory, so it can
   never read whatever project cerber happens to be started from and mistake it
@@ -88,8 +94,10 @@ Details worth knowing:
   anything, write anything, or reach the network. Read the verdict, don't
   rubber-stamp it.
 - Checkouts live in `~/.cerber/src/<owner>__<repo>__<n>` and are reused by later
-  re-reviews. They are a cache — `cerber prune` (or `--all`) reclaims the space,
-  and a big monorepo is a few hundred MB per PR.
+  re-reviews. A big monorepo is a few hundred MB per PR, so the cache keeps only
+  the 8 most recently reviewed and evicts the rest as it goes — never one a
+  review is currently reading. `cerber prune` reclaims the space now;
+  `cerber prune --all` takes the ones for reviews still awaiting you too.
 
 ### When the PR moves under you
 

@@ -544,7 +544,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           <button
             className="rerun-btn"
             disabled={rerunning}
-            title="Check the PR head out locally and re-review with the code around the diff — slower, but it stops the AI hedging over context it cannot see."
+            title="Re-review with a local checkout of the PR head, so the AI can read the code around the diff instead of hedging over context it cannot see."
             onClick={() => onRerun(true)}
           >
             {rerunning ? "starting…" : "Re-review with full source"}

@@ -36,8 +36,8 @@ program
   .option("-P, --parallel <n>", "how many reviews to run concurrently", "3")
   .option("-f, --force", "re-review even if the artifact is up to date with the PR head")
   .option(
-    "-s, --with-source",
-    "check the PR head out locally so the reviewer can read the code around the diff (slower, pricier, better-grounded)",
+    "--no-source",
+    "review the diff alone: skip the local checkout of the PR head. Faster and cheaper, but the AI cannot see past the changed lines",
   )
   .action(
     async (
@@ -48,7 +48,7 @@ program
         awaitingMe?: boolean;
         parallel: string;
         force?: boolean;
-        withSource?: boolean;
+        source: boolean;
       },
     ) => {
       let refs: PrRef[];
@@ -79,7 +79,7 @@ program
           const { artifact, skipped } = await reviewPr(ref, {
             model: opts.model,
             force: opts.force,
-            withSource: opts.withSource,
+            withSource: opts.source,
             onProgress: (m) => console.log(`[${label}] ${m}`),
           });
           if (skipped) {
@@ -304,8 +304,8 @@ program
   .option("-P, --parallel <n>", "daemon review concurrency", "3")
   .option("-m, --model <model>", "Claude model override for daemon reviews")
   .option(
-    "-s, --with-source",
-    "let reviews read a local checkout of the PR head, not just the diff (applies to daemon runs and cockpit re-reviews)",
+    "--no-source",
+    "review the diff alone, with no local checkout of the PR head (applies to daemon runs and cockpit re-reviews)",
   )
   .option(
     "--auto-send",
@@ -323,7 +323,7 @@ program
       repo: string[];
       parallel: string;
       model?: string;
-      withSource?: boolean;
+      source: boolean;
       autoSend?: boolean;
       autoSendThreshold: string;
       insecure?: boolean;
@@ -350,7 +350,7 @@ program
             intervalMs: Math.max(1, Number(opts.interval) || 5) * 60_000,
             parallel: Math.max(1, Number(opts.parallel) || 1),
             model: opts.model,
-            withSource: opts.withSource,
+            withSource: opts.source,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
@@ -360,7 +360,7 @@ program
         host: opts.host,
         token,
         daemon,
-        withSource: opts.withSource,
+        withSource: opts.source,
       });
     },
   );

@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { prepareCheckout, sourceDir } from "./checkout.js";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { evictOldCheckouts, listCheckouts, prepareCheckout, sourceDir } from "./checkout.js";
 
 const ref = { owner: "acme", repo: "widgets", number: 42 };
 
@@ -21,6 +24,7 @@ function fakeGit(existing: boolean, present: string[] = []) {
         renamed.push([from, to]);
         return true;
       },
+      touch: async () => {},
     },
   };
 }
@@ -90,5 +94,58 @@ describe("prepareCheckout", () => {
     const { renamed, deps } = fakeGit(true);
     await prepareCheckout(ref, { deps });
     expect(renamed).toEqual([]);
+  });
+});
+
+describe("evictOldCheckouts", () => {
+  let home: string;
+  const previousHome = process.env.CERBER_HOME;
+
+  /** Make a checkout dir whose mtime says when it was last reviewed. */
+  async function seed(name: string, ageMinutes: number) {
+    const dir = path.join(home, "src", name);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "file.txt"), "x");
+    const when = new Date(Date.now() - ageMinutes * 60_000);
+    await fs.utimes(dir, when, when);
+  }
+
+  const remaining = async () => (await fs.readdir(path.join(home, "src"))).sort();
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-evict-"));
+    process.env.CERBER_HOME = home;
+  });
+
+  afterEach(async () => {
+    if (previousHome === undefined) delete process.env.CERBER_HOME;
+    else process.env.CERBER_HOME = previousHome;
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it("keeps the most recently used and drops the rest", async () => {
+    await seed("acme__a__1", 30);
+    await seed("acme__b__2", 10);
+    await seed("acme__c__3", 20);
+
+    const evicted = await evictOldCheckouts({ keep: 2 });
+
+    expect(evicted).toEqual(["acme/a#1"]);
+    expect(await remaining()).toEqual(["acme__b__2", "acme__c__3"]);
+  });
+
+  it("never evicts a checkout a review is reading right now", async () => {
+    await seed("acme__a__1", 30);
+    await seed("acme__b__2", 10);
+
+    const evicted = await evictOldCheckouts({ keep: 0, inUse: (id) => id === "acme/a#1" });
+
+    expect(evicted).toEqual(["acme/b#2"]);
+    expect(await remaining()).toEqual(["acme__a__1"]);
+  });
+
+  it("does nothing when the cache is empty", async () => {
+    expect(await evictOldCheckouts({ keep: 2 })).toEqual([]);
+    expect(await listCheckouts()).toEqual([]);
   });
 });

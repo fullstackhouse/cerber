@@ -20,6 +20,8 @@ export interface CheckoutDeps {
   mkdir: (dir: string) => Promise<void>;
   /** Rename a path out of the way; a no-op if it isn't there. */
   quarantine: (from: string, to: string) => Promise<boolean>;
+  /** Mark the checkout as used just now, for the cache's eviction order. */
+  touch: (dir: string) => Promise<void>;
 }
 
 /**
@@ -61,6 +63,10 @@ const realDeps: CheckoutDeps = {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw err;
     }
+  },
+  touch: async (dir) => {
+    const now = new Date();
+    await fs.utimes(dir, now, now).catch(() => {});
   },
 };
 
@@ -121,6 +127,7 @@ export async function prepareCheckout(
   }
 
   const sha = (await deps.git(["rev-parse", "HEAD"], dir)).trim();
+  await deps.touch(dir);
   return { dir, sha };
 }
 
@@ -131,8 +138,14 @@ export interface CachedCheckout {
   bytes: number;
 }
 
-/** Every checkout currently on disk, with what it costs. */
-export async function listCheckouts(): Promise<CachedCheckout[]> {
+interface CheckoutEntry {
+  id: string;
+  dir: string;
+  /** Last time a review used it — how the cache decides what to drop. */
+  usedAt: number;
+}
+
+async function listCheckoutDirs(): Promise<CheckoutEntry[]> {
   const root = path.join(cerberHome(), "src");
   let entries: string[];
   try {
@@ -141,14 +154,52 @@ export async function listCheckouts(): Promise<CachedCheckout[]> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
-  const found: CachedCheckout[] = [];
+  const found: CheckoutEntry[] = [];
   for (const entry of entries) {
     const parsed = entry.match(/^(.+)__(.+)__(\d+)$/);
     if (!parsed) continue;
     const dir = path.join(root, entry);
-    found.push({ id: `${parsed[1]}/${parsed[2]}#${parsed[3]}`, dir, bytes: await dirSize(dir) });
+    const usedAt = await fs.stat(dir).then((s) => s.mtimeMs, () => 0);
+    found.push({ id: `${parsed[1]}/${parsed[2]}#${parsed[3]}`, dir, usedAt });
+  }
+  return found;
+}
+
+/** Every checkout currently on disk, with what it costs. Walks each tree. */
+export async function listCheckouts(): Promise<CachedCheckout[]> {
+  const entries = await listCheckoutDirs();
+  const found: CachedCheckout[] = [];
+  for (const entry of entries) {
+    found.push({ id: entry.id, dir: entry.dir, bytes: await dirSize(entry.dir) });
   }
   return found.sort((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * Checkouts are the default now, so the cache has to stop growing on its own —
+ * a daemon watching a busy repo would otherwise clone every PR it ever sees and
+ * keep them all. Drops the least recently used, and never one being reviewed.
+ */
+export const MAX_CACHED_CHECKOUTS = 8;
+
+export async function evictOldCheckouts(
+  opts: { keep?: number; inUse?: (id: string) => boolean } = {},
+): Promise<string[]> {
+  const keep = opts.keep ?? MAX_CACHED_CHECKOUTS;
+  const inUse = opts.inUse ?? (() => false);
+  const entries = (await listCheckoutDirs()).sort((a, b) => b.usedAt - a.usedAt);
+
+  const evicted: string[] = [];
+  let kept = 0;
+  for (const entry of entries) {
+    if (inUse(entry.id) || kept < keep) {
+      kept++;
+      continue;
+    }
+    await removeCheckout(entry.dir);
+    evicted.push(entry.id);
+  }
+  return evicted;
 }
 
 export async function removeCheckout(dir: string): Promise<void> {
