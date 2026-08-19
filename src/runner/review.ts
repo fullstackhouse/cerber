@@ -176,6 +176,12 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     sent: null,
     refresh: null,
     calibration: null,
+    // The conversation is the user's writing, so a re-review keeps it — the
+    // chat prompt replays the transcript, which is what makes it survive the
+    // session change. The snapshot does NOT carry over: it describes the draft
+    // this run just replaced, and resetting to it would restore a dead review.
+    chat: existing?.chat ?? [],
+    preChat: null,
   };
   await saveArtifact(artifact);
 

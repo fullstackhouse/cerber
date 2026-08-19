@@ -105,6 +105,8 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     sent: null,
     refresh: null,
     calibration: null,
+    chat: [],
+    preChat: null,
   };
 }
 
