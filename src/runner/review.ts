@@ -8,18 +8,11 @@ import {
   artifactId,
 } from "../core/artifact.js";
 import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout.js";
-import {
-  PrRef,
-  fetchPrDiff,
-  fetchPrInfo,
-  fetchRepoIsPrivate,
-  isOrgMember,
-  isTeamMember,
-} from "../core/gh.js";
+import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
-import { decideTrust, membershipQueries, needsVisibility, parseTrustRules } from "../core/trust.js";
+import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
 import { extractJson, runClaude } from "./claude.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
@@ -89,10 +82,6 @@ async function resolveTrust(
   const rules = parseTrustRules((await loadConfig()).trust);
   if (rules.length === 0) return false;
 
-  const isPrivate = needsVisibility(rules)
-    ? await fetchRepoIsPrivate(pr).catch(() => undefined)
-    : undefined;
-
   // A membership check that errors (no read:org scope, GitHub down) must read
   // as "not a member" — never as trust we could not actually confirm.
   const memberships = new Set<string>();
@@ -110,14 +99,7 @@ async function resolveTrust(
     }
   }
 
-  const decision = decideTrust(rules, {
-    owner: pr.owner,
-    repo: pr.repo,
-    author: pr.author,
-    pushAccess: !pr.headFromFork,
-    isPrivate,
-    memberships,
-  });
+  const decision = decideTrust(rules, { author: pr.author, memberships });
   if (decision.trusted) log(`Trusted (${decision.reason}): the review may run commands in the checkout.`);
   return decision.trusted;
 }

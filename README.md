@@ -115,31 +115,33 @@ for PRs you already trust — a teammate's, or anything in your own repos —
 cerber can let the review run commands in the checkout: the test suite, a
 typecheck, `git log`/`git blame`, a build.
 
-Trust is about the *people*, never the code, so you state it and nothing about
-a PR can earn it:
+Trust is about the *people*, and only about people — cerber has no way to
+trust a repository, because anyone can open a PR against one:
 
 ```bash
 cerber trust @fullstackhouse/*      # anyone in the org
 cerber trust @fullstackhouse/devs   # anyone on that GitHub team
 cerber trust @teammate              # one person, by login
-cerber trust private                # any private repo (see the caveat below)
-cerber trust                        # show what is trusted today
+cerber trust                        # show who is trusted today
 ```
 
-**A repo is not a set of people.** Anyone can open a PR against a public repo
-from a fork, so a rule like `fullstackhouse` or `fullstackhouse/open-mercato`
-would otherwise mean "trust whoever showed up". Repo-shaped rules — a repo, an
-owner, `private` — therefore only apply when the PR's branch was pushed to the
-repo itself, which takes write access. To trust people wherever they work,
-including on forks, name them: `@org/*`, `@org/team`, or `@login`. Membership
-is resolved against GitHub at review time (your `gh` login needs `read:org`),
-and a lookup that fails counts as "not a member".
+Membership is resolved against GitHub when the review runs (your `gh` login
+needs `read:org`), and a lookup that fails counts as "not a member" — a check
+cerber could not complete never reads as trust. Writing a repo instead of a
+person is rejected, in the CLI, the cockpit, and on config load:
+
+```
+$ cerber trust fullstackhouse/open-mercato
+"fullstackhouse/open-mercato" is not a trust rule. Trust is about people, not
+repositories — anyone can open a PR against a repo you own, so trusting the
+repo would trust them too. Use @fullstackhouse/* for everyone in that org,
+@fullstackhouse/team for one team, or @login for a person.
+```
 
 Rules live in `~/.cerber/config.json`, and the cockpit has a **settings**
 screen that reads and writes the same file — each rule shown with what it
 actually grants. A `!` rule denies and beats every grant, so `fullstackhouse`
-plus `!fullstackhouse/public-fork` does what it looks like — and a denial applies to
-fork PRs too, since those are exactly the ones you meant to stop. `--trust` and
+plus `!@fullstackhouse/contractors` does what it looks like. `--trust` and
 `--no-trust` override the config for one run; `cerber trust <pattern> --delete`
 removes a rule.
 

@@ -13,7 +13,6 @@ const pr: PrInfo = {
   baseRefName: "main",
   headRefName: "feature",
   headSha: "abc1234",
-  headFromFork: false,
   state: "OPEN",
   additions: 1,
   deletions: 0,

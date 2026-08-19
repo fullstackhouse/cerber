@@ -57,7 +57,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     "--repo",
     `${ref.owner}/${ref.repo}`,
     "--json",
-    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isCrossRepository",
+    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state",
   ]);
   const raw = JSON.parse(out);
   return PrInfoSchema.parse({
@@ -71,21 +71,11 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     headSha: raw.headRefOid ?? "",
-    headFromFork: raw.isCrossRepository !== false,
     state: raw.state ?? "OPEN",
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
   });
-}
-
-/**
- * Repo visibility, for the `private` trust rule. A separate call from
- * `gh pr view` — only made when a trust rule actually asks about it.
- */
-export async function fetchRepoIsPrivate(ref: Pick<PrRef, "owner" | "repo">): Promise<boolean> {
-  const out = await gh(["repo", "view", `${ref.owner}/${ref.repo}`, "--json", "isPrivate"]);
-  return JSON.parse(out).isPrivate === true;
 }
 
 /**

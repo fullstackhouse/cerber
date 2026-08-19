@@ -54,7 +54,6 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
       baseRefName: "main",
       headRefName: "feat",
       headSha: "head1",
-      headFromFork: false,
       state: "OPEN",
       additions: 1,
       deletions: 0,

@@ -12,7 +12,7 @@ import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
-import { describeRule, explainRule, parseTrustRule } from "../core/trust.js";
+import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   listArtifacts,
@@ -67,8 +67,14 @@ export async function buildApp(
 
   const trustView = (lines: string[]) =>
     lines.flatMap((line) => {
-      const rule = parseTrustRule(line);
-      return rule ? [{ rule: describeRule(rule), explanation: explainRule(rule), denies: rule.negated }] : [];
+      try {
+        const rule = parseTrustRule(line);
+        return rule ? [{ rule: describeRule(rule), explanation: explainRule(rule), denies: rule.negated }] : [];
+      } catch {
+        // loadConfig rejects these, so reaching here means the file changed
+        // under us; showing the rest beats failing the whole screen.
+        return [];
+      }
     });
 
   app.get("/api/config", async (c) => {
@@ -85,7 +91,14 @@ export async function buildApp(
     if (typeof rule !== "string" || !rule.trim()) {
       return c.json({ error: "rule is required" }, 400);
     }
-    const parsed = parseTrustRule(rule);
+    let parsed;
+    try {
+      parsed = parseTrustRule(rule);
+    } catch (err: unknown) {
+      // The message explains what to write instead — show it verbatim.
+      if (err instanceof TrustRuleError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
     if (!parsed) return c.json({ error: `not a trust rule: ${rule}` }, 400);
 
     const canonical = describeRule(parsed);

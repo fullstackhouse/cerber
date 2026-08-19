@@ -3,14 +3,14 @@ import { fetchConfig, updateTrustRule } from "./api";
 import { ConfigView } from "./types";
 
 const EXAMPLES = [
-  { rule: "@acme/*", meaning: "anyone in the acme org — trusts people" },
+  { rule: "@acme/*", meaning: "anyone in the acme org" },
   { rule: "@acme/devs", meaning: "anyone on that GitHub team" },
   { rule: "@teammate", meaning: "one person, by login" },
-  { rule: "acme/widgets", meaning: "one repo, but only PRs pushed by someone with write access" },
-  { rule: "acme", meaning: "every repo in that owner or org, same write-access rule" },
-  { rule: "private", meaning: "any private repo, same write-access rule" },
-  { rule: "!acme/public-fork", meaning: "deny — beats every rule above, forks included" },
+  { rule: "!@acme/contractors", meaning: "deny — beats every rule above" },
 ];
+
+/** Rule errors carry the guidance a person needs — show it, not "Error: ...". */
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function Settings() {
   const [config, setConfig] = useState<ConfigView | null>(null);
@@ -19,14 +19,14 @@ export function Settings() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetchConfig().then(setConfig).catch((e) => setError(String(e)));
+    fetchConfig().then(setConfig).catch((e) => setError(message(e)));
   }, []);
 
   const apply = (p: Promise<ConfigView>) => {
     setBusy(true);
     setError(null);
     p.then(setConfig)
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(message(e)))
       .finally(() => setBusy(false));
   };
 
@@ -51,15 +51,15 @@ export function Settings() {
         <code>{config.path}</code>.
       </p>
       <p className="muted">
-        Prefer the <code>@org/team</code> and <code>@org/*</code> forms — they name people. A repo
-        rule is a shorthand for "whoever can push here", since anyone can open a PR against a public
-        repo from a fork; those PRs are never trusted by a repo rule.
+        Only people can be trusted — there is no way to trust a repository. Anyone can open a PR
+        against a repo you own, so trusting the repo would trust them too. Membership is checked
+        against GitHub when the review runs, and a check that fails counts as "not a member".
       </p>
 
       <div className="trust-add">
         <input
           value={draft}
-          placeholder="@org/team, @org/*, @author, owner/repo, private, !deny"
+          placeholder="@org/*, @org/team, @login, !deny"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && draft.trim()) {
@@ -82,7 +82,7 @@ export function Settings() {
 
       {config.trust.length === 0 ? (
         <p className="muted">
-          Nothing is trusted yet — every review reads the checkout and runs nothing.
+          Nobody is trusted yet — every review reads the checkout and runs nothing.
         </p>
       ) : (
         <table className="trust-table">

@@ -5,7 +5,7 @@ import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
-import { describeRule, explainRule, parseTrustRule } from "../core/trust.js";
+import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
 import {
@@ -221,18 +221,24 @@ program
 program
   .command("trust")
   .description(
-    "Show, add, or remove the rules that let a review run commands (~/.cerber/config.json)",
+    "Show, add, or remove the people whose PRs a review may run (~/.cerber/config.json)",
   )
   .argument(
     "[pattern]",
-    "owner/repo, owner, @author, private, or !pattern to deny — omit to list what is trusted today",
+    "@org/*, @org/team, @login, or !pattern to deny — omit to list what is trusted today",
   )
   .option("-d, --delete", "remove this rule instead of adding it")
   .action(async (pattern: string | undefined, opts: { delete?: boolean }) => {
     const config = await loadConfig();
 
     if (pattern) {
-      const rule = parseTrustRule(pattern);
+      let rule;
+      try {
+        rule = parseTrustRule(pattern);
+      } catch (err: unknown) {
+        console.error(err instanceof TrustRuleError ? err.message : String(err));
+        process.exit(1);
+      }
       if (!rule) {
         console.error(`Not a trust rule: "${pattern}"`);
         process.exit(1);
@@ -260,21 +266,23 @@ program
     if (config.trust.length === 0) {
       console.log(
         `Nothing is trusted: every review reads the checkout and runs nothing.\n` +
-          `Trust a repo, an owner, or a person with:\n` +
-          `  cerber trust fullstackhouse      # every repo in the org\n` +
-          `  cerber trust @teammate           # anything they authored\n` +
-          `  cerber trust private             # any private repo\n` +
+          `Trust people — never a repo, since anyone can open a PR against one:\n` +
+          `  cerber trust @your-org/*         # everyone in the org\n` +
+          `  cerber trust @your-org/devs      # one GitHub team\n` +
+          `  cerber trust @teammate           # one person\n` +
           `Rules live in ${configPath()}, and in the cockpit under Settings.`,
       );
       return;
     }
 
-    console.log(`Trust rules (${configPath()}):`);
+    console.log(`Trusted people (${configPath()}):`);
     for (const line of config.trust) {
       const rule = parseTrustRule(line);
       if (rule) console.log(`  ${describeRule(rule).padEnd(28)} ${explainRule(rule)}`);
     }
-    console.log("\nEverything else is reviewed read-only. Remove one with: cerber trust <pattern> --delete");
+    console.log(
+      "\nEveryone else's PRs are reviewed read-only. Remove one with: cerber trust <pattern> --delete",
+    );
   });
 
 program

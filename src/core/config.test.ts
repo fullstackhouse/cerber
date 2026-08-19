@@ -24,14 +24,26 @@ describe("config", () => {
   });
 
   it("round-trips what the cockpit writes", async () => {
-    await saveConfig({ trust: ["acme", "@someone", "!acme/fork"] });
-    expect((await loadConfig()).trust).toEqual(["acme", "@someone", "!acme/fork"]);
+    await saveConfig({ trust: ["@acme/*", "@someone", "!@acme/contractors"] });
+    expect((await loadConfig()).trust).toEqual(["@acme/*", "@someone", "!@acme/contractors"]);
   });
 
   it("writes JSON a human can still read and edit", async () => {
-    await saveConfig({ trust: ["acme"] });
+    await saveConfig({ trust: ["@acme/*"] });
     const raw = await fs.readFile(configPath(), "utf8");
-    expect(raw).toBe('{\n  "trust": [\n    "acme"\n  ]\n}\n');
+    expect(raw).toBe('{\n  "trust": [\n    "@acme/*"\n  ]\n}\n');
+  });
+
+  it("rejects a repo-shaped rule on the way in, with the fix in the message", async () => {
+    await expect(saveConfig({ trust: ["acme/widgets"] })).rejects.toThrow(
+      /Trust is about people, not repositories/,
+    );
+  });
+
+  it("refuses to load a config someone hand-edited a repo rule into", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"trust": ["@acme/*", "acme/widgets"]}');
+    await expect(loadConfig()).rejects.toThrow(/not valid cerber config/);
   });
 
   it("refuses a malformed config instead of silently reverting to defaults", async () => {
