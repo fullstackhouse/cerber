@@ -68,4 +68,16 @@ export interface Artifact {
     costUsd: number | null;
     error: string | null;
   } | null;
+  sent: {
+    at: string;
+    event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+    url: string | null;
+  } | null;
+}
+
+export interface SendPreview {
+  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  body: string;
+  comments: { path: string; line: number; side: "RIGHT"; body: string }[];
+  folded: ReviewComment[];
 }

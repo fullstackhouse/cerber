@@ -69,6 +69,13 @@ export const RunInfoSchema = z.object({
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 
+export const SentInfoSchema = z.object({
+  at: z.string(),
+  event: z.enum(["APPROVE", "COMMENT", "REQUEST_CHANGES"]),
+  url: z.string().nullable().default(null),
+});
+export type SentInfo = z.infer<typeof SentInfoSchema>;
+
 export const ArtifactSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   /** "owner/repo#123" */
@@ -85,6 +92,8 @@ export const ArtifactSchema = z.object({
   comments: z.array(CommentSchema).default([]),
   verdict: VerdictSchema.nullable().default(null),
   run: RunInfoSchema.nullable().default(null),
+  /** Set once the user explicitly sent the review to GitHub. */
+  sent: SentInfoSchema.nullable().default(null),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

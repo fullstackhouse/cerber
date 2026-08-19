@@ -54,6 +54,39 @@ export function patchForFiles(diff: string, files: string[]): string {
     .join("\n");
 }
 
+/**
+ * Line numbers (new side of the diff) that a GitHub review comment can attach
+ * to, per file: added and context lines inside hunks.
+ */
+export function newSideLines(diff: string): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>();
+  for (const { path, patch } of splitDiffByFile(diff)) {
+    const lines = new Set<number>();
+    let newLine = 0;
+    let inHunk = false;
+    const patchLines = patch.split("\n");
+    for (let i = 0; i < patchLines.length; i++) {
+      const line = patchLines[i]!;
+      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk) {
+        newLine = Number(hunk[1]);
+        inHunk = true;
+        continue;
+      }
+      if (!inHunk) continue;
+      if (line === "" && i === patchLines.length - 1) continue; // trailing split artifact
+      if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+      if (line.startsWith("+") || line.startsWith(" ") || line === "") {
+        lines.add(newLine);
+        newLine++;
+      }
+      // "-" lines belong to the old side only.
+    }
+    result.set(path, lines);
+  }
+  return result;
+}
+
 /** Paths present in the diff but not claimed by any chapter. */
 export function unclaimedFiles(diff: string, chapters: { files: string[] }[]): string[] {
   const claimed = new Set(chapters.flatMap((c) => c.files));

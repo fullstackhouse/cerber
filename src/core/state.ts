@@ -44,6 +44,18 @@ export async function loadArtifactByKey(key: string): Promise<Artifact | null> {
   }
 }
 
+/** Load by key, apply a mutation, bump updatedAt, save. Returns the new artifact. */
+export async function updateArtifactByKey(
+  key: string,
+  mutate: (artifact: Artifact) => Artifact,
+): Promise<Artifact | null> {
+  const artifact = await loadArtifactByKey(key);
+  if (!artifact) return null;
+  const updated = { ...mutate(artifact), updatedAt: new Date().toISOString() };
+  await saveArtifact(updated);
+  return updated;
+}
+
 export async function listArtifacts(): Promise<Artifact[]> {
   let entries: string[];
   try {

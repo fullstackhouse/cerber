@@ -41,6 +41,7 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Ar
     comments: [],
     verdict: null,
     run: { model: opts.model ?? null, startedAt: now(), finishedAt: null, costUsd: null, error: null },
+    sent: null,
   };
   await saveArtifact(artifact);
 
@@ -50,12 +51,20 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Ar
 
   try {
     const review = await runAiReview(prompt, opts);
+    // The prompt demands each file in exactly one chapter, but models drift:
+    // keep a file only in the first chapter that claims it.
+    const seen = new Set<string>();
+    const chapters = review.ai.chapters.map((ch) => {
+      const files = ch.files.filter((f) => !seen.has(f));
+      files.forEach((f) => seen.add(f));
+      return { ...ch, files };
+    });
     artifact = {
       ...artifact,
       status: "ready",
       updatedAt: now(),
       summary: review.ai.summary,
-      chapters: review.ai.chapters,
+      chapters,
       comments: review.ai.comments.map((c) => ({
         id: randomUUID(),
         path: c.path,

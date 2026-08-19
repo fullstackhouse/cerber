@@ -247,6 +247,161 @@ a {
   font-size: 12px;
 }
 
+/* Comment editing */
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f6f8fa;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #eef1f4;
+}
+
+.comment-actions {
+  margin-left: 8px;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.comment-dropped {
+  opacity: 0.5;
+}
+
+.comment-approved {
+  border-left-color: var(--green);
+}
+
+.comment-edit,
+.add-comment textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.add-comment {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-comment-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.add-comment select,
+.add-comment input {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.add-comment-btn {
+  margin: 8px 0;
+}
+
+/* Verdict override */
+.verdict-override {
+  margin-left: 12px;
+  font-size: 13px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Send panel */
+.send-panel {
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 24px 0;
+}
+
+.send-panel.sent {
+  border-color: var(--green);
+  background: #dafbe1;
+}
+
+.send-panel h2 {
+  margin: 0 0 4px;
+}
+
+.send-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.send-controls select {
+  font: inherit;
+  font-size: 14px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.send-btn {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-size: 14px;
+  padding: 6px 14px;
+}
+
+.send-btn:hover {
+  background: #0757b3;
+}
+
+.send-btn-confirm {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.send-btn-confirm:hover {
+  background: #a91e28;
+}
+
+.confirm-group {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.body-preview {
+  background: #f6f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  max-height: 400px;
+  overflow: auto;
+}
+
+.export-link {
+  font-size: 13px;
+}
+
+.post-actions {
+  margin-top: 16px;
+}
+
 .diff .d2h-file-header {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }

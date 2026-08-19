@@ -80,3 +80,37 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
 export async function fetchPrDiff(ref: PrRef): Promise<string> {
   return gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
 }
+
+/**
+ * THE ONLY GITHUB WRITE IN CERBER.
+ * Submits a review in one shot. Must only ever be called from an explicit
+ * user action (cockpit Send button / `cerber send` after confirmation).
+ */
+export async function submitReview(
+  ref: PrRef,
+  payload: { event: string; body: string; comments: { path: string; line: number; side: string; body: string }[] },
+): Promise<{ url: string | null }> {
+  const args = [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`,
+    "--method",
+    "POST",
+    "--input",
+    "-",
+  ];
+  const { execFile: ef } = await import("node:child_process");
+  const out = await new Promise<string>((resolve, reject) => {
+    const child = ef("gh", args, { maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`gh api reviews failed: ${stderr?.trim() || err.message}`));
+      else resolve(stdout);
+    });
+    child.stdin!.write(JSON.stringify(payload));
+    child.stdin!.end();
+  });
+  try {
+    const res = JSON.parse(out);
+    return { url: res.html_url ?? null };
+  } catch {
+    return { url: null };
+  }
+}
