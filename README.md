@@ -19,17 +19,17 @@ logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no config
 
 ```bash
 # Review a PR (writes a local artifact to ~/.cerber, nothing else)
-npx cerber review https://github.com/owner/repo/pull/123
+npx @fullstackhouse/cerber review https://github.com/owner/repo/pull/123
 
 # Review several
-npx cerber review owner/repo#123 owner/repo#124
-npx cerber review 123 124 --repo owner/repo
+npx @fullstackhouse/cerber review owner/repo#123 owner/repo#124
+npx @fullstackhouse/cerber review 123 124 --repo owner/repo
 
 # See what's in the queue
-npx cerber list
+npx @fullstackhouse/cerber list
 
 # Open the cockpit
-npx cerber serve        # → http://127.0.0.1:4820
+npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 ```
 
 ## What a review looks like
