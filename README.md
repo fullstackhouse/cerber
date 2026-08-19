@@ -5,8 +5,8 @@ a summary, a chaptered walkthrough of the changes, draft inline comments, and a
 verdict with a confidence score. You go through it in a local web cockpit.
 
 **Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
-writes happen when you hit Send (coming in a later phase) — reviewing is 100%
-local and read-only.
+write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
+reviewing is 100% local and read-only.
 
 Named after Cerberus, the gatekeeper — and a sibling of
 [cezar](https://github.com/open-mercato/cezar): cezar runs coding agents,
@@ -64,7 +64,7 @@ carried into the fresh review.
 
 ## Status / roadmap
 
-Early. Current phase: review + read-only cockpit.
+Early, but all six planned phases have shipped.
 
 1. ✅ `cerber review <pr>` + artifact schema + cockpit (read-only)
 2. ✅ Comment editing in the cockpit (edit/approve/drop/add), verdict override,
