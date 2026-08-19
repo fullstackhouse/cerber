@@ -131,16 +131,16 @@ cerber could not complete never reads as trust. Writing a repo instead of a
 person is rejected, in the CLI, the cockpit, and on config load:
 
 ```
-$ cerber trust fullstackhouse/open-mercato
-"fullstackhouse/open-mercato" is not a trust rule. Trust is about people, not
-repositories — anyone can open a PR against a repo you own, so trusting the
-repo would trust them too. Use @fullstackhouse/* for everyone in that org,
-@fullstackhouse/team for one team, or @login for a person.
+$ cerber trust acme/widgets
+"acme/widgets" is not a trust rule. Trust is about people, not repositories —
+anyone can open a PR against a repo you own, so trusting the repo would trust
+them too. Use @acme/* for everyone in that org, @acme/team for one team, or
+@login for a person.
 ```
 
 Rules live in `~/.cerber/config.json`, and the cockpit has a **settings**
 screen that reads and writes the same file — each rule shown with what it
-actually grants. A `!` rule denies and beats every grant, so `fullstackhouse`
+actually grants. A `!` rule denies and beats every grant, so `@fullstackhouse/*`
 plus `!@fullstackhouse/contractors` does what it looks like. `--trust` and
 `--no-trust` override the config for one run; `cerber trust <pattern> --delete`
 removes a rule.
