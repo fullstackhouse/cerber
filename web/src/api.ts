@@ -1,7 +1,6 @@
 import {
   Artifact,
   ChatRef,
-  ChatTurnResult,
   ConfigView,
   DaemonConfig,
   DaemonStatus,
@@ -78,18 +77,24 @@ export const rerunReview = (key: string, withSource?: boolean) =>
   );
 
 /**
- * One turn of the conversation about this review. Minutes-long: the reviewer
- * re-reads the code before answering. Whatever it revises is already applied
- * to the artifact that comes back — there is nothing to accept.
+ * Start one turn of the conversation about this review. Minutes-long — the
+ * reviewer re-reads the code before answering — so it runs detached and this
+ * returns as soon as the question is recorded, with `pendingChat` set. Poll the
+ * artifact until it clears: whatever the turn revised is already applied by
+ * then, so there is nothing to accept.
  */
-export const sendChatTurn = (
+export const startChatTurn = (
   key: string,
   body: { message: string; refs?: ChatRef[]; allowUserComments?: boolean },
 ) =>
-  request<ChatTurnResult>(`/api/reviews/${encodeURIComponent(key)}/chat`, {
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat`, {
     method: "POST",
     body: JSON.stringify(body),
   });
+
+/** Clear a turn that failed. Refused while one is still being answered. */
+export const dismissPendingChat = (key: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/pending`, { method: "DELETE" });
 
 /** Put the review back the way it was before the conversation. Keeps the chat. */
 export const resetReviewToPreChat = (key: string) =>

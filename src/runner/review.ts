@@ -182,6 +182,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     // this run just replaced, and resetting to it would restore a dead review.
     chat: existing?.chat ?? [],
     preChat: null,
+    pendingChat: null,
   };
   await saveArtifact(artifact);
 

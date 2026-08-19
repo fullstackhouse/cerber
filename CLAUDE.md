@@ -86,6 +86,12 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   propose/accept machinery wearing a different name
 - Don't start an AI run without claiming `runner/inflight` — the daemon's timer
   and the cockpit's button both write the same artifact file
+- Don't hold an HTTP request open for an AI run. A review and a chat turn both
+  take minutes: they start detached, answer `202`, and put their state on the
+  artifact (`status: running`, `pendingChat`) for the cockpit to poll — failures
+  included, since there is no response left to hand them to. A held request dies
+  at a reverse proxy's read timeout and tells the user it broke while the run
+  quietly succeeds
 - Don't give the review run a tool it doesn't need. The default run reads and
   nothing else, and treats everything in the checkout as untrusted PR content
   rather than instructions. Only a PR the user trusted (`config.json`, `--trust`)

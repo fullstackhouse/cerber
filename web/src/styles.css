@@ -715,6 +715,24 @@ button:hover {
   margin-top: 4px;
 }
 
+/* A turn that has been asked but not yet answered — it runs detached, so this
+   is what a mid-turn reload lands on. */
+.chat-turn-pending {
+  border-left-style: dashed;
+}
+
+.chat-waiting {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.chat-failed {
+  font-size: 13px;
+  color: var(--red);
+  margin-top: 4px;
+}
+
 .chat-refs {
   display: flex;
   align-items: baseline;

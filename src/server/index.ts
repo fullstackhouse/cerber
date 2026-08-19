@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { DaemonHandle } from "./daemon.js";
-import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
+import { Artifact, ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { z } from "zod";
@@ -371,6 +371,8 @@ export async function buildApp(
     allowUserComments: z.boolean().optional(),
   });
 
+  const turnInFlight = (a: Artifact) => a.pendingChat != null && a.pendingChat.error == null;
+
   app.post("/api/reviews/:key/chat", async (c) => {
     const key = c.req.param("key");
     const artifact = await loadArtifactByKey(key);
@@ -378,7 +380,7 @@ export async function buildApp(
     // A sent review is a record of what was posted — arguing with it now would
     // rewrite history that GitHub already has.
     if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
-    if (isReviewRunning(artifact.id)) {
+    if (isReviewRunning(artifact.id) || turnInFlight(artifact)) {
       return c.json({ error: "a run for this PR is already in flight" }, 409);
     }
 
@@ -389,22 +391,62 @@ export async function buildApp(
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
 
-    try {
-      const result = await runChatTurn(artifact, request.message, {
-        refs: request.refs,
-        allowUserComments: request.allowUserComments,
-        onProgress: (m) => console.log(`[chat ${artifact.id}] ${m}`),
+    // Record the question before responding, so the cockpit's next poll — and a
+    // reload mid-turn — finds a turn being answered rather than a message that
+    // went nowhere.
+    const pending = await updateArtifactByKey(key, (a) => ({
+      ...a,
+      pendingChat: {
+        message: request.message,
+        refs: request.refs ?? [],
+        startedAt: new Date().toISOString(),
+        error: null,
+      },
+    }));
+
+    // Minutes-long, like a re-review: run it detached and let the cockpit poll.
+    // Holding the request open is fine on localhost and fails behind a reverse
+    // proxy's read timeout, which tells the user it broke while the turn
+    // quietly succeeds — a worse failure than an honest error.
+    void runChatTurn(artifact, request.message, {
+      refs: request.refs,
+      allowUserComments: request.allowUserComments,
+      onProgress: (m) => console.log(`[chat ${artifact.id}] ${m}`),
+    })
+      .then(async (result) => {
+        // The cockpit stays live throughout, so fold the result onto whatever
+        // is on disk now rather than overwriting it — an edit the user made
+        // while waiting must not vanish when the answer lands.
+        await updateArtifactByKey(key, (current) => ({
+          ...mergeConcurrentEdits(artifact, result.artifact, current),
+          pendingChat: null,
+        }));
+      })
+      .catch(async (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[chat ${artifact.id}] failed: ${message}`);
+        // Nobody is holding a response to hand this to any more, so the failure
+        // lives on the artifact against the question that caused it.
+        await updateArtifactByKey(key, (a) => ({
+          ...a,
+          pendingChat: a.pendingChat ? { ...a.pendingChat, error: message } : null,
+        })).catch(() => {});
       });
-      // A turn takes minutes and the cockpit stays live throughout, so fold the
-      // result onto whatever is on disk now rather than overwriting it — an
-      // edit the user made while waiting must not vanish when the answer lands.
-      const saved = await updateArtifactByKey(key, (current) =>
-        mergeConcurrentEdits(artifact, result.artifact, current),
-      );
-      return c.json({ artifact: saved, applied: result.applied, refused: result.refused });
-    } catch (err: unknown) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+
+    return c.json(pending, 202);
+  });
+
+  // Clear a turn that failed. Only that: a turn still being answered would come
+  // back on the next write and the cockpit would have lied about dropping it.
+  app.delete("/api/reviews/:key/chat/pending", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    if (turnInFlight(artifact)) {
+      return c.json({ error: "that turn is still being answered" }, 409);
     }
+    const updated = await updateArtifactByKey(key, (a) => ({ ...a, pendingChat: null }));
+    return c.json(updated);
   });
 
   // Put the review back the way it was before the conversation started. The
@@ -414,6 +456,11 @@ export async function buildApp(
     const artifact = await loadArtifactByKey(key);
     if (!artifact) return c.json({ error: "not found" }, 404);
     if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    // A turn in flight will fold its own result on top of whatever is on disk
+    // when it lands, so resetting now would be undone a minute later.
+    if (turnInFlight(artifact)) {
+      return c.json({ error: "a turn is still being answered — wait for it to land" }, 409);
+    }
     if (!artifact.preChat) return c.json({ error: "this review has not been chatted about" }, 409);
 
     const updated = await updateArtifactByKey(key, (a) =>
@@ -502,7 +549,9 @@ export async function buildApp(
 export async function startServer(opts: ServeOptions): Promise<void> {
   const cleared = await reconcileRunning();
   if (cleared > 0) {
-    console.log(`Cleared ${cleared} review(s) left mid-run by a previous process — re-review to retry.`);
+    console.log(
+      `Cleared ${cleared} AI run(s) left in flight by a previous process — start them again from the cockpit.`,
+    );
   }
   const app = await buildApp(opts);
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {

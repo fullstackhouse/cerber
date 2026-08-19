@@ -70,6 +70,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     calibration: null,
   chat: [],
   preChat: null,
+  pendingChat: null,
     ...overrides,
   };
 }

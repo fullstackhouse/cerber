@@ -118,14 +118,19 @@ export interface Artifact {
   } | null;
   /** The conversation about this review. Never sent to GitHub. */
   chat?: ChatTurn[];
+  /** A turn being answered right now, or the one that failed. */
+  pendingChat?: PendingChat | null;
   /** Present once a chat has started — what "reset" goes back to. */
   preChat?: { at: string } | null;
 }
 
-export interface ChatTurnResult {
-  artifact: Artifact;
-  applied: Revision[];
-  refused: { revision: Revision; reason: string }[];
+/** A chat turn in flight. Turns run detached; this is what the cockpit polls. */
+export interface PendingChat {
+  message: string;
+  refs: ChatRef[];
+  startedAt: string;
+  /** Why the turn failed. Null while it is still being answered. */
+  error: string | null;
 }
 
 export interface RefreshResult {
