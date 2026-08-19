@@ -537,7 +537,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         {artifact.pr.author} · {artifact.pr.headRefName} → {artifact.pr.baseRefName} ·{" "}
         {artifact.pr.changedFiles}f <span className="add">+{artifact.pr.additions}</span>{" "}
         <span className="del">-{artifact.pr.deletions}</span>
-        {artifact.run?.costUsd != null && <> · review cost ${artifact.run.costUsd.toFixed(2)}</>} ·{" "}
+        {artifact.run?.costUsd != null && (
+          <span title="What this review would cost at API token rates. Riding a Claude subscription, it draws on your usage limits instead.">
+            {" "}
+            · ≈${artifact.run.costUsd.toFixed(2)} at API rates
+          </span>
+        )}{" "}
+        ·{" "}
         {artifact.run?.trusted
           ? "ran the code"
           : artifact.run?.withSource

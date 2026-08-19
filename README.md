@@ -44,6 +44,8 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
   human's time
 - **Verdict** — approve / comment / request changes, with a 0–100 confidence
   score and reasoning
+- **Run metadata** — model, whether it read the source or only the diff, and
+  the token spend as an API-rate equivalent
 
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
@@ -61,10 +63,15 @@ sees whether a test covers the new path.
 On one real PR, same commit, the difference was: a speculative "this *looks
 like* it sits after an early return" became a concrete finding; a permission
 check the diff showed as a tidy gate turned out to hide a value the API
-response still ships; confidence went 72% → 82%. It cost 3.3× as much and took
-three minutes instead of one.
+response still ships; confidence went 72% → 82%. It burned 3.3× the tokens and
+took three minutes instead of one.
 
-If you want the old behaviour — faster, cheaper, blind past the changed lines:
+Cerber rides your `claude` login, so a review isn't billed per run: on a Claude
+subscription it draws on your usage limits. The `≈$` figures in the CLI and
+cockpit are what those tokens would cost at API token rates — read them as
+"how much of the plan did this eat", not as an invoice.
+
+If you want the old behaviour — faster, lighter, blind past the changed lines:
 
 ```bash
 cerber review owner/repo#123 --no-source

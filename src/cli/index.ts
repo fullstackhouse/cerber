@@ -98,7 +98,7 @@ program
           rows.push(
             `✔ ${label.padEnd(40)} ${v ? `${v.recommendation} ${v.confidence}%` : "?"}`.padEnd(65) +
               `${artifact.comments.length} comment(s)` +
-              (artifact.run?.costUsd != null ? `, $${artifact.run.costUsd.toFixed(2)}` : ""),
+              (artifact.run?.costUsd != null ? `, ≈$${artifact.run.costUsd.toFixed(2)}` : ""),
           );
         } catch (err: unknown) {
           failures++;
@@ -110,6 +110,11 @@ program
       for (const row of rows) console.log(row);
       if (skips > 0) console.log(`(${skips} already up to date — use --force to re-review)`);
       console.log(`\nArtifacts in ${cerberHome()}/reviews — view with: cerber serve`);
+      if (rows.some((r) => r.includes("≈$"))) {
+        console.log(
+          "(≈$ is what the tokens would cost at API rates — on a Claude subscription they draw on your usage limits, not your card.)",
+        );
+      }
       if (failures > 0) process.exitCode = 1;
     },
   );
