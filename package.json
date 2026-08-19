@@ -3,6 +3,7 @@
   "version": "0.10.1",
   "description": "AI code-review cockpit: Claude reviews your PRs into local artifacts; nothing reaches GitHub until you say so.",
   "license": "MIT",
+  "author": "Full Stack House (https://fullstack.house)",
   "repository": "github:fullstackhouse/cerber",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
