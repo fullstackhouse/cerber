@@ -41,6 +41,7 @@ Writing style (applies to every markdown field):
 - Lead with the point. State the claim first, support it after. No hedging chains, no em-dash clause stacks.
 - Keep comments to ~3 sentences unless a code suggestion needs more. Length must buy clarity, not cover uncertainty — if you are unsure, say so in one plain sentence.
 - Do NOT imitate the PR description's writing style. Keep this plain register even when the PR itself is dense or writerly.
+- Describe the effect a person would see before the mechanism behind it. Not: "A stray closing code fence with prose on the same line left the block open, rendering the conditions below as code." But: "Also fixes a markdown typo: a code block was never closed, so everything after it displayed as code."
 
 Rules:
 - Group ALL changed files into chapters that tell the story of the PR (schema first, then logic, then tests, etc). Every changed file must appear in exactly one chapter.
