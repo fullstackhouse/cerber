@@ -23,6 +23,9 @@ import {
 } from "../core/state.js";
 import { isReviewRunning } from "../runner/inflight.js";
 import { reviewPr } from "../runner/review.js";
+import { runChatTurn } from "../runner/chat.js";
+import { mergeConcurrentEdits, restoreReview } from "../core/revise.js";
+import { ChatTurnSchema } from "../core/artifact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -355,6 +358,68 @@ export async function buildApp(
       });
 
     return c.json(running, 202);
+  });
+
+  // ---- Chat: argue with the review before sending it ----
+  // Local only. The transcript never reaches GitHub — Send still builds its
+  // payload from the summary, comments and verdict alone.
+
+  const ChatRequestSchema = z.object({
+    message: z.string().min(1),
+    refs: ChatTurnSchema.shape.refs.optional(),
+    /** The user said, in so many words, that the run may touch their comments. */
+    allowUserComments: z.boolean().optional(),
+  });
+
+  app.post("/api/reviews/:key/chat", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    // A sent review is a record of what was posted — arguing with it now would
+    // rewrite history that GitHub already has.
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    if (isReviewRunning(artifact.id)) {
+      return c.json({ error: "a run for this PR is already in flight" }, 409);
+    }
+
+    let request;
+    try {
+      request = ChatRequestSchema.parse(await c.req.json());
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+
+    try {
+      const result = await runChatTurn(artifact, request.message, {
+        refs: request.refs,
+        allowUserComments: request.allowUserComments,
+        onProgress: (m) => console.log(`[chat ${artifact.id}] ${m}`),
+      });
+      // A turn takes minutes and the cockpit stays live throughout, so fold the
+      // result onto whatever is on disk now rather than overwriting it — an
+      // edit the user made while waiting must not vanish when the answer lands.
+      const saved = await updateArtifactByKey(key, (current) =>
+        mergeConcurrentEdits(artifact, result.artifact, current),
+      );
+      return c.json({ artifact: saved, applied: result.applied, refused: result.refused });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+  });
+
+  // Put the review back the way it was before the conversation started. The
+  // conversation itself stays — you lose the edits, not the reasoning.
+  app.post("/api/reviews/:key/chat/reset", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    if (!artifact.preChat) return c.json({ error: "this review has not been chatted about" }, 409);
+
+    const updated = await updateArtifactByKey(key, (a) =>
+      a.preChat ? restoreReview(a, a.preChat) : a,
+    );
+    return c.json(updated);
   });
 
   // ---- Export (local file download) ----

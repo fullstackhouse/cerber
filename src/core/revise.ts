@@ -44,6 +44,42 @@ export function restoreReview(artifact: Artifact, snapshot: ReviewSnapshot): Art
   };
 }
 
+/**
+ * Fold a finished chat turn back onto whatever the artifact says now.
+ *
+ * A turn takes minutes, and the cockpit stays live throughout: the user can
+ * edit, drop or add a comment while waiting for the answer. Writing the turn's
+ * result wholesale would silently undo that, which is the one thing a run must
+ * never do to the user's own work.
+ *
+ * `before` is the artifact the turn started from, `after` is what it produced,
+ * `current` is what is on disk now. Anything the user changed between `before`
+ * and `current` wins; everything else comes from the turn.
+ */
+export function mergeConcurrentEdits(
+  before: Artifact,
+  after: Artifact,
+  current: Artifact,
+): Artifact {
+  const wasThere = new Map(before.comments.map((c) => [c.id, c]));
+  const fromTurn = new Map(after.comments.map((c) => [c.id, c]));
+  const userTouched = (id: string, now: (typeof current.comments)[number]) => {
+    const then = wasThere.get(id);
+    // Absent from `before` means the user added it while the turn ran.
+    if (!then) return true;
+    return then.body !== now.body || then.status !== now.status;
+  };
+
+  const merged = current.comments.map((now) =>
+    userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now,
+  );
+  // Comments the turn itself added are not in `current` yet.
+  const seen = new Set(merged.map((c) => c.id));
+  for (const c of after.comments) if (!seen.has(c.id)) merged.push(c);
+
+  return { ...after, comments: merged };
+}
+
 export interface ReviseOptions {
   /** Id generator, so tests get stable ids. Defaults to randomUUID. */
   newId?: () => string;

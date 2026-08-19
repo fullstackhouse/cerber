@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Artifact, Comment, SCHEMA_VERSION } from "./artifact.js";
-import { applyRevisions, restoreReview, snapshotReview } from "./revise.js";
+import { applyRevisions, mergeConcurrentEdits, restoreReview, snapshotReview } from "./revise.js";
 
 function comment(over: Partial<Comment> = {}): Comment {
   return {
@@ -193,6 +193,69 @@ describe("applyRevisions", () => {
     const a = artifact();
     applyRevisions(a, [{ kind: "summary", body: "Changed." }]);
     expect(a.summary).toBe("The original summary.");
+  });
+});
+
+describe("mergeConcurrentEdits", () => {
+  // A turn takes minutes. The cockpit stays live, so the user can be editing
+  // while the answer is still being written.
+  const before = () => artifact({ comments: [comment({ id: "c1", body: "AI wrote this." })] });
+
+  it("keeps a comment the user edited while the turn was running", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const current = artifact({ comments: [comment({ id: "c1", body: "The user's own rewrite.", editedByUser: true })] });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.body).toBe("The user's own rewrite.");
+  });
+
+  it("takes the turn's rewrite when the user did not touch it", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const merged = mergeConcurrentEdits(b, after, artifact({ comments: [comment({ id: "c1" })] }));
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+  });
+
+  it("keeps a comment the user dropped while the turn was running", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "Sharper." },
+    ]);
+    const current = artifact({ comments: [comment({ id: "c1", status: "dropped" })] });
+    expect(mergeConcurrentEdits(b, after, current).comments[0]!.status).toBe("dropped");
+  });
+
+  it("keeps a comment the user added while the turn was running", () => {
+    const b = before();
+    const current = artifact({
+      comments: [comment({ id: "c1" }), comment({ id: "mine", origin: "user", body: "Spotted this." })],
+    });
+    const merged = mergeConcurrentEdits(b, b, current);
+    expect(merged.comments.map((c) => c.id)).toEqual(["c1", "mine"]);
+  });
+
+  it("keeps a comment the turn added", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(
+      b,
+      [{ kind: "comment-add", path: "src/b.ts", line: 1, body: "New.", chapterId: null }],
+      { newId: ids() },
+    );
+    const merged = mergeConcurrentEdits(b, after, artifact({ comments: [comment({ id: "c1" })] }));
+    expect(merged.comments.map((c) => c.id)).toEqual(["c1", "new-1"]);
+  });
+
+  it("takes the turn's summary, chapters and verdict", () => {
+    // Only comments are editable in the cockpit while a turn runs, so the rest
+    // of the review has no concurrent writer to lose to.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [{ kind: "summary", body: "The turn's summary." }]);
+    const merged = mergeConcurrentEdits(b, after, artifact({ summary: "stale" }));
+    expect(merged.summary).toBe("The turn's summary.");
   });
 });
 
