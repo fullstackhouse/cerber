@@ -120,9 +120,9 @@ Nothing else works until a turn can re-enter the reviewer's session.
 
 ### Phase 2: Chat schema and revision core
 
-- [ ] 2.1 ChatTurn schema, chat[] and preChatSnapshot on the artifact
-- [ ] 2.2 applyRevisions pure function
-- [ ] 2.3 Tests for every revision kind and the editedByUser refusal
+- [x] 2.1 ChatTurn schema, chat[] and preChatSnapshot on the artifact — 79e54ac
+- [x] 2.2 applyRevisions pure function — 79e54ac
+- [x] 2.3 Tests for every revision kind and the editedByUser refusal — 79e54ac
 
 ### Phase 3: The chat prompt and turn runner
 
