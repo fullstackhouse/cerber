@@ -125,7 +125,7 @@ export interface SendPreview {
 }
 
 export interface TrustEntry {
-  /** The rule as written: "acme/widgets", "@someone", "!acme/fork". */
+  /** The rule as written: "@acme/*", "@acme/devs", "@someone", "!@acme/devs". */
   rule: string;
   explanation: string;
   denies: boolean;

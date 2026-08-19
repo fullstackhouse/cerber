@@ -87,7 +87,13 @@ export async function buildApp(
   });
 
   app.post("/api/config/trust", async (c) => {
-    const { rule, remove } = await c.req.json();
+    let body: { rule?: unknown; remove?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "body must be JSON" }, 400);
+    }
+    const { rule, remove } = body;
     if (typeof rule !== "string" || !rule.trim()) {
       return c.json({ error: "rule is required" }, 400);
     }

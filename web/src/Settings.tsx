@@ -59,10 +59,14 @@ export function Settings() {
       <div className="trust-add">
         <input
           value={draft}
+          aria-label="Trust rule"
           placeholder="@org/*, @org/team, @login, !deny"
+          disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && draft.trim()) {
+            // The button is disabled while a write is in flight; Enter has to
+            // honour that too, or it posts the same rule twice.
+            if (e.key === "Enter" && !busy && draft.trim()) {
               apply(updateTrustRule(draft.trim()));
               setDraft("");
             }

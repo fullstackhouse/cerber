@@ -118,25 +118,19 @@ export async function prepareCheckout(
   await deps.git(["fetch", "-q", "--depth=1", "--no-tags", "origin", `refs/pull/${ref.number}/head`], dir);
   await deps.git(["checkout", "-q", "--force", "--detach", "FETCH_HEAD"], dir);
   // A previous head may have left untracked files behind; they would read as
-  // part of this commit's tree.
+  // part of this commit's tree. This also wipes any quarantine an earlier run
+  // left, which is why the loop below never has to undo one: every run starts
+  // from the commit's own files, whether or not the last one was trusted.
   await deps.git(["clean", "-qfdx"], dir);
 
-  // Renamed rather than deleted: the reviewer can still read and comment on
-  // these files, but Claude Code won't load them as its own configuration. A
-  // trusted checkout puts them back — the same files a previous untrusted
-  // review of this PR may have moved aside.
-  for (const file of AGENT_CONFIG_FILES) {
-    const live = path.join(dir, file);
-    const aside = live + QUARANTINE_SUFFIX;
-    const moved = opts.trusted
-      ? await deps.quarantine(aside, live)
-      : await deps.quarantine(live, aside);
-    if (moved) {
-      log(
-        opts.trusted
-          ? `Restored ${file} — this repo is trusted, so its own config applies.`
-          : `Quarantined ${file} from the checkout — PR config never configures the reviewer.`,
-      );
+  if (!opts.trusted) {
+    // Renamed rather than deleted: the reviewer can still read and comment on
+    // these files, but Claude Code won't load them as its own configuration.
+    for (const file of AGENT_CONFIG_FILES) {
+      const live = path.join(dir, file);
+      if (await deps.quarantine(live, live + QUARANTINE_SUFFIX)) {
+        log(`Quarantined ${file} from the checkout — PR config never configures the reviewer.`);
+      }
     }
   }
 

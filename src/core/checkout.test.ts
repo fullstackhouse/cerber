@@ -151,13 +151,13 @@ describe("evictOldCheckouts", () => {
 });
 
 describe("prepareCheckout — trusted", () => {
-  it("puts back config an earlier untrusted review moved aside", async () => {
-    const { renamed, deps } = fakeGit(true, [".claude/settings.json.cerber-quarantined"]);
+  it("leaves the repo's own config alone", async () => {
+    const { renamed, calls, deps } = fakeGit(true, [".claude/settings.json", ".mcp.json"]);
     await prepareCheckout(ref, { deps, trusted: true });
 
-    expect(renamed).toHaveLength(1);
-    const [from, to] = renamed[0]!;
-    expect(from).toBe(to + ".cerber-quarantined");
-    expect(to.endsWith(".claude/settings.json")).toBe(true);
+    // Nothing to move aside, and nothing to move back: the clean above already
+    // wiped any quarantine an earlier untrusted run left behind.
+    expect(renamed).toEqual([]);
+    expect(calls).toContainEqual(["clean", "-qfdx"]);
   });
 });
