@@ -13,7 +13,7 @@ import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
-import { extractJson, runClaude } from "./claude.js";
+import { extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
 
@@ -284,9 +284,13 @@ async function runAiReview(
   // Without a checkout the run has nothing legitimate to read — cerber's own
   // cwd is not the reviewed repo — so every tool stays off, and it runs in an
   // empty directory so no unrelated project's CLAUDE.md rides along.
+  // The neutral dir doubles as the empty GH_CONFIG_DIR: a run has no business
+  // authenticating to GitHub, and a trusted one has Bash to try it with.
+  const empty = await neutralDir();
   const claudeOpts = {
     model: opts.model,
-    cwd: source ?? (await neutralDir()),
+    cwd: source ?? empty,
+    env: unauthenticatedEnv(process.env, empty),
     allowedTools: source ? (trusted ? TRUSTED_TOOLS : READ_TOOLS) : undefined,
     disallowedTools: source
       ? trusted

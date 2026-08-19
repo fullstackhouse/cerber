@@ -37,7 +37,7 @@ describe("sourceDir", () => {
 });
 
 describe("prepareCheckout", () => {
-  it("initialises a fresh clone that rides gh auth, then checks out the PR head", async () => {
+  it("initialises a fresh clone, then checks out the PR head", async () => {
     const { calls, deps } = fakeGit(false);
     const checkout = await prepareCheckout(ref, { deps });
 
@@ -48,21 +48,38 @@ describe("prepareCheckout", () => {
       "origin",
       "https://github.com/acme/widgets.git",
     ]);
-    expect(calls[2]).toEqual(["config", "credential.helper", "!gh auth git-credential"]);
     expect(checkout.sha).toBe("abc1234");
     expect(checkout.dir).toBe(sourceDir(ref));
+  });
+
+  it("never leaves a usable push credential inside the checkout", async () => {
+    const { calls, deps } = fakeGit(true);
+    await prepareCheckout(ref, { deps });
+
+    // The credential rides the fetch command and is never written to the clone,
+    // which a trusted review is about to run commands in.
+    expect(calls.some((c) => c[0] === "config" && c[1] === "credential.helper")).toBe(false);
+    expect(calls).toContainEqual(["config", "--unset-all", "credential.helper"]);
+    const fetch = calls.find((c) => c.includes("fetch"))!;
+    expect(fetch.slice(0, 2)).toEqual(["-c", "credential.helper=!gh auth git-credential"]);
   });
 
   it("reuses an existing clone instead of re-initialising it", async () => {
     const { calls, deps } = fakeGit(true);
     await prepareCheckout(ref, { deps });
-    expect(calls.map((c) => c[0])).toEqual(["fetch", "checkout", "clean", "rev-parse"]);
+    expect(calls.map((c) => (c[0] === "-c" ? "fetch" : c[0]))).toEqual([
+      "config",
+      "fetch",
+      "checkout",
+      "clean",
+      "rev-parse",
+    ]);
   });
 
   it("fetches the pull ref shallowly, so fork PRs resolve without extra remotes", async () => {
     const { calls, deps } = fakeGit(true);
     await prepareCheckout(ref, { deps });
-    expect(calls[0]).toEqual([
+    expect(calls.find((c) => c.includes("fetch"))!.slice(2)).toEqual([
       "fetch",
       "-q",
       "--depth=1",

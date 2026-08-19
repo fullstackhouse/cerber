@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildClaudeArgs, extractJson, runClaude } from "./claude.js";
+import { buildClaudeArgs, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 
 describe("buildClaudeArgs", () => {
   it("asks for headless JSON output", () => {
@@ -84,5 +84,33 @@ describe("runClaude", () => {
     await expect(runClaude("hi", { bin: "definitely-not-a-real-binary-xyz" })).rejects.toThrow(
       /Is Claude Code installed/,
     );
+  });
+});
+
+describe("unauthenticatedEnv", () => {
+  const env = () => unauthenticatedEnv({ PATH: "/usr/bin", GH_TOKEN: "real-token" }, "/tmp/empty");
+
+  it("keeps the rest of the environment, so the run still works", () => {
+    expect(env().PATH).toBe("/usr/bin");
+  });
+
+  it("blanks every GitHub token a run could inherit", () => {
+    expect(env().GH_TOKEN).toBe("");
+    expect(env().GITHUB_TOKEN).toBe("");
+  });
+
+  it("points gh at an empty config dir instead of the user's login", () => {
+    expect(env().GH_CONFIG_DIR).toBe("/tmp/empty");
+  });
+
+  it("disables system git config, not just the global one", () => {
+    // GIT_CONFIG_SYSTEM does not suppress macOS's Command Line Tools config,
+    // which supplies credential.helper=osxkeychain — a push succeeded with it.
+    expect(env().GIT_CONFIG_NOSYSTEM).toBe("1");
+    expect(env().GIT_CONFIG_GLOBAL).toBe("/dev/null");
+  });
+
+  it("never lets git fall back to an interactive prompt", () => {
+    expect(env().GIT_TERMINAL_PROMPT).toBe("0");
   });
 });

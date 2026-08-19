@@ -37,6 +37,13 @@ export const AGENT_CONFIG_FILES = [
 
 const QUARANTINE_SUFFIX = ".cerber-quarantined";
 
+/**
+ * Auth for the fetch, passed per command and never written to the clone.
+ * Persisting it would leave a working push credential lying inside a directory
+ * a trusted review is about to run commands in.
+ */
+const FETCH_AUTH = ["-c", "credential.helper=!gh auth git-credential"];
+
 const realDeps: CheckoutDeps = {
   git: async (args, cwd) => {
     try {
@@ -112,10 +119,14 @@ export async function prepareCheckout(
     await deps.mkdir(dir);
     await deps.git(["init", "-q"], dir);
     await deps.git(["remote", "add", "origin", `https://github.com/${ref.owner}/${ref.repo}.git`], dir);
-    await deps.git(["config", "credential.helper", "!gh auth git-credential"], dir);
   }
 
-  await deps.git(["fetch", "-q", "--depth=1", "--no-tags", "origin", `refs/pull/${ref.number}/head`], dir);
+  // Clones made before the credential moved out of the config still carry one.
+  await deps.git(["config", "--unset-all", "credential.helper"], dir).catch(() => "");
+  await deps.git(
+    [...FETCH_AUTH, "fetch", "-q", "--depth=1", "--no-tags", "origin", `refs/pull/${ref.number}/head`],
+    dir,
+  );
   await deps.git(["checkout", "-q", "--force", "--detach", "FETCH_HEAD"], dir);
   // A previous head may have left untracked files behind; they would read as
   // part of this commit's tree. This also wipes any quarantine an earlier run

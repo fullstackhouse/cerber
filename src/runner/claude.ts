@@ -25,6 +25,38 @@ export interface ClaudeOptions {
   isolateWorkspace?: boolean;
   /** Kill the run after this long. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /**
+   * Take GitHub write access away from the run. A trusted review gets `Bash`,
+   * and cerber's promise is that nothing reaches GitHub except an explicit
+   * Send — so the run must not merely be *told* not to push, it must have
+   * nothing to push with.
+   */
+  /** Environment for the run. Defaults to cerber's own. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Environment that leaves a run unable to authenticate to GitHub: no gh config
+ * to read a token from, no token in the environment, and no git config that
+ * could supply a credential helper. Reading the checkout and running its tests
+ * need none of these.
+ */
+export function unauthenticatedEnv(base: NodeJS.ProcessEnv, emptyDir: string): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    GH_CONFIG_DIR: emptyDir,
+    GH_TOKEN: "",
+    GITHUB_TOKEN: "",
+    GH_ENTERPRISE_TOKEN: "",
+    GITHUB_ENTERPRISE_TOKEN: "",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    // NOSYSTEM, not GIT_CONFIG_SYSTEM: on macOS git also reads a config shipped
+    // with the Command Line Tools, which sets credential.helper=osxkeychain and
+    // survives GIT_CONFIG_SYSTEM. Measured — a push still succeeded without it.
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+  };
 }
 
 /**
@@ -58,6 +90,7 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
     const child = spawn(opts.bin ?? "claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: opts.cwd,
+      env: opts.env,
     });
     let stdout = "";
     let stderr = "";

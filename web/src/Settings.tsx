@@ -123,8 +123,10 @@ export function Settings() {
       </table>
 
       <p className="muted">
-        A trusted review still cannot edit the code, commit, push, or send anything to GitHub. The
-        daemon reviews unattended, so with rules set it runs matching PRs' code with nobody
+        A trusted review cannot write to GitHub — it is given no credentials, so a push or a{" "}
+        <code>gh</code> call fails to authenticate rather than being merely discouraged. It is only{" "}
+        <em>told</em> not to modify the code it is reviewing; the checkout is a disposable cache.
+        The daemon reviews unattended, so with rules set it runs matching PRs' code with nobody
         watching — start it with <code>--no-trust</code> to prevent that.
       </p>
     </div>

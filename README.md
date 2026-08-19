@@ -147,9 +147,18 @@ removes a rule.
 
 A trusted review gets `Bash`, `WebFetch` and `WebSearch` on top of reading, and
 the repo's own `.claude` config applies — it behaves as if you had checked the
-branch out and opened it yourself. It still may not edit the code, commit,
-push, or write anything to GitHub, and the cockpit labels the review "ran the
-code" so you know which kind you are reading.
+branch out and opened it yourself. The cockpit labels it "ran the code" so you
+know which kind you are reading.
+
+It cannot write to GitHub, and that is *enforced*, not requested: the run gets
+no GitHub credentials at all. `GH_CONFIG_DIR` points at an empty directory,
+`GH_TOKEN`/`GITHUB_TOKEN` are blanked, the fetch credential is passed per
+command instead of being stored in the checkout, and git's global and system
+config are switched off so a keychain helper cannot stand in. A `git push` or
+`gh pr comment` from inside a review fails to authenticate. Be clear about the
+edge of that guarantee: `Bash` can still *write files in the checkout*, and the
+instruction not to modify the code under review is an instruction, not a wall.
+The checkout is a disposable cache, so the blast radius is a wasted re-review.
 
 **What you are accepting.** A trusted review executes code from that PR on your
 machine — the branch's scripts, its dependencies, its test suite. That is the
