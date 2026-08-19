@@ -38,7 +38,8 @@ Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
 `~/.cerber/config.json` and apply on the next poll. Merged and closed PRs are
-archived out of the queue automatically.
+archived out of the queue automatically, and PRs in archived repos are never
+picked up at all — the repo is read-only, so a review could never be sent.
 
 ## What a review looks like
 
