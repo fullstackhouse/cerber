@@ -79,7 +79,7 @@ async function resolveTrust(
     log(opts.trust ? "Trusted by --trust: the review may run commands." : "Untrusted by --no-trust.");
     return opts.trust;
   }
-  const rules = parseTrustRules((await loadConfig()).trust.join("\n"));
+  const rules = parseTrustRules((await loadConfig()).trust);
   if (rules.length === 0) return false;
 
   const isPrivate = needsVisibility(rules)

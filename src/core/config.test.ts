@@ -34,21 +34,6 @@ describe("config", () => {
     expect(raw).toBe('{\n  "trust": [\n    "acme"\n  ]\n}\n');
   });
 
-  it("still reads a trusted.txt from before config.json existed", async () => {
-    await fs.writeFile(
-      path.join(home, "trusted.txt"),
-      "# a comment\nfullstackhouse\n@teammate   # trailing comment\n!acme/fork\n",
-    );
-    // Bare owners canonicalise to the glob the matcher actually uses.
-    expect((await loadConfig()).trust).toEqual(["fullstackhouse/*", "@teammate", "!acme/fork"]);
-  });
-
-  it("prefers config.json once it exists", async () => {
-    await fs.writeFile(path.join(home, "trusted.txt"), "legacy-org\n");
-    await saveConfig({ trust: ["acme"] });
-    expect((await loadConfig()).trust).toEqual(["acme"]);
-  });
-
   it("refuses a malformed config instead of silently reverting to defaults", async () => {
     await fs.mkdir(home, { recursive: true });
     await fs.writeFile(configPath(), '{"trust": "fullstackhouse"}');

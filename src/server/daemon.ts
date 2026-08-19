@@ -14,7 +14,7 @@ export interface DaemonOptions {
   model?: string;
   /** False reviews the diff alone, with no local checkout. Defaults to on. */
   withSource?: boolean;
-  /** Overrides ~/.cerber/trusted.txt for every run; undefined defers to it. */
+  /** Overrides the configured trust rules for every run; undefined defers to them. */
   trust?: boolean;
   /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.

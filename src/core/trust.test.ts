@@ -1,14 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { decideTrust, needsVisibility, parseTrustRules } from "./trust.js";
+import { decideTrust, needsVisibility, parseTrustRule, parseTrustRules } from "./trust.js";
 
 const pr = { owner: "fullstackhouse", repo: "open-mercato", author: "kamwro" };
-const rules = (text: string) => parseTrustRules(text);
+const rules = (...lines: string[]) => parseTrustRules(lines);
 
-describe("parseTrustRules", () => {
-  it("ignores blank lines, comments, and trailing comments", () => {
-    expect(rules("\n# a comment\nacme/widgets   # one repo\n")).toEqual([
-      { negated: false, kind: "repo", pattern: "acme/widgets" },
-    ]);
+describe("parseTrustRule", () => {
+  it("keeps a hand-written trailing comment out of the pattern", () => {
+    expect(parseTrustRule("acme/widgets   # the main app")).toEqual({
+      negated: false,
+      kind: "repo",
+      pattern: "acme/widgets",
+    });
+  });
+
+  it("returns null for nothing worth parsing", () => {
+    expect(parseTrustRule("")).toBeNull();
+    expect(parseTrustRule("   ")).toBeNull();
+    expect(parseTrustRule("# just a note")).toBeNull();
+    expect(parseTrustRule("!")).toBeNull();
+  });
+
+  it("skips unparseable entries rather than failing the whole list", () => {
+    expect(rules("acme", "", "@someone")).toHaveLength(2);
   });
 
   it("reads a bare owner as every repo under it", () => {
@@ -16,7 +29,7 @@ describe("parseTrustRules", () => {
   });
 
   it("distinguishes authors, visibility, and denials", () => {
-    expect(rules("@someone\nprivate\n!acme/public")).toEqual([
+    expect(rules("@someone", "private", "!acme/public")).toEqual([
       { negated: false, kind: "author", pattern: "someone" },
       { negated: false, kind: "private", pattern: "private" },
       { negated: true, kind: "repo", pattern: "acme/public" },
@@ -54,11 +67,10 @@ describe("decideTrust", () => {
   });
 
   it("lets a denial beat a grant, whatever the order", () => {
-    const both = "fullstackhouse\n!fullstackhouse/open-mercato";
-    const reversed = "!fullstackhouse/open-mercato\nfullstackhouse";
-    expect(decideTrust(rules(both), pr).trusted).toBe(false);
-    expect(decideTrust(rules(reversed), pr).trusted).toBe(false);
-    expect(decideTrust(rules(both), { ...pr, repo: "cezar" }).trusted).toBe(true);
+    const both = ["fullstackhouse", "!fullstackhouse/open-mercato"];
+    expect(decideTrust(rules(...both), pr).trusted).toBe(false);
+    expect(decideTrust(rules(...[...both].reverse()), pr).trusted).toBe(false);
+    expect(decideTrust(rules(...both), { ...pr, repo: "cezar" }).trusted).toBe(true);
   });
 
   it("is case-insensitive, the way GitHub names are", () => {
@@ -69,7 +81,7 @@ describe("decideTrust", () => {
 
 describe("needsVisibility", () => {
   it("only asks GitHub for visibility when a rule depends on it", () => {
-    expect(needsVisibility(rules("acme\n@someone"))).toBe(false);
-    expect(needsVisibility(rules("acme\nprivate"))).toBe(true);
+    expect(needsVisibility(rules("acme", "@someone"))).toBe(false);
+    expect(needsVisibility(rules("acme", "private"))).toBe(true);
   });
 });

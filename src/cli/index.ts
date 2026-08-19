@@ -5,7 +5,7 @@ import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
-import { describeRule, explainRule, parseTrustRules } from "../core/trust.js";
+import { describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
 import {
@@ -43,7 +43,7 @@ program
   )
   .option(
     "-t, --trust",
-    "let the review run commands in the checkout (tests, typecheck, git log) regardless of ~/.cerber/trusted.txt",
+    "let the review run commands in the checkout (tests, typecheck, git log) whatever the trust config says",
   )
   .option("--no-trust", "keep the review read-only even if a trust rule matches")
   .action(
@@ -232,15 +232,16 @@ program
     const config = await loadConfig();
 
     if (pattern) {
-      const rule = parseTrustRules(pattern)[0];
+      const rule = parseTrustRule(pattern);
       if (!rule) {
         console.error(`Not a trust rule: "${pattern}"`);
         process.exit(1);
       }
       const canonical = describeRule(rule);
-      const without = config.trust.filter(
-        (line) => describeRule(parseTrustRules(line)[0]!) !== canonical,
-      );
+      const without = config.trust.filter((line) => {
+        const parsed = parseTrustRule(line);
+        return !parsed || describeRule(parsed) !== canonical;
+      });
       if (opts.delete) {
         if (without.length === config.trust.length) {
           console.error(`Not in the trust list: ${canonical}`);
@@ -270,7 +271,7 @@ program
 
     console.log(`Trust rules (${configPath()}):`);
     for (const line of config.trust) {
-      const rule = parseTrustRules(line)[0];
+      const rule = parseTrustRule(line);
       if (rule) console.log(`  ${describeRule(rule).padEnd(28)} ${explainRule(rule)}`);
     }
     console.log("\nEverything else is reviewed read-only. Remove one with: cerber trust <pattern> --delete");
@@ -381,7 +382,7 @@ program
   )
   .option(
     "--no-trust",
-    "ignore ~/.cerber/trusted.txt: every review here stays read-only, even for repos you trust",
+    "ignore the configured trust rules: every review here stays read-only, even for repos you trust",
   )
   .option(
     "--auto-send",

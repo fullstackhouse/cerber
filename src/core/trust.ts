@@ -22,19 +22,26 @@ export interface TrustContext {
   isPrivate?: boolean;
 }
 
-export function parseTrustRules(text: string): TrustRule[] {
-  return text
-    .split("\n")
-    .map((line) => line.replace(/\s+#.*$/, "").trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .map((line) => {
-      const negated = line.startsWith("!");
-      const body = negated ? line.slice(1).trim() : line;
-      if (body.toLowerCase() === "private") return { negated, kind: "private" as const, pattern: "private" };
-      if (body.startsWith("@")) return { negated, kind: "author" as const, pattern: body.slice(1) };
-      // A bare owner means every repo under it.
-      return { negated, kind: "repo" as const, pattern: body.includes("/") ? body : `${body}/*` };
-    });
+/** One rule as a person writes it. Null when there is nothing to parse. */
+export function parseTrustRule(input: string): TrustRule | null {
+  // Trailing "# why we trust them" survives a hand-edited config.
+  const line = input.replace(/\s+#.*$/, "").trim();
+  if (line.length === 0 || line.startsWith("#")) return null;
+
+  const negated = line.startsWith("!");
+  const body = negated ? line.slice(1).trim() : line;
+  if (body.length === 0) return null;
+  if (body.toLowerCase() === "private") return { negated, kind: "private", pattern: "private" };
+  if (body.startsWith("@")) return { negated, kind: "author", pattern: body.slice(1) };
+  // A bare owner means every repo under it.
+  return { negated, kind: "repo", pattern: body.includes("/") ? body : `${body}/*` };
+}
+
+export function parseTrustRules(lines: string[]): TrustRule[] {
+  return lines.flatMap((line) => {
+    const rule = parseTrustRule(line);
+    return rule ? [rule] : [];
+  });
 }
 
 /** True when any rule needs repo visibility, which is a separate gh call. */

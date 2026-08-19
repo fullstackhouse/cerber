@@ -12,7 +12,7 @@ import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
-import { describeRule, explainRule, parseTrustRules } from "../core/trust.js";
+import { describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   listArtifacts,
@@ -33,7 +33,7 @@ export interface ServeOptions {
   daemon?: DaemonHandle;
   /** False makes cockpit re-reviews diff-only (`serve --no-source`). Defaults to on. */
   withSource?: boolean;
-  /** False keeps cockpit re-reviews read-only whatever ~/.cerber/trusted.txt says. */
+  /** False keeps cockpit re-reviews read-only whatever the trust config says. */
   trust?: boolean;
 }
 
@@ -67,7 +67,7 @@ export async function buildApp(
 
   const trustView = (lines: string[]) =>
     lines.flatMap((line) => {
-      const rule = parseTrustRules(line)[0];
+      const rule = parseTrustRule(line);
       return rule ? [{ rule: describeRule(rule), explanation: explainRule(rule), denies: rule.negated }] : [];
     });
 
@@ -85,13 +85,16 @@ export async function buildApp(
     if (typeof rule !== "string" || !rule.trim()) {
       return c.json({ error: "rule is required" }, 400);
     }
-    const parsed = parseTrustRules(rule)[0];
+    const parsed = parseTrustRule(rule);
     if (!parsed) return c.json({ error: `not a trust rule: ${rule}` }, 400);
 
     const canonical = describeRule(parsed);
     try {
       const config = await loadConfig();
-      const without = config.trust.filter((line) => describeRule(parseTrustRules(line)[0]!) !== canonical);
+      const without = config.trust.filter((line) => {
+        const existing = parseTrustRule(line);
+        return !existing || describeRule(existing) !== canonical;
+      });
       const trust = remove === true ? without : [...without, canonical];
       await saveConfig({ ...config, trust });
       return c.json({ path: configPath(), trust: trustView(trust) });

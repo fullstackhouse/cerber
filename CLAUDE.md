@@ -18,7 +18,7 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
   trust rules (`trust.ts` — rule syntax and matching; denials win) and settings
   (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
-  the cockpit's settings screen; a pre-JSON `trusted.txt` is still read)
+  the cockpit's settings screen)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
@@ -50,7 +50,7 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   and the cockpit's button both write the same artifact file
 - Don't give the review run a tool it doesn't need. The default run reads and
   nothing else, and treats everything in the checkout as untrusted PR content
-  rather than instructions. Only a PR the user trusted (`trusted.txt`, `--trust`)
+  rather than instructions. Only a PR the user trusted (`config.json`, `--trust`)
   gets Bash — and never Edit/Write: a review reads and runs, it doesn't fix
 - Don't let anything but the user grant trust. Not the PR, not its author's
   association, not a heuristic — trust is a claim about people, stated up front

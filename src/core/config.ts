@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { cerberHome } from "./state.js";
-import { describeRule, parseTrustRules } from "./trust.js";
 
 /**
  * `~/.cerber/config.json` — everything cerber lets you decide, in one file the
@@ -24,23 +23,13 @@ export function configPath(): string {
   return path.join(cerberHome(), "config.json");
 }
 
-/** The pre-JSON trust file. Still read, never written. */
-function legacyTrustPath(): string {
-  return path.join(cerberHome(), "trusted.txt");
-}
-
 export async function loadConfig(): Promise<Config> {
   const raw = await fs.readFile(configPath(), "utf8").catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return null;
     throw err;
   });
 
-  if (raw === null) {
-    // Nothing yet: fall back to a trusted.txt from before config.json existed.
-    const legacy = await fs.readFile(legacyTrustPath(), "utf8").catch(() => null);
-    if (legacy === null) return { ...DEFAULT_CONFIG };
-    return { trust: parseTrustRules(legacy).map(describeRule) };
-  }
+  if (raw === null) return { ...DEFAULT_CONFIG };
 
   try {
     return ConfigSchema.parse(JSON.parse(raw));
