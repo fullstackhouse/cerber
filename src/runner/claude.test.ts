@@ -63,11 +63,18 @@ describe("extractJson", () => {
 
 describe("runClaude", () => {
   it("kills a run that never finishes, so the PR is not wedged forever", async () => {
-    // A stand-in that ignores its arguments and hangs, the way a wedged run does.
+    // A stand-in that hangs AND ignores SIGTERM, so "close" cannot arrive on
+    // any platform. Waiting for it is what wedged CI; rejecting on the kill is
+    // what fixes it.
     const bin = path.join(os.tmpdir(), `cerber-hang-${process.pid}.sh`);
-    await fs.writeFile(bin, "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
+    // Short enough to reap itself: SIGKILL reaches the shell, not the sleep it
+    // spawned, and a leaked process in CI is somebody else's confusing failure.
+    await fs.writeFile(bin, "#!/bin/sh\ntrap '' TERM\nsleep 3\n", { mode: 0o755 });
     try {
+      const started = Date.now();
       await expect(runClaude("hi", { bin, timeoutMs: 100 })).rejects.toThrow(/did not finish within/);
+      // Promptly, not "eventually when the child happens to die".
+      expect(Date.now() - started).toBeLessThan(2_000);
     } finally {
       await fs.rm(bin, { force: true });
     }

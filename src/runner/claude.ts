@@ -33,6 +33,9 @@ export interface ClaudeOptions {
  */
 export const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 
+/** How long a killed run gets to exit on its own before SIGKILL. */
+const SIGKILL_GRACE_MS = 5_000;
+
 export function buildClaudeArgs(opts: ClaudeOptions): string[] {
   const args = ["-p", "--output-format", "json"];
   if (opts.model) args.push("--model", opts.model);
@@ -59,24 +62,41 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
     let stdout = "";
     let stderr = "";
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    let timedOut = false;
+    let settled = false;
+    const settle = (finish: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      finish();
+    };
+
     const timer = setTimeout(() => {
-      timedOut = true;
       child.kill("SIGTERM");
+      // Escalate: a run that ignores SIGTERM would otherwise sit there holding
+      // a checkout and burning quota. Unref'd so it never delays our exit.
+      setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS).unref();
+      // Settle now rather than on "close". Node only emits close once the
+      // child's stdio is fully closed, and anything the run spawned still
+      // holds those pipes — waiting for it is the wedge we came to prevent.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.stdin.destroy();
+      settle(() =>
+        reject(new Error(`claude did not finish within ${Math.round(timeoutMs / 60_000)} minutes — run killed.`)),
+      );
     }, timeoutMs);
 
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(new Error(`Failed to start claude CLI: ${err.message}. Is Claude Code installed and on PATH?`));
+      settle(() =>
+        reject(new Error(`Failed to start claude CLI: ${err.message}. Is Claude Code installed and on PATH?`)),
+      );
     });
     child.on("close", (code) => {
+      if (settled) return;
       clearTimeout(timer);
-      if (timedOut) {
-        reject(new Error(`claude did not finish within ${Math.round(timeoutMs / 60_000)} minutes — run killed.`));
-        return;
-      }
+      settled = true;
       if (code !== 0) {
         reject(new Error(`claude exited with code ${code}: ${stderr.trim() || stdout.slice(0, 500)}`));
         return;
