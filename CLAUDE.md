@@ -11,7 +11,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
-  gh client (shells out to `gh`, no tokens handled), diff utils
+  gh client (shells out to `gh`, no tokens handled), diff utils,
+  re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
+  matching each comment's line *text*, never a fuzzy guess)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON)
@@ -32,3 +34,7 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 - Don't add GitHub write calls anywhere except the (future) explicit send path
 - Don't add a database or config wizard — plain files, zero config
 - Don't handle API keys — `gh` and `claude` own auth
+- Don't let a re-review discard human work: comments the user wrote or edited
+  are carried across (`carryOverComments`), never regenerated away
+- Don't start an AI run without claiming `runner/inflight` — the daemon's timer
+  and the cockpit's button both write the same artifact file

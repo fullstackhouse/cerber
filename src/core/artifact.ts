@@ -14,6 +14,10 @@ export const CommentSchema = z.object({
   status: z.enum(["draft", "approved", "dropped"]).default("draft"),
   /** Set when the user edits an AI comment's body — calibration signal. */
   editedByUser: z.boolean().default(false),
+  /** Line this comment was written against, when a refresh has since moved it. */
+  originalLine: z.number().int().positive().nullable().default(null),
+  /** The commented line no longer exists in the diff — it can't post inline. */
+  drifted: z.boolean().default(false),
 });
 export type Comment = z.infer<typeof CommentSchema>;
 
@@ -45,6 +49,8 @@ export const PrInfoSchema = z.object({
   baseRefName: z.string(),
   headRefName: z.string(),
   headSha: z.string().default(""),
+  /** OPEN | CLOSED | MERGED, as of the last fetch. */
+  state: z.enum(["OPEN", "CLOSED", "MERGED"]).default("OPEN"),
   additions: z.number().int().default(0),
   deletions: z.number().int().default(0),
   changedFiles: z.number().int().default(0),
@@ -80,6 +86,18 @@ export const SentInfoSchema = z.object({
 });
 export type SentInfo = z.infer<typeof SentInfoSchema>;
 
+/** Result of pulling a review forward onto a newer head commit. */
+export const RefreshInfoSchema = z.object({
+  at: z.string(),
+  fromSha: z.string(),
+  toSha: z.string(),
+  /** Comments whose line number changed but whose code was found again. */
+  moved: z.number().int().default(0),
+  /** Comments whose line is gone from the new diff — they now post in the body. */
+  drifted: z.number().int().default(0),
+});
+export type RefreshInfo = z.infer<typeof RefreshInfoSchema>;
+
 /** What actually happened vs what the AI proposed — recorded at send time. */
 export const CalibrationSchema = z.object({
   aiRecommendation: z.enum(["approve", "comment", "request_changes"]).nullable(),
@@ -110,6 +128,8 @@ export const ArtifactSchema = z.object({
   run: RunInfoSchema.nullable().default(null),
   /** Set once the review was sent to GitHub (explicitly, or via opt-in auto-send). */
   sent: SentInfoSchema.nullable().default(null),
+  /** Last time this review was pulled forward onto a newer head commit. */
+  refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;

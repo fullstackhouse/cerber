@@ -3,6 +3,7 @@ import { evaluateAutoSend } from "../core/autosend.js";
 import { searchAwaitingMe, submitReview } from "../core/gh.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import { appendAutoSendLog, updateArtifactByKey } from "../core/state.js";
+import { ReviewInProgressError } from "../runner/inflight.js";
 import { pool, reviewPr } from "../runner/review.js";
 
 export interface DaemonOptions {
@@ -100,6 +101,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
             await handleAutoSend(result.artifact);
           }
         } catch (err: unknown) {
+          if (err instanceof ReviewInProgressError) {
+            // The cockpit (or an earlier, slower poll) is already on it.
+            skipped++;
+            return;
+          }
           failed++;
           status.errors++;
           log(`[${label}] failed: ${err instanceof Error ? err.message : err}`);

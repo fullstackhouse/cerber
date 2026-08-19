@@ -48,6 +48,20 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
+### When the PR moves under you
+
+A review is written against one commit, but authors keep pushing. Opening a
+review checks the PR's head and pulls the review forward: comments follow their
+code to its new line numbers, and any whose code is gone are flagged and post
+in the review body instead of inline — GitHub rejects an entire review over one
+comment on a line that is no longer in the diff. Sends carry the reviewed
+commit's SHA, so inline comments land where they were written.
+
+The AI's summary and verdict still describe the commit that was reviewed. To
+get its opinion of the new code, hit **Re-review at the new head** in the
+cockpit (or `cerber review <pr> --force`) — comments you wrote or rewrote are
+carried into the fresh review.
+
 ## Status / roadmap
 
 Early. Current phase: review + read-only cockpit.
@@ -64,6 +78,9 @@ Early. Current phase: review + read-only cockpit.
 5. ✅ Confidence calibration (`cerber stats`), shadow-mode auto-send (default
    in daemon: logs what would be sent), opt-in `--auto-send` (approve-only,
    `--auto-send-threshold`, default 90%)
+6. ✅ Reviews keep up with the PR: opening one re-anchors its comments onto new
+   commits, flags the ones whose code is gone, and offers a re-review that
+   keeps everything you wrote
 
 ## Running on a VPS
 

@@ -10,10 +10,12 @@ import {
   fetchSendPreview,
   patchComment,
   patchReview,
+  refreshReview,
+  rerunReview,
   sendReview,
 } from "./api";
 import { Markdown } from "./Markdown";
-import { Artifact, Chapter, ReviewComment, SendPreview } from "./types";
+import { Artifact, Chapter, RefreshResult, ReviewComment, SendPreview } from "./types";
 
 /**
  * Diff rendered by diff2html, with review comments injected inline under the
@@ -111,6 +113,15 @@ function CommentCard({
         <span className="muted">({comment.origin})</span>
         {comment.status === "dropped" && <span className="badge badge-muted"> dropped</span>}
         {comment.status === "approved" && <span className="badge badge-green"> approved</span>}
+        {comment.drifted && (
+          <span className="badge badge-warn" title="The code this comment points at changed in a newer commit. It will post in the review body instead of inline.">
+            {" "}
+            code changed — posts in body
+          </span>
+        )}
+        {!comment.drifted && comment.originalLine != null && comment.originalLine !== comment.line && (
+          <span className="muted" title="This comment followed its code to a new line."> (was :{comment.originalLine})</span>
+        )}
         {!readOnly && (
           <span className="comment-actions">
             {editing ? (
@@ -380,16 +391,121 @@ function SendPanel({
   );
 }
 
+function FreshnessBanner({
+  artifact,
+  freshness,
+  rerunning,
+  onRerun,
+}: {
+  artifact: Artifact;
+  freshness: RefreshResult | null;
+  rerunning: boolean;
+  onRerun: () => void;
+}) {
+  const running = artifact.status === "running";
+  const state = freshness?.prState ?? artifact.pr.state;
+  const closed = state === "CLOSED" || state === "MERGED";
+  const refresh = artifact.refresh;
+  const movedHere = freshness?.changed ? refresh : null;
+
+  if (running) {
+    return (
+      <div className="freshness freshness-running">
+        <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates itself
+        when the run lands — it takes a few minutes.
+      </div>
+    );
+  }
+  if (!closed && !movedHere) return null;
+
+  return (
+    <div className="freshness">
+      {closed && (
+        <div>
+          <strong>This PR is {state === "MERGED" ? "merged" : "closed"}.</strong> A review can still
+          be sent, but nobody is waiting for it.
+        </div>
+      )}
+      {movedHere && (
+        <div>
+          <strong>The PR moved on since this review.</strong> Now at{" "}
+          <code>{movedHere.toSha.slice(0, 7)}</code>, reviewed at{" "}
+          <code>{movedHere.fromSha.slice(0, 7)}</code>.{" "}
+          {movedHere.moved > 0 && <>{movedHere.moved} comment(s) followed the code. </>}
+          {movedHere.drifted > 0 && (
+            <>
+              {movedHere.drifted} could not — the code they point at is gone, so they will post in
+              the review body instead of inline.{" "}
+            </>
+          )}
+          The summary and verdict still describe the commit that was reviewed.
+          {!artifact.sent && (
+            <button className="rerun-btn" disabled={rerunning} onClick={onRerun}>
+              {rerunning ? "starting…" : "Re-review at the new head"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Detail({ reviewKey }: { reviewKey: string }) {
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [freshness, setFreshness] = useState<RefreshResult | null>(null);
+  const [rerunning, setRerunning] = useState(false);
 
   useEffect(() => {
-    fetchReview(reviewKey).then(setArtifact).catch((e) => setError(String(e)));
+    let cancelled = false;
+    setFreshness(null);
+    fetchReview(reviewKey)
+      .then((a) => {
+        if (cancelled) return;
+        setArtifact(a);
+        // Opening a review checks GitHub for new commits and pulls the comments
+        // forward onto them, so what you read is anchored to current code.
+        return refreshReview(reviewKey).then((r) => {
+          if (cancelled) return;
+          setFreshness(r);
+          if (r.changed) setArtifact(r.artifact);
+        });
+      })
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
   }, [reviewKey]);
+
+  // While an AI run is in flight, follow it until it lands.
+  useEffect(() => {
+    if (artifact?.status !== "running") return;
+    const timer = setInterval(() => {
+      fetchReview(reviewKey)
+        .then((a) => {
+          setArtifact(a);
+          if (a.status !== "running") setRerunning(false);
+        })
+        .catch(() => {
+          // Transient — the next tick tries again.
+        });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [artifact?.status, reviewKey]);
 
   if (error) return <p className="error">{error}</p>;
   if (!artifact) return <p className="muted">Loading…</p>;
+
+  const onRerun = () => {
+    setRerunning(true);
+    setError(null);
+    rerunReview(reviewKey)
+      .then(setArtifact)
+      .catch((e) => {
+        setError(String(e));
+        setRerunning(false);
+      });
+  };
 
   const readOnly = artifact.sent != null;
   const apply = (p: Promise<Artifact>) => p.then(setArtifact).catch((e) => setError(String(e)));
@@ -441,6 +557,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           <Markdown text={artifact.verdict.reasoning} />
         </div>
       )}
+
+      <FreshnessBanner
+        artifact={artifact}
+        freshness={freshness}
+        rerunning={rerunning}
+        onRerun={onRerun}
+      />
 
       {artifact.run?.error && <div className="error">Run failed: {artifact.run.error}</div>}
 

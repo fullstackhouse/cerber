@@ -232,6 +232,38 @@ a {
   color: var(--muted);
 }
 
+.badge-warn {
+  background: #fff8c5;
+  color: var(--yellow);
+}
+
+/* PR moved on / closed / mid-re-review — state the review can't see by itself. */
+.freshness {
+  background: #fff8c5;
+  border: 1px solid rgba(154, 103, 0, 0.3);
+  color: #57430a;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 12px 0;
+  line-height: 1.5;
+}
+
+.freshness code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.freshness-running {
+  background: #ddf4ff;
+  border-color: rgba(9, 105, 218, 0.3);
+  color: #0a3069;
+}
+
+.rerun-btn {
+  margin-left: 8px;
+}
+
 .add {
   color: var(--green);
 }

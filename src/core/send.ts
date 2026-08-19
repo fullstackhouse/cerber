@@ -38,7 +38,10 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
   const inline: InlineComment[] = [];
   const folded: Comment[] = [];
   for (const c of active) {
-    if (c.line != null && anchorable.get(c.path)?.has(c.line)) {
+    // A drifted comment's line number may still exist in the diff, but it now
+    // holds different code — posting there would point the author at something
+    // the comment was never about.
+    if (!c.drifted && c.line != null && anchorable.get(c.path)?.has(c.line)) {
       inline.push({ path: c.path, line: c.line, side: "RIGHT", body: c.body });
     } else {
       folded.push(c);
@@ -58,7 +61,10 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
   if (folded.length > 0) {
     parts.push("", "## Additional notes", "");
     for (const c of folded) {
-      parts.push(`- \`${c.path}${c.line != null ? `:${c.line}` : ""}\` — ${c.body}`);
+      // A drifted comment's line no longer exists, so name it as "was at" —
+      // pointing a reader at a line number that moved is worse than no number.
+      const at = c.line != null ? `:${c.drifted ? `~${c.line}` : c.line}` : "";
+      parts.push(`- \`${c.path}${at}\` — ${c.body}`);
     }
   }
   parts.push("", "---", "_Reviewed with [cerber](https://github.com/fullstackhouse/cerber) 🐕 — drafted by AI, sent by a human._");

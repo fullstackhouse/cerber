@@ -55,13 +55,13 @@ export function patchForFiles(diff: string, files: string[]): string {
 }
 
 /**
- * Line numbers (new side of the diff) that a GitHub review comment can attach
- * to, per file: added and context lines inside hunks.
+ * New-side lines of the diff with their text, per file: added and context
+ * lines inside hunks — exactly the lines a GitHub comment can attach to.
  */
-export function newSideLines(diff: string): Map<string, Set<number>> {
-  const result = new Map<string, Set<number>>();
+export function newSideLineText(diff: string): Map<string, Map<number, string>> {
+  const result = new Map<string, Map<number, string>>();
   for (const { path, patch } of splitDiffByFile(diff)) {
-    const lines = new Set<number>();
+    const lines = new Map<number, string>();
     let newLine = 0;
     let inHunk = false;
     const patchLines = patch.split("\n");
@@ -77,12 +77,24 @@ export function newSideLines(diff: string): Map<string, Set<number>> {
       if (line === "" && i === patchLines.length - 1) continue; // trailing split artifact
       if (line.startsWith("\\")) continue; // "\ No newline at end of file"
       if (line.startsWith("+") || line.startsWith(" ") || line === "") {
-        lines.add(newLine);
+        lines.set(newLine, line === "" ? "" : line.slice(1));
         newLine++;
       }
       // "-" lines belong to the old side only.
     }
     result.set(path, lines);
+  }
+  return result;
+}
+
+/**
+ * Line numbers (new side of the diff) that a GitHub review comment can attach
+ * to, per file: added and context lines inside hunks.
+ */
+export function newSideLines(diff: string): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>();
+  for (const [path, lines] of newSideLineText(diff)) {
+    result.set(path, new Set(lines.keys()));
   }
   return result;
 }

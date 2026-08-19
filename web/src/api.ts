@@ -1,4 +1,4 @@
-import { Artifact, DaemonStatus, ReviewListItem, SendPreview } from "./types";
+import { Artifact, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -50,6 +50,14 @@ export const deleteComment = (key: string, id: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/comments/${id}`, {
     method: "DELETE",
   });
+
+/** Pull the review onto the PR's current head, re-anchoring comments. */
+export const refreshReview = (key: string) =>
+  request<RefreshResult>(`/api/reviews/${encodeURIComponent(key)}/refresh`, { method: "POST" });
+
+/** Start a fresh AI review of the PR's current head. Returns while it runs. */
+export const rerunReview = (key: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/rerun`, { method: "POST" });
 
 export const fetchSendPreview = (key: string, event: string) =>
   request<SendPreview>(`/api/reviews/${encodeURIComponent(key)}/send-preview?event=${event}`);

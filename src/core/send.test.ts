@@ -33,6 +33,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
       baseRefName: "main",
       headRefName: "feat",
       headSha: "abc",
+      state: "OPEN" as const,
       additions: 1,
       deletions: 0,
       changedFiles: 1,
@@ -44,6 +45,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     verdict: { recommendation: "comment", confidence: 80, reasoning: "ok" },
     run: null,
     sent: null,
+    refresh: null,
     calibration: null,
     ...overrides,
   };
@@ -63,10 +65,10 @@ describe("buildReviewPayload", () => {
   it("sends anchorable comments inline and folds the rest into the body", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
-        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
-        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, origin: "user", status: "approved", editedByUser: false },
-        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, origin: "ai", status: "dropped", editedByUser: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false },
+        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -78,6 +80,20 @@ describe("buildReviewPayload", () => {
     expect(payload.body).toContain("## Summary");
     expect(payload.body).toContain("## Walkthrough");
     expect(payload.body).toContain("cerber");
+  });
+
+  it("folds drifted comments even when their line still exists", () => {
+    // Line 2 is in the diff, but the code the comment was written about is
+    // gone — posting inline would attach it to whatever took that line over.
+    const artifact = makeArtifact({
+      comments: [
+        { id: "1", path: "src/a.ts", line: 2, body: "stale anchor", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: true },
+      ],
+    });
+    const payload = buildReviewPayload(artifact, "COMMENT");
+    expect(payload.comments).toEqual([]);
+    expect(payload.folded.map((c) => c.id)).toEqual(["1"]);
+    expect(payload.body).toContain("src/a.ts:~2");
   });
 
   it("anchors the review to the reviewed head commit", () => {
@@ -97,8 +113,8 @@ describe("toMarkdown", () => {
   it("renders a full review document without dropped comments", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", origin: "ai", status: "draft", editedByUser: false },
-        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", origin: "ai", status: "dropped", editedByUser: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     const md = toMarkdown(artifact);

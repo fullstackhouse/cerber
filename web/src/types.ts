@@ -42,6 +42,10 @@ export interface ReviewComment {
   chapterId: string | null;
   origin: "ai" | "user";
   status: "draft" | "approved" | "dropped";
+  /** Line this comment was written against, if a refresh has since moved it. */
+  originalLine?: number | null;
+  /** The commented code is gone from the diff — it can't post inline. */
+  drifted?: boolean;
 }
 
 export interface Artifact {
@@ -55,6 +59,7 @@ export interface Artifact {
     baseRefName: string;
     headRefName: string;
     headSha: string;
+    state?: "OPEN" | "CLOSED" | "MERGED";
   };
   diff: string;
   summary: string;
@@ -74,6 +79,22 @@ export interface Artifact {
     url: string | null;
     auto?: boolean;
   } | null;
+  refresh?: {
+    at: string;
+    fromSha: string;
+    toSha: string;
+    moved: number;
+    drifted: number;
+  } | null;
+}
+
+export interface RefreshResult {
+  stale: boolean;
+  changed: boolean;
+  prState?: "OPEN" | "CLOSED" | "MERGED";
+  moved?: number;
+  drifted?: number;
+  artifact: Artifact;
 }
 
 export type DaemonStatus =
