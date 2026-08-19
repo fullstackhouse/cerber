@@ -4,7 +4,8 @@ import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
-import { addTrustRule, loadTrustRules, trustFilePath } from "../core/trust.js";
+import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { describeRule, explainRule, parseTrustRules } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
 import {
@@ -220,40 +221,59 @@ program
 program
   .command("trust")
   .description(
-    "Show or extend the list of PRs reviewed with commands allowed (~/.cerber/trusted.txt)",
+    "Show, add, or remove the rules that let a review run commands (~/.cerber/config.json)",
   )
   .argument(
     "[pattern]",
-    "owner/repo, owner, @author, or private — omit to list what is trusted today",
+    "owner/repo, owner, @author, private, or !pattern to deny — omit to list what is trusted today",
   )
-  .action(async (pattern?: string) => {
+  .option("-d, --delete", "remove this rule instead of adding it")
+  .action(async (pattern: string | undefined, opts: { delete?: boolean }) => {
+    const config = await loadConfig();
+
     if (pattern) {
-      const file = await addTrustRule(pattern);
-      console.log(`Trusted: ${pattern}\n  → ${file}`);
-      console.log(
-        "Reviews of matching PRs may now run tests, typechecks and git commands in the checkout.",
+      const rule = parseTrustRules(pattern)[0];
+      if (!rule) {
+        console.error(`Not a trust rule: "${pattern}"`);
+        process.exit(1);
+      }
+      const canonical = describeRule(rule);
+      const without = config.trust.filter(
+        (line) => describeRule(parseTrustRules(line)[0]!) !== canonical,
       );
+      if (opts.delete) {
+        if (without.length === config.trust.length) {
+          console.error(`Not in the trust list: ${canonical}`);
+          process.exit(1);
+        }
+        await saveConfig({ ...config, trust: without });
+        console.log(`Removed ${canonical}. Those PRs are reviewed read-only again.`);
+        return;
+      }
+      await saveConfig({ ...config, trust: [...without, canonical] });
+      console.log(`Trusted: ${explainRule(rule)}\n  → ${configPath()}`);
+      console.log("Reviews of matching PRs may run tests, typechecks and git commands in the checkout.");
       return;
     }
-    const rules = await loadTrustRules();
-    if (rules.length === 0) {
+
+    if (config.trust.length === 0) {
       console.log(
         `Nothing is trusted: every review reads the checkout and runs nothing.\n` +
           `Trust a repo, an owner, or a person with:\n` +
           `  cerber trust fullstackhouse      # every repo in the org\n` +
           `  cerber trust @teammate           # anything they authored\n` +
           `  cerber trust private             # any private repo\n` +
-          `Rules live in ${trustFilePath()} — a plain file you can edit.`,
+          `Rules live in ${configPath()}, and in the cockpit under Settings.`,
       );
       return;
     }
-    console.log(`Trust rules (${trustFilePath()}):`);
-    for (const rule of rules) {
-      const what =
-        rule.kind === "private" ? "any private repo" : rule.kind === "author" ? `@${rule.pattern}` : rule.pattern;
-      console.log(`  ${rule.negated ? "denied " : "trusted"}  ${what}`);
+
+    console.log(`Trust rules (${configPath()}):`);
+    for (const line of config.trust) {
+      const rule = parseTrustRules(line)[0];
+      if (rule) console.log(`  ${describeRule(rule).padEnd(28)} ${explainRule(rule)}`);
     }
-    console.log("\nReviews of matching PRs may run commands in the checkout. Everything else is read-only.");
+    console.log("\nEverything else is reviewed read-only. Remove one with: cerber trust <pattern> --delete");
   });
 
 program
@@ -404,10 +424,10 @@ program
       // Trust means "run this PR's code". A human clicking review accepted that
       // per PR; a daemon does it unattended, on whatever lands in the queue.
       if (opts.daemon && opts.trust) {
-        const rules = await loadTrustRules();
+        const rules = (await loadConfig()).trust;
         if (rules.length > 0) {
           console.log(
-            `⚠ ${rules.length} trust rule(s) in ${trustFilePath()}: this daemon will run commands from matching PRs ` +
+            `⚠ ${rules.length} trust rule(s) in ${configPath()}: this daemon will run commands from matching PRs ` +
               `automatically, with nobody watching. Pass --no-trust to keep every review read-only.`,
           );
         }

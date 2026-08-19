@@ -16,7 +16,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   matching each comment's line *text*, never a fuzzy guess), source checkouts
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
   an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
-  trust rules (`trust.ts` — `~/.cerber/trusted.txt`, plain lines, denials win)
+  trust rules (`trust.ts` — rule syntax and matching; denials win) and settings
+  (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
+  the cockpit's settings screen; a pre-JSON `trusted.txt` is still read)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
   runner (rides the user's login; prompt on stdin; validate output with zod,
   retry once on bad JSON). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
@@ -38,7 +40,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 ## Don'ts
 
 - Don't add GitHub write calls anywhere except the (future) explicit send path
-- Don't add a database or config wizard — plain files, zero config
+- Don't add a database or config wizard — plain files, zero config. Settings
+  are one JSON file with a zod schema and sane defaults; absent must keep
+  working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
 - Don't let a re-review discard human work: comments the user wrote or edited
   are carried across (`carryOverComments`), never regenerated away

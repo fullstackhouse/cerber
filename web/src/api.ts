@@ -1,4 +1,4 @@
-import { Artifact, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
+import { Artifact, ConfigView, DaemonStatus, RefreshResult, ReviewListItem, SendPreview } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -77,3 +77,12 @@ export const sendReview = (key: string, event: string) =>
   });
 
 export const exportUrl = (key: string) => `/api/reviews/${encodeURIComponent(key)}/export`;
+
+export const fetchConfig = () => request<ConfigView>("/api/config");
+
+/** Add a trust rule, or remove it. Returns the config as it now stands. */
+export const updateTrustRule = (rule: string, remove = false) =>
+  request<ConfigView>("/api/config/trust", {
+    method: "POST",
+    body: JSON.stringify({ rule, remove }),
+  });

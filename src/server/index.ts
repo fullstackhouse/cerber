@@ -10,7 +10,9 @@ import { DaemonHandle } from "./daemon.js";
 import { ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
+import { describeRule, explainRule, parseTrustRules } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   listArtifacts,
@@ -60,6 +62,43 @@ export async function buildApp(
   app.get("/api/daemon", (c) =>
     c.json(opts.daemon ? opts.daemon.status() : { enabled: false }),
   );
+
+  // ---- Config: trust rules, edited from the cockpit's Settings view ----
+
+  const trustView = (lines: string[]) =>
+    lines.flatMap((line) => {
+      const rule = parseTrustRules(line)[0];
+      return rule ? [{ rule: describeRule(rule), explanation: explainRule(rule), denies: rule.negated }] : [];
+    });
+
+  app.get("/api/config", async (c) => {
+    try {
+      const config = await loadConfig();
+      return c.json({ path: configPath(), trust: trustView(config.trust) });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.post("/api/config/trust", async (c) => {
+    const { rule, remove } = await c.req.json();
+    if (typeof rule !== "string" || !rule.trim()) {
+      return c.json({ error: "rule is required" }, 400);
+    }
+    const parsed = parseTrustRules(rule)[0];
+    if (!parsed) return c.json({ error: `not a trust rule: ${rule}` }, 400);
+
+    const canonical = describeRule(parsed);
+    try {
+      const config = await loadConfig();
+      const without = config.trust.filter((line) => describeRule(parseTrustRules(line)[0]!) !== canonical);
+      const trust = remove === true ? without : [...without, canonical];
+      await saveConfig({ ...config, trust });
+      return c.json({ path: configPath(), trust: trustView(trust) });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();

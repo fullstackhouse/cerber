@@ -1,7 +1,3 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { cerberHome } from "./state.js";
-
 /**
  * Which PRs cerber is willing to review with its guard down.
  *
@@ -25,24 +21,6 @@ export interface TrustContext {
   /** Only looked up when a `private` rule exists — it costs an extra gh call. */
   isPrivate?: boolean;
 }
-
-export function trustFilePath(): string {
-  return path.join(cerberHome(), "trusted.txt");
-}
-
-export const TRUST_FILE_TEMPLATE = `# Reviews of PRs matching these lines run trusted: the AI may run commands in
-# the checkout (tests, typecheck, git log) instead of only reading files, and
-# the repo's own .claude config applies. Trust people, not code.
-#
-#   acme/widgets     one repo
-#   acme             every repo in that owner or org
-#   acme/*-service   globs, within a path segment
-#   @someone         anything that person authored
-#   private          any private repo
-#   !acme/public-fork   "!" denies, and beats every other line
-#
-# Everything not listed is reviewed read-only. Delete a line to withdraw trust.
-`;
 
 export function parseTrustRules(text: string): TrustRule[] {
   return text
@@ -99,26 +77,21 @@ export function decideTrust(rules: TrustRule[], ctx: TrustContext): TrustDecisio
   return { trusted: false, reason: "no trust rule matches" };
 }
 
-/** Reads ~/.cerber/trusted.txt. Missing file = trust nobody, which is the safe default. */
-export async function loadTrustRules(): Promise<TrustRule[]> {
-  try {
-    return parseTrustRules(await fs.readFile(trustFilePath(), "utf8"));
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
+/** How a rule reads back to a human: what you typed, what the cockpit shows. */
+export function describeRule(rule: TrustRule): string {
+  const body = rule.kind === "author" ? `@${rule.pattern}` : rule.pattern;
+  return rule.negated ? `!${body}` : body;
 }
 
-/** Append a rule, creating the file with its explanatory header if needed. */
-export async function addTrustRule(pattern: string): Promise<string> {
-  const file = trustFilePath();
-  await fs.mkdir(cerberHome(), { recursive: true });
-  const existing = await fs.readFile(file, "utf8").catch(() => null);
-  const body = existing ?? TRUST_FILE_TEMPLATE;
-  const line = pattern.trim();
-  if (parseTrustRules(body).some((r) => r.pattern === parseTrustRules(line)[0]?.pattern && !r.negated)) {
-    return file;
-  }
-  await fs.writeFile(file, `${body}${body.endsWith("\n") ? "" : "\n"}${line}\n`);
-  return file;
+/** Plain-English gloss for the cockpit, so a rule is never a mystery string. */
+export function explainRule(rule: TrustRule): string {
+  const subject =
+    rule.kind === "private"
+      ? "any private repo"
+      : rule.kind === "author"
+        ? `PRs authored by @${rule.pattern}`
+        : rule.pattern.endsWith("/*")
+          ? `every repo in ${rule.pattern.slice(0, -2)}`
+          : rule.pattern;
+  return rule.negated ? `never runs commands: ${subject}` : `may run commands: ${subject}`;
 }

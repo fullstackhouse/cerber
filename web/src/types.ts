@@ -123,3 +123,15 @@ export interface SendPreview {
   comments: { path: string; line: number; side: "RIGHT"; body: string }[];
   folded: ReviewComment[];
 }
+
+export interface TrustEntry {
+  /** The rule as written: "acme/widgets", "@someone", "!acme/fork". */
+  rule: string;
+  explanation: string;
+  denies: boolean;
+}
+
+export interface ConfigView {
+  path: string;
+  trust: TrustEntry[];
+}

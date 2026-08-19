@@ -11,7 +11,8 @@ import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout
 import { PrRef, fetchPrDiff, fetchPrInfo, fetchRepoIsPrivate } from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
-import { decideTrust, loadTrustRules, needsVisibility } from "../core/trust.js";
+import { loadConfig } from "../core/config.js";
+import { decideTrust, needsVisibility, parseTrustRules } from "../core/trust.js";
 import { extractJson, runClaude } from "./claude.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
@@ -29,8 +30,8 @@ export interface ReviewOptions {
    */
   withSource?: boolean;
   /**
-   * Override the trust rules in ~/.cerber/trusted.txt for this run: true lets
-   * the review run commands in the checkout, false keeps it read-only.
+   * Override the configured trust rules for this run: true lets the review run
+   * commands in the checkout, false keeps it read-only.
    */
   trust?: boolean;
 }
@@ -66,8 +67,8 @@ export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<Re
 
 /**
  * Trust is a claim about the people behind a PR, so it comes from the user:
- * the rules they wrote in ~/.cerber/trusted.txt, or an explicit flag on this
- * run. Nothing about the PR's own content can earn it.
+ * the rules in their config, or an explicit flag on this run. Nothing about
+ * the PR's own content can earn it.
  */
 async function resolveTrust(
   pr: PrInfo,
@@ -78,7 +79,7 @@ async function resolveTrust(
     log(opts.trust ? "Trusted by --trust: the review may run commands." : "Untrusted by --no-trust.");
     return opts.trust;
   }
-  const rules = await loadTrustRules();
+  const rules = parseTrustRules((await loadConfig()).trust.join("\n"));
   if (rules.length === 0) return false;
 
   const isPrivate = needsVisibility(rules)

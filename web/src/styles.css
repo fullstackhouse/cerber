@@ -564,3 +564,58 @@ button:hover {
   background: transparent;
   color: inherit;
 }
+
+/* ---- Settings ---- */
+
+.topbar-link {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.topbar-link:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.settings {
+  max-width: 760px;
+}
+.settings h2 {
+  font-size: 15px;
+  margin-top: 32px;
+}
+.settings p {
+  line-height: 1.55;
+}
+
+.trust-add {
+  display: flex;
+  gap: 8px;
+  margin: 20px 0 12px;
+}
+.trust-add input {
+  flex: 1;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-alt, transparent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.trust-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.trust-table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: baseline;
+}
+.trust-table td:last-child {
+  text-align: right;
+}
+.trust-deny code {
+  text-decoration: line-through;
+}

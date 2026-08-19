@@ -125,10 +125,12 @@ cerber trust private             # any private repo
 cerber trust                     # show what is trusted today
 ```
 
-Rules live in `~/.cerber/trusted.txt`, a plain file you can edit. A `!` line
-denies and beats every grant, so `fullstackhouse` plus
-`!fullstackhouse/public-fork` does what it looks like. `--trust` and
-`--no-trust` override the file for one run.
+Rules live in `~/.cerber/config.json`, and the cockpit has a **settings**
+screen that reads and writes the same file — each rule shown with what it
+actually grants. A `!` rule denies and beats every grant, so `fullstackhouse`
+plus `!fullstackhouse/public-fork` does what it looks like. `--trust` and
+`--no-trust` override the config for one run; `cerber trust <pattern> --delete`
+removes a rule.
 
 A trusted review gets `Bash`, `WebFetch` and `WebSearch` on top of reading, and
 the repo's own `.claude` config applies — it behaves as if you had checked the
