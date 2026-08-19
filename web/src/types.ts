@@ -17,10 +17,18 @@ export interface ReviewListItem {
     additions: number;
     deletions: number;
     changedFiles: number;
+    baseRefName?: string;
+    headRefName?: string;
   };
   verdict: Verdict | null;
   commentCount: number;
+  /** Of those, the ones whose code is gone — they post in the body, not inline. */
+  driftedCount?: number;
   costUsd: number | null;
+  withSource?: boolean | null;
+  trusted?: boolean | null;
+  runError?: string | null;
+  sent?: Artifact["sent"];
 }
 
 export interface Verdict {

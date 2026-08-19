@@ -102,6 +102,7 @@ export function Settings() {
           }}
         />
         <button
+          className="btn"
           disabled={busy || !draft.trim()}
           onClick={() => {
             apply(updateTrustRule(draft.trim()));
@@ -126,8 +127,8 @@ export function Settings() {
                   <code>{entry.rule}</code>
                 </td>
                 <td className="muted">{entry.explanation}</td>
-                <td>
-                  <button disabled={busy} onClick={() => apply(updateTrustRule(entry.rule, true))}>
+                <td className="trust-actions">
+                  <button className="btn" disabled={busy} onClick={() => apply(updateTrustRule(entry.rule, true))}>
                     remove
                   </button>
                 </td>

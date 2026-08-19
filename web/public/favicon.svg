@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- cerber: a paw with three toes, for the three-headed gatekeeper. -->
+  <style>
+    .mark { fill: #3d4fd6 }
+    @media (prefers-color-scheme: dark) { .mark { fill: #8b96ee } }
+  </style>
+  <g class="mark">
+    <circle cx="6.1" cy="8.9" r="2.5" />
+    <circle cx="12" cy="6.7" r="2.7" />
+    <circle cx="17.9" cy="8.9" r="2.5" />
+    <ellipse cx="12" cy="16.6" rx="5.4" ry="4.3" />
+  </g>
+</svg>

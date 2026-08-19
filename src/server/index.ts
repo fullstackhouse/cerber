@@ -173,10 +173,19 @@ export async function buildApp(
           additions: a.pr.additions,
           deletions: a.pr.deletions,
           changedFiles: a.pr.changedFiles,
+          // The queue's cursor row explains itself without opening the review,
+          // so the list carries what that explanation is made of.
+          baseRefName: a.pr.baseRefName,
+          headRefName: a.pr.headRefName,
         },
         verdict: a.verdict,
         commentCount: a.comments.filter((cm) => cm.status !== "dropped").length,
+        driftedCount: a.comments.filter((cm) => cm.status !== "dropped" && cm.drifted).length,
         costUsd: a.run?.costUsd ?? null,
+        withSource: a.run?.withSource ?? null,
+        trusted: a.run?.trusted ?? null,
+        runError: a.run?.error ?? null,
+        sent: a.sent ? { at: a.sent.at, event: a.sent.event, url: a.sent.url, auto: a.sent.auto ?? false } : null,
       })),
     );
   });

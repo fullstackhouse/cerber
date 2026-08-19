@@ -35,9 +35,11 @@ npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
-`~/.cerber/config.json` and apply on the next poll. Merged and closed PRs are
-archived out of the queue automatically, and PRs in archived repos are never
-picked up at all — the repo is read-only, so a review could never be sent.
+`~/.cerber/config.json` and apply on the next poll. The queue only lists what
+still wants you: anything you have settled drops into a drawer under it — one
+for reviews you sent, one for the ones you marked reviewed or skipped, one for
+merged and closed PRs — and PRs in archived repos are never picked up at all,
+since the repo is read-only and a review could never be sent.
 
 ## What a review looks like
 
@@ -56,6 +58,13 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
 diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
+
+The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
+and the strip under the table explains whatever it lands on — the verdict's own
+reasoning, what the run read, how it sits against the auto-send bar — so most
+rows can be judged without opening them. `↵` opens one, `r` drafts (or
+re-drafts) it. Inside a review, `[` and `]` walk to the previous/next PR still
+awaiting you, `n` steps through the chapters, and `s` sends.
 
 ### It reviews the code, not just the diff
 
