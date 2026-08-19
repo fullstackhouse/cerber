@@ -21,6 +21,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
       baseRefName: "main",
       headRefName: "f",
       headSha: "abc",
+      headFromFork: false,
       state: "OPEN" as const,
       additions: 0,
       deletions: 0,

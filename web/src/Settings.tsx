@@ -3,12 +3,13 @@ import { fetchConfig, updateTrustRule } from "./api";
 import { ConfigView } from "./types";
 
 const EXAMPLES = [
-  { rule: "acme", meaning: "every repo in that owner or org" },
-  { rule: "acme/widgets", meaning: "one repo" },
-  { rule: "acme/*-service", meaning: "a glob, within a path segment" },
-  { rule: "@teammate", meaning: "anything that person authored" },
-  { rule: "private", meaning: "any private repo" },
-  { rule: "!acme/public-fork", meaning: "deny — beats every rule above" },
+  { rule: "@acme/*", meaning: "anyone in the acme org — trusts people" },
+  { rule: "@acme/devs", meaning: "anyone on that GitHub team" },
+  { rule: "@teammate", meaning: "one person, by login" },
+  { rule: "acme/widgets", meaning: "one repo, but only PRs pushed by someone with write access" },
+  { rule: "acme", meaning: "every repo in that owner or org, same write-access rule" },
+  { rule: "private", meaning: "any private repo, same write-access rule" },
+  { rule: "!acme/public-fork", meaning: "deny — beats every rule above, forks included" },
 ];
 
 export function Settings() {
@@ -49,11 +50,16 @@ export function Settings() {
         Trust the people, not the code: nothing about a PR can earn it. Rules live in{" "}
         <code>{config.path}</code>.
       </p>
+      <p className="muted">
+        Prefer the <code>@org/team</code> and <code>@org/*</code> forms — they name people. A repo
+        rule is a shorthand for "whoever can push here", since anyone can open a PR against a public
+        repo from a fork; those PRs are never trusted by a repo rule.
+      </p>
 
       <div className="trust-add">
         <input
           value={draft}
-          placeholder="owner, owner/repo, @author, private, !deny"
+          placeholder="@org/team, @org/*, @author, owner/repo, private, !deny"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && draft.trim()) {

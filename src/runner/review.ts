@@ -8,11 +8,18 @@ import {
   artifactId,
 } from "../core/artifact.js";
 import { evictOldCheckouts, neutralDir, prepareCheckout } from "../core/checkout.js";
-import { PrRef, fetchPrDiff, fetchPrInfo, fetchRepoIsPrivate } from "../core/gh.js";
+import {
+  PrRef,
+  fetchPrDiff,
+  fetchPrInfo,
+  fetchRepoIsPrivate,
+  isOrgMember,
+  isTeamMember,
+} from "../core/gh.js";
 import { carryOverComments } from "../core/refresh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
-import { decideTrust, needsVisibility, parseTrustRules } from "../core/trust.js";
+import { decideTrust, membershipQueries, needsVisibility, parseTrustRules } from "../core/trust.js";
 import { extractJson, runClaude } from "./claude.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
@@ -85,7 +92,32 @@ async function resolveTrust(
   const isPrivate = needsVisibility(rules)
     ? await fetchRepoIsPrivate(pr).catch(() => undefined)
     : undefined;
-  const decision = decideTrust(rules, { owner: pr.owner, repo: pr.repo, author: pr.author, isPrivate });
+
+  // A membership check that errors (no read:org scope, GitHub down) must read
+  // as "not a member" — never as trust we could not actually confirm.
+  const memberships = new Set<string>();
+  for (const query of membershipQueries(rules)) {
+    try {
+      const member = query.team
+        ? await isTeamMember(query.org, query.team, pr.author)
+        : await isOrgMember(query.org, pr.author);
+      if (member) memberships.add(query.key);
+    } catch (err: unknown) {
+      log(
+        `Could not check whether @${pr.author} is in ${query.key} ` +
+          `(${err instanceof Error ? err.message : err}) — treating as not a member.`,
+      );
+    }
+  }
+
+  const decision = decideTrust(rules, {
+    owner: pr.owner,
+    repo: pr.repo,
+    author: pr.author,
+    pushAccess: !pr.headFromFork,
+    isPrivate,
+    memberships,
+  });
   if (decision.trusted) log(`Trusted (${decision.reason}): the review may run commands in the checkout.`);
   return decision.trusted;
 }

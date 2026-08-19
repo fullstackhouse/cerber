@@ -49,6 +49,11 @@ export const PrInfoSchema = z.object({
   baseRefName: z.string(),
   headRefName: z.string(),
   headSha: z.string().default(""),
+  /**
+   * The PR's branch lives in a fork, so its author need not have write access
+   * here. Defaults to true: an artifact that doesn't say cannot grant trust.
+   */
+  headFromFork: z.boolean().default(true),
   /** OPEN | CLOSED | MERGED, as of the last fetch. */
   state: z.enum(["OPEN", "CLOSED", "MERGED"]).default("OPEN"),
   additions: z.number().int().default(0),

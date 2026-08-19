@@ -57,7 +57,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     "--repo",
     `${ref.owner}/${ref.repo}`,
     "--json",
-    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state",
+    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isCrossRepository",
   ]);
   const raw = JSON.parse(out);
   return PrInfoSchema.parse({
@@ -71,6 +71,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     headSha: raw.headRefOid ?? "",
+    headFromFork: raw.isCrossRepository !== false,
     state: raw.state ?? "OPEN",
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
@@ -85,6 +86,31 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
 export async function fetchRepoIsPrivate(ref: Pick<PrRef, "owner" | "repo">): Promise<boolean> {
   const out = await gh(["repo", "view", `${ref.owner}/${ref.repo}`, "--json", "isPrivate"]);
   return JSON.parse(out).isPrivate === true;
+}
+
+/**
+ * Org and team membership, for `@org/*` and `@org/team` trust rules. A 404 is
+ * GitHub's "no" and the answer we want; anything else (no `read:org` scope, an
+ * outage) throws, so a broken check can never read as "trusted".
+ */
+export async function isOrgMember(org: string, login: string): Promise<boolean> {
+  return membershipCheck(["api", `orgs/${org}/members/${login}`, "--silent"]);
+}
+
+export async function isTeamMember(org: string, team: string, login: string): Promise<boolean> {
+  return membershipCheck(["api", `orgs/${org}/teams/${team}/memberships/${login}`, "--jq", ".state"]);
+}
+
+async function membershipCheck(args: string[]): Promise<boolean> {
+  try {
+    const out = await gh(args);
+    // The team endpoint answers for invited-but-not-yet-joined people too.
+    return out.trim() === "" || out.trim() === "active";
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/not found|HTTP 404/i.test(message)) return false;
+    throw err;
+  }
 }
 
 export async function fetchPrDiff(ref: PrRef): Promise<string> {

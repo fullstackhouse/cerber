@@ -16,7 +16,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   matching each comment's line *text*, never a fuzzy guess), source checkouts
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
   an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
-  trust rules (`trust.ts` — rule syntax and matching; denials win) and settings
+  trust rules (`trust.ts` — rule syntax and matching; `@org/team` and `@org/*`
+  trust people, repo rules additionally require the PR to be pushed to the repo
+  rather than a fork; denials win) and settings
   (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
   the cockpit's settings screen)
 - `src/runner/` — review prompt + headless `claude -p --output-format json`
@@ -54,5 +56,8 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   gets Bash — and never Edit/Write: a review reads and runs, it doesn't fix
 - Don't let anything but the user grant trust. Not the PR, not its author's
   association, not a heuristic — trust is a claim about people, stated up front
+- Don't let a repo stand in for the people who can open PRs against it. A
+  public repo takes PRs from anyone, so repo-shaped rules apply only to
+  non-fork branches, and a failed membership lookup means "not a member"
 - Don't make the checkout a precondition — it's on by default, but if git or
   `gh` can't produce one, log it and review the diff alone
