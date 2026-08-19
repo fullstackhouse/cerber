@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Detail } from "./Detail";
-import { Icon, Key } from "./Icon";
+import { Icon, Key, Logo } from "./Icon";
 import { Queue } from "./Queue";
 import { Settings } from "./Settings";
 
@@ -36,6 +36,7 @@ export function App() {
       <header className="topbar">
         <div className="bar-inner">
           <a href="#/" className="brand">
+            <Logo />
             cerber
           </a>
           <span className="tagline">nothing reaches GitHub until you say so</span>

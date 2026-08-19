@@ -68,6 +68,22 @@ export function Icon({ name, size = 13 }: { name: IconName; size?: number }) {
   );
 }
 
+/**
+ * The mark: a paw with three toes, for the three-headed gatekeeper. Solid
+ * rather than line-drawn, because it has to hold together at favicon size —
+ * web/public/favicon.svg is the same shape.
+ */
+export function Logo({ size = 17 }: { size?: number }) {
+  return (
+    <svg className="logo" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="6.1" cy="8.9" r="2.5" />
+      <circle cx="12" cy="6.7" r="2.7" />
+      <circle cx="17.9" cy="8.9" r="2.5" />
+      <ellipse cx="12" cy="16.6" rx="5.4" ry="4.3" />
+    </svg>
+  );
+}
+
 /** A keycap, for the hints that tell you the keyboard can do this too. */
 export function Key({ children }: { children: React.ReactNode }) {
   return <span className="key">{children}</span>;

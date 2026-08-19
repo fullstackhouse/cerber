@@ -316,11 +316,19 @@ button {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--fg);
   text-decoration: none;
+}
+
+.brand .logo {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .tagline {
