@@ -1,5 +1,44 @@
-import { describe, expect, it } from "vitest";
-import { classifyReply } from "./gh.js";
+import { execFile } from "node:child_process";
+import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
+import { classifyReply, currentLogin, resetLoginCache } from "./gh.js";
+
+// gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
+// resolves to the `{ stdout }` shape the real one does, while still recording
+// the calls on the spy itself.
+vi.mock("node:child_process", () => {
+  const execFile = vi.fn();
+  (execFile as unknown as Record<symbol, unknown>)[Symbol.for("nodejs.util.promisify.custom")] = (
+    ...args: unknown[]
+  ) => Promise.resolve(execFile(...(args as [])));
+  return { execFile };
+});
+const exec = execFile as unknown as Mock;
+
+describe("currentLogin", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetLoginCache();
+  });
+
+  it("asks gh once and reuses the answer", async () => {
+    exec.mockResolvedValue({ stdout: "jtomaszewski\n" });
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries after a failure instead of failing forever", async () => {
+    // A cached rejection would leave every later poll reporting "unknown"
+    // until the process restarts — gh being briefly offline or mid-re-auth
+    // must not permanently disable whose-move detection.
+    exec
+      .mockRejectedValueOnce(Object.assign(new Error("boom"), { stderr: "gh: not authenticated" }))
+      .mockResolvedValue({ stdout: "jtomaszewski\n" });
+    await expect(currentLogin()).rejects.toThrow("not authenticated");
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("classifyReply", () => {
   const c = (author: string, at: string) => ({ author, at, bot: false });

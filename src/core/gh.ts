@@ -208,8 +208,22 @@ export function classifyReply(comments: Comment[], login: string): Reply {
 /** The login `@me` resolves to. Asked once — it cannot change mid-process. */
 let cachedLogin: Promise<string> | null = null;
 export function currentLogin(): Promise<string> {
-  cachedLogin ??= gh(["api", "user", "--jq", ".login"]).then((out) => out.trim());
+  cachedLogin ??= gh(["api", "user", "--jq", ".login"]).then(
+    (out) => out.trim(),
+    (err: unknown) => {
+      // A login we could not fetch is not an answer worth keeping. gh may be
+      // offline or mid-re-auth; caching the rejection would leave every later
+      // poll reporting "unknown" until the process restarts.
+      cachedLogin = null;
+      throw err;
+    },
+  );
   return cachedLogin;
+}
+
+/** Test seam: forget the cached login so the next call asks again. */
+export function resetLoginCache(): void {
+  cachedLogin = null;
 }
 
 export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
