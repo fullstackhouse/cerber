@@ -1324,7 +1324,15 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 why
               </button>
             )}
-            <button className="lab rail-lab-btn" onClick={() => jump(chatEl)}>
+            {/* Focus, not just scroll: on a wide screen the panel is already
+                in view, and what you wanted was the cursor in it. */}
+            <button
+              className="lab rail-lab-btn"
+              onClick={() => {
+                jump(chatEl);
+                chatInput.current?.focus();
+              }}
+            >
               chat
             </button>
           </div>
@@ -1439,21 +1447,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             </div>
           )}
 
-          {/* Above the diffs, next to what it is mostly about: the summary and
-              the verdict you have just read. Anything you point it at from
-              further down scrolls back up to here. */}
-          <ChatPanel
-            artifact={artifact}
-            reviewKey={reviewKey}
-            refs={chatRefs}
-            onClearRefs={() => setChatRefs([])}
-            onDropRef={(i) => setChatRefs((refs) => refs.filter((_, n) => n !== i))}
-            onArtifact={setArtifact}
-            readOnly={readOnly}
-            inputRef={chatInput}
-            anchorRef={chatEl}
-          />
-
           {chapters.map((ch, i) => (
             <ChapterSection
               key={ch.id}
@@ -1503,79 +1496,98 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </div>
             </section>
           )}
+        </div>
 
-          {/* The verdict was written against findings that may since have been
-              dropped, edited or re-graded. Nothing auto-rewrites it — the hint
-              says they disagree, and one click hands it to the chat, which
-              already knows how to revise a draft. */}
-          {!readOnly && mismatch && (
-            <div className="verdict-hint">
-              <span>
-                <strong>{mismatch}</strong> — the verdict was written before those edits.
-              </span>
-              <button className="btn btn-sm" onClick={retrue} disabled={chatBusy}>
-                <Icon name="comment" />
-                {chatBusy ? "the reviewer is busy…" : "ask the reviewer to re-true it"}
-              </button>
-            </div>
-          )}
-          {artifact.verdict && !readOnly && (
-            <div className="verdict-bar" ref={verdictEl}>
-              <span className="lab">verdict</span>
-              {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
-              <span className="grow" />
-              <span className="faint">what you send follows this unless you say otherwise</span>
-            </div>
-          )}
-
-          <SendPanel
+        {/* The two things you do rather than read. On a wide screen they are a
+            column of their own, in view the whole way down the diffs; narrower,
+            they fall in under them, which is where the page used to end. */}
+        <aside className="cockpit">
+          <ChatPanel
             artifact={artifact}
             reviewKey={reviewKey}
-            event={event}
-            overridden={eventOverride != null}
-            onPickEvent={setEventOverride}
-            sending={sending}
-            onSend={doSend}
-            error={sendError}
-            next={next}
-            onAdvance={advance}
-            anchorRef={sendEl}
-            footer={
-              <>
-                <span className="faint">not sending?</span>
-                {!readOnly && (
-                  <>
-                    {/* Both mean "I'm done with this one" — so they move you on. */}
-                    <button
-                      className="btn btn-sm"
-                      title={
-                        next
-                          ? `Settle it locally and go to ${next.id}`
-                          : "Settle it locally and go back to the queue"
-                      }
-                      onClick={() => settle("reviewed")}
-                    >
-                      <Icon name="check" />
-                      mark reviewed
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      title={next ? `Leave it and go to ${next.id}` : "Leave it and go back to the queue"}
-                      onClick={() => settle("skipped")}
-                    >
-                      <Icon name="skip" />
-                      skip
-                    </button>
-                  </>
-                )}
-                <a className="btn btn-sm" href={exportUrl(reviewKey)}>
-                  <Icon name="download" />
-                  export .md
-                </a>
-              </>
-            }
+            refs={chatRefs}
+            onClearRefs={() => setChatRefs([])}
+            onDropRef={(i) => setChatRefs((refs) => refs.filter((_, n) => n !== i))}
+            onArtifact={setArtifact}
+            readOnly={readOnly}
+            inputRef={chatInput}
+            anchorRef={chatEl}
           />
-        </div>
+
+          <div className="cockpit-decide">
+            {/* The verdict was written against findings that may since have been
+                dropped, edited or re-graded. Nothing auto-rewrites it — the hint
+                says they disagree, and one click hands it to the chat, which
+                already knows how to revise a draft. */}
+            {!readOnly && mismatch && (
+              <div className="verdict-hint">
+                <span>
+                  <strong>{mismatch}</strong> — the verdict was written before those edits.
+                </span>
+                <button className="btn btn-sm" onClick={retrue} disabled={chatBusy}>
+                  <Icon name="comment" />
+                  {chatBusy ? "the reviewer is busy…" : "ask the reviewer to re-true it"}
+                </button>
+              </div>
+            )}
+            {artifact.verdict && !readOnly && (
+              <div className="verdict-bar" ref={verdictEl}>
+                <span className="lab">verdict</span>
+                {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
+                <span className="grow" />
+                <span className="faint">what you send follows this unless you say otherwise</span>
+              </div>
+            )}
+
+            <SendPanel
+              artifact={artifact}
+              reviewKey={reviewKey}
+              event={event}
+              overridden={eventOverride != null}
+              onPickEvent={setEventOverride}
+              sending={sending}
+              onSend={doSend}
+              error={sendError}
+              next={next}
+              onAdvance={advance}
+              anchorRef={sendEl}
+              footer={
+                <>
+                  <span className="faint">not sending?</span>
+                  {!readOnly && (
+                    <>
+                      {/* Both mean "I'm done with this one" — so they move you on. */}
+                      <button
+                        className="btn btn-sm"
+                        title={
+                          next
+                            ? `Settle it locally and go to ${next.id}`
+                            : "Settle it locally and go back to the queue"
+                        }
+                        onClick={() => settle("reviewed")}
+                      >
+                        <Icon name="check" />
+                        mark reviewed
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        title={next ? `Leave it and go to ${next.id}` : "Leave it and go back to the queue"}
+                        onClick={() => settle("skipped")}
+                      >
+                        <Icon name="skip" />
+                        skip
+                      </button>
+                    </>
+                  )}
+                  <a className="btn btn-sm" href={exportUrl(reviewKey)}>
+                    <Icon name="download" />
+                    export .md
+                  </a>
+                </>
+              }
+            />
+          </div>
+        </aside>
       </div>
     </div>
   );

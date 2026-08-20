@@ -890,22 +890,100 @@ button {
 
 /* ---- review: two columns ---- */
 
+/* Two columns of reading — the rail, then the review — with the doing (chat,
+   verdict, send) underneath. Wide enough, and the doing becomes a third column
+   that stays put; see the breakpoint below. */
 .review-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
+  display: grid;
+  align-items: start;
+  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-areas:
+    "rail main"
+    "rail cockpit";
 }
 
 .rail {
-  width: 236px;
-  flex-shrink: 0;
+  grid-area: rail;
+}
+
+.main {
+  grid-area: main;
+}
+
+.cockpit {
+  grid-area: cockpit;
+  min-width: 0;
+  padding-bottom: 18px;
+}
+
+.rail {
   padding: 22px 20px 22px 0;
   position: sticky;
   top: var(--top-h, 0px);
   z-index: 5;
-  align-self: flex-start;
   max-height: calc(100vh - var(--top-h, 0px));
   overflow-y: auto;
+}
+
+/* ---- the third column, once there is room for one ----
+   Below this width the diffs are already tight, so the cockpit stays in the
+   flow under them rather than taking 360px away from the code. Above it, the
+   page itself widens: the column comes out of the margins, not out of the
+   diff. */
+@media (min-width: 1600px) {
+  .review {
+    --measure: 2100px;
+  }
+
+  .review-body {
+    grid-template-columns: 236px minmax(0, 1fr) 420px;
+    grid-template-areas: "rail main cockpit";
+  }
+
+  .cockpit {
+    position: sticky;
+    top: var(--top-h, 0px);
+    height: calc(100vh - var(--top-h, 0px));
+    padding: 22px 0 18px 22px;
+    display: flex;
+    flex-direction: column;
+    /* Chat at the top, the decision at the foot of the screen — both in the
+       same place every time you look up from the diff. */
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  /* The log takes what is left and scrolls inside itself, so the box you type
+     in is on screen whatever the conversation has grown to. */
+  .cockpit .chat-panel {
+    flex: 0 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 120px;
+    margin: 0;
+  }
+
+  .cockpit .chat-panel .card-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .cockpit .chat-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .cockpit .verdict-bar {
+    margin-top: 0;
+  }
+
+  .cockpit-decide {
+    flex: 0 0 auto;
+    max-height: 65%;
+    overflow-y: auto;
+  }
 }
 
 /* Jumping to a chapter or a comment must not park it under the sticky head. */
@@ -1059,7 +1137,6 @@ button {
 }
 
 .main {
-  flex-grow: 1;
   min-width: 0;
   padding: 22px 0 0;
 }
