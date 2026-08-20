@@ -83,3 +83,4 @@ Adds `isDraft` to the artifact schema, removes the filter, and keeps the flag ho
 - [x] 3.1 Server tests for POST /api/reviews — 7c5dfe2
 - [x] 3.2 Tests for the draft discovery and refresh paths — 7c5dfe2
 - [x] 3.3 Full validation gate — 7c5dfe2
+- [x] Post-review fix: start the review on a pure stub, guard with isReviewRunning, clear the paste error on edit — 3102503
