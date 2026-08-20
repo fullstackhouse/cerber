@@ -98,9 +98,9 @@ PR: #15
 
 ### Phase 4: Tell whose move it is
 
-- [x] 4.1 Read each awaiting PR's conversation and classify whose move it is
-- [x] 4.2 The daemon publishes the classification per awaiting PR
-- [x] 4.3 The tag says whose move it is, and degrades to today's wording when unknown
+- [x] 4.1 Read each awaiting PR's conversation and classify whose move it is — 3f85081
+- [x] 4.2 The daemon publishes the classification per awaiting PR — 3f85081
+- [x] 4.3 The tag says whose move it is, and degrades to today's wording when unknown — 3f85081
 
 ### Phase 2b: Post-review
 
