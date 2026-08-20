@@ -27,6 +27,15 @@ export interface ReviewPayload {
 }
 
 /**
+ * The grade travels in the text: to a reader used to review convention, an
+ * unprefixed comment says "please change this", so leaving a nit bare would
+ * invert its meaning. Ungraded remarks (questions, notes) stay bare.
+ */
+function withGrade(c: Comment): string {
+  return c.severity ? `**${c.severity}:** ${c.body}` : c.body;
+}
+
+/**
  * Build the GitHub review payload from an artifact.
  * Includes every comment that is not dropped. Comments whose line is not part
  * of the diff (GitHub would reject them) are folded into the review body.
@@ -42,7 +51,7 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
     // holds different code — posting there would point the author at something
     // the comment was never about.
     if (!c.drifted && c.line != null && anchorable.get(c.path)?.has(c.line)) {
-      inline.push({ path: c.path, line: c.line, side: "RIGHT", body: c.body });
+      inline.push({ path: c.path, line: c.line, side: "RIGHT", body: withGrade(c) });
     } else {
       folded.push(c);
     }
@@ -64,7 +73,7 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
       // A drifted comment's line no longer exists, so name it as "was at" —
       // pointing a reader at a line number that moved is worse than no number.
       const at = c.line != null ? `:${c.drifted ? `~${c.line}` : c.line}` : "";
-      parts.push(`- \`${c.path}${at}\` — ${c.body}`);
+      parts.push(`- \`${c.path}${at}\` — ${withGrade(c)}`);
     }
   }
   parts.push("", "---", "_Reviewed with [cerber](https://github.com/fullstackhouse/cerber) 🐕 — drafted by AI, sent by a human._");
