@@ -108,4 +108,4 @@ PR: #15
 
 ### Phase 3: Gate
 
-- [x] 3.1 Full validation gate green — `pnpm typecheck && pnpm test && pnpm build`, 288 tests in 24 files
+- [x] 3.1 Full validation gate green — `pnpm typecheck && pnpm test && pnpm build`, 304 tests in 24 files
