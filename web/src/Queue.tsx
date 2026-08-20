@@ -11,7 +11,7 @@ import {
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
-  replyTag,
+  requestTag,
   rowTag,
   shownTab,
   strip,
@@ -108,7 +108,7 @@ function Row({
 }) {
   const v = verdictCell(r);
   const tag = rowTag(r);
-  const request = awaiting ? replyTag(awaiting) : null;
+  const request = awaiting ? requestTag(r, awaiting) : null;
   return (
     <div
       className={`row${selected ? " row-on" : ""}`}

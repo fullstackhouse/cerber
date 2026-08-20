@@ -189,6 +189,45 @@ const REPLY_TAG: Record<Reply, { label: string; title: string }> = {
 export const replyTag = (reply: Reply) => REPLY_TAG[reply];
 
 /**
+ * The tag on an open-requests row, from the best thing cerber knows.
+ *
+ * Its own send record beats the poll's read of the conversation, because the
+ * read cannot see a review at all: `classifyReply` works off the PR's issue
+ * comments, where a submitted review — body, inline comments and all — leaves
+ * nothing. So a row cerber sent minutes ago came back tagged "you haven't
+ * replied", beside a verdict column reading "sent · approve". Two claims about
+ * one row, and the wrong one was the louder.
+ *
+ * A poll runs every few minutes, so a request outliving a send usually just
+ * means the search answered before the send. Whether GitHub also keeps the
+ * request open for a comment-only review is its business — either way, the
+ * fact worth stating is the one cerber is sure of: your review went.
+ */
+export function sentTag(sent: NonNullable<ReviewListItem["sent"]>): { label: string; title: string } {
+  const event = EVENT_LABEL[sent.event] ?? sent.event;
+  const when = new Date(sent.at).toLocaleDateString();
+  return {
+    label: sent.auto ? "auto-sent a review" : "you replied with a review",
+    // Never "you" for an auto-send: the daemon sent it under a bar you set,
+    // which is not the same as you having answered the PR.
+    //
+    // Two facts and no theory about which one explains the other. A poll that
+    // answered before the send is the likely reason the request is still
+    // listed, but nothing here knows the order, and GitHub keeps some requests
+    // open regardless — naming a cause we haven't checked is the same
+    // over-claiming the tag itself was fixed for.
+    title:
+      `${sent.auto ? "The daemon auto-sent this review" : "You sent this review"} to GitHub on ` +
+      `${when} as ${event}. The last inbox poll still listed a review request for you — a request ` +
+      `can lag a send, and GitHub holds some open even after one.`,
+  };
+}
+
+/** The open-requests tag for a row: what cerber sent, or whose move the poll says it is. */
+export const requestTag = (r: ReviewListItem, reply: Reply) =>
+  r.sent ? sentTag(r.sent) : replyTag(reply);
+
+/**
  * What to say instead of "nothing awaits your review" when something does.
  *
  * Says what it actually knows — GitHub holds a review request you never

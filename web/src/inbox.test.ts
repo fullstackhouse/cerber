@@ -8,6 +8,7 @@ import {
   isArchived,
   replyOf,
   replyTag,
+  requestTag,
   rowTag,
   shownTab,
   sortReviews,
@@ -171,6 +172,41 @@ describe("hiddenAwaitingNote", () => {
   it("does not call an archived row settled — nobody settled it", () => {
     const closed = row({ pr: { ...row().pr, state: "CLOSED" } });
     expect(hiddenAwaitingNote([closed])).toContain("settled or archived it here");
+  });
+});
+
+describe("requestTag", () => {
+  const sent = (over: Partial<NonNullable<ReviewListItem["sent"]>> = {}) =>
+    row({ status: "sent", sent: { at: "2026-08-20T12:00:00.000Z", event: "APPROVE", url: null, ...over } });
+
+  it("never says you haven't replied about a review cerber sent", () => {
+    // The reported case: `sent · approve` in the verdict column and "you
+    // haven't replied" beside it. The poll reads issue comments, where a
+    // submitted review leaves nothing — so it cannot see the answer we sent.
+    const tag = requestTag(sent(), "none");
+    expect(tag.label).toBe("you replied with a review");
+    expect(tag.title).toContain("approve");
+  });
+
+  it("states the two facts without claiming which explains the other", () => {
+    // Nothing here knows whether the poll ran before the send, and GitHub
+    // holds some requests open regardless — so the tooltip names no cause.
+    const title = requestTag(sent(), "none").title;
+    expect(title).toContain("The last inbox poll still listed a review request for you");
+    expect(title).not.toMatch(/since then|because|so one sent/);
+  });
+
+  it("does not put an auto-send in your mouth", () => {
+    // The daemon sent it under a bar the user set, which is not the same as
+    // the user having answered the PR.
+    expect(requestTag(sent({ auto: true }), "none").label).toBe("auto-sent a review");
+    expect(requestTag(sent({ auto: true }), "none").title).toContain("The daemon auto-sent");
+  });
+
+  it("keeps the poll's answer when there is no send to beat it", () => {
+    expect(requestTag(row({ status: "skipped" }), "none").label).toBe("you haven't replied");
+    expect(requestTag(row({ status: "reviewed" }), "them").label).toBe("they replied last");
+    expect(requestTag(row({ status: "reviewed" }), "unknown").label).toBe("unanswered on GitHub");
   });
 });
 
