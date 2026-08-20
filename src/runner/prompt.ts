@@ -86,12 +86,12 @@ Writing style (applies to every markdown field):
 
 Summary shape:
 - General to specific, and a reader must be able to stop after any section with a correct, just less detailed, picture.
-- Past two paragraphs, break the summary into sections under \`###\` headings. Use these headings, in this order, and drop every one you have nothing real to say under — four sections of substance beat six with filler:
-  - \`### 🎯 The problem\` — the symptom someone hit and what it cost them, in plain words. No identifiers yet; a product manager should follow this section. For a PR that fixes nothing, this is the goal instead.
-  - \`### 🔧 The fix\` — the cause in a sentence, then what the PR does about it. A reviewer in a hurry stops here.
-  - \`### 🔍 Details\` — the technical narration: names, the choice behind the approach, what the PR's own tests pin down, anything counter-intuitive worth knowing.
-  - \`### ⚠️ Worth knowing\` — risk, follow-up, breaking change. Skip it when there is none.
-- Keep the emoji and the order fixed; the words after the emoji are yours, and a heading that names this PR's specifics beats a generic one ("🎯 Searching an order number returned every order").
+- Past two paragraphs, break the summary into sections under \`###\` headings. These four sections, in this order, each opening with its emoji — drop every one you have nothing real to say under; four sections of substance beat six with filler:
+  - \`### 🎯 \` the problem — the symptom someone hit and what it cost them, in plain words. No identifiers yet; a product manager should follow this section. For a PR that fixes nothing, this is the goal instead.
+  - \`### 🔧 \` the fix — the cause in a sentence, then what the PR does about it. A reviewer in a hurry stops here.
+  - \`### 🔍 \` details — the technical narration: names, the choice behind the approach, what the PR's own tests pin down, anything counter-intuitive worth knowing.
+  - \`### ⚠️ \` worth knowing — risk, follow-up, breaking change. Skip it when there is none.
+- The emoji and the order are fixed. The words after the emoji are yours: write the heading this PR needs ("### 🎯 Searching an order number returned every order"), and fall back to the plain label ("### 🎯 The problem") only when nothing sharper fits.
 - A small PR gets one or two short paragraphs and NO headings. Headings on a three-line summary are noise.
 
 Verdict shape ("reasoning"):

@@ -60,8 +60,9 @@ describe("buildReviewPrompt", () => {
 
   it("asks for a summary in sections, and for none on a small PR", () => {
     const { prompt } = buildReviewPrompt(pr, "d");
-    expect(prompt).toContain("### 🎯 The problem");
-    expect(prompt).toContain("### 🔧 The fix");
+    expect(prompt).toContain("### 🎯 ");
+    expect(prompt).toContain("### 🔧 ");
+    expect(prompt).toContain("The emoji and the order are fixed. The words after the emoji are yours");
     expect(prompt).toContain("A small PR gets one or two short paragraphs and NO headings");
   });
 
