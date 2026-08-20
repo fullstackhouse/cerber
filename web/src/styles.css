@@ -952,27 +952,113 @@ button {
 
 /* ---- review: two columns ---- */
 
+/* Two columns of reading — the rail, then the review — with the doing (chat,
+   verdict, send) underneath. Wide enough, and the doing becomes a third column
+   that stays put; see the breakpoint below. */
 .review-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
+  display: grid;
+  align-items: start;
+  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-areas:
+    "rail main"
+    "rail cockpit";
 }
 
 .rail {
-  width: 236px;
-  flex-shrink: 0;
+  grid-area: rail;
+}
+
+.main {
+  grid-area: main;
+}
+
+.cockpit {
+  grid-area: cockpit;
+  min-width: 0;
+  padding-bottom: 18px;
+}
+
+.rail {
   padding: 22px 20px 22px 0;
   position: sticky;
   top: var(--top-h, 0px);
   z-index: 5;
-  align-self: flex-start;
   max-height: calc(100vh - var(--top-h, 0px));
   overflow-y: auto;
+}
+
+/* ---- the third column, once there is room for one ----
+   Below this width the diffs are already tight, so the cockpit stays in the
+   flow under them rather than taking 360px away from the code. Above it, the
+   page itself widens: the column comes out of the margins, not out of the
+   diff. */
+@media (min-width: 1600px) {
+  .review {
+    --measure: 2100px;
+  }
+
+  /* The diff has a natural width — past a point, extra pixels only lengthen
+     the lines. The conversation has no such ceiling, so the room a bigger
+     screen brings goes to the chat rather than to the code. */
+  .review-body {
+    grid-template-columns: 236px minmax(0, 1fr) clamp(420px, 34%, 680px);
+    grid-template-areas: "rail main cockpit";
+  }
+
+  .cockpit {
+    position: sticky;
+    top: var(--top-h, 0px);
+    height: calc(100vh - var(--top-h, 0px));
+    padding: 22px 0 18px 22px;
+    display: flex;
+    flex-direction: column;
+    /* Chat at the top, the decision at the foot of the screen — both in the
+       same place every time you look up from the diff. */
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  /* The log takes what is left and scrolls inside itself, so the box you type
+     in is on screen whatever the conversation has grown to. */
+  .cockpit .chat-panel {
+    flex: 0 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 120px;
+    margin: 0;
+  }
+
+  .cockpit .chat-panel .card-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .cockpit .chat-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .cockpit .verdict-bar {
+    margin-top: 0;
+  }
+
+  .cockpit-decide {
+    flex: 0 0 auto;
+    max-height: 65%;
+    overflow-y: auto;
+  }
 }
 
 /* Jumping to a chapter or a comment must not park it under the sticky head. */
 .chapter,
 .comment,
+.card-summary,
+.card-why,
+.chat-panel,
+.send-panel,
+.sent-strip,
 .verdict-bar {
   scroll-margin-top: calc(var(--top-h, 0px) + 12px);
 }
@@ -980,6 +1066,35 @@ button {
 .rail-lab {
   display: block;
   margin-top: 22px;
+}
+
+/* The page's first two sections have no list under them, so they sit together
+   at the top as a pair rather than as two headings with an empty gap each. */
+.rail-jumps {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.rail .rail-jumps .lab {
+  margin-bottom: 0;
+}
+
+/* A section of the rail that is itself the jump — reads as a heading beside
+   "walkthrough" and "comments", clicks like the items under them. */
+.rail-lab-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.rail-lab-btn:hover {
+  color: var(--fg);
 }
 
 .rail .lab {
@@ -1087,7 +1202,6 @@ button {
 }
 
 .main {
-  flex-grow: 1;
   min-width: 0;
   padding: 22px 0 0;
 }

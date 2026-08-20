@@ -514,6 +514,7 @@ function ChatPanel({
   onArtifact,
   readOnly,
   inputRef,
+  anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -523,6 +524,7 @@ function ChatPanel({
   onArtifact: (a: Artifact) => void;
   readOnly: boolean;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  anchorRef: React.RefObject<HTMLElement | null>;
 }) {
   const [draft, setDraft] = useState("");
   const [starting, setStarting] = useState(false);
@@ -554,7 +556,7 @@ function ChatPanel({
     });
 
   return (
-    <section className="card chat-panel">
+    <section className="card chat-panel" ref={anchorRef}>
       <header className="card-head">
         <h2>talk to the reviewer</h2>
         <span className="faint">
@@ -711,6 +713,7 @@ function SendPanel({
   footer,
   next,
   onAdvance,
+  anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -726,6 +729,7 @@ function SendPanel({
   /** Where the queue goes next, once this one is done with. */
   next: ReviewListItem | null;
   onAdvance: () => void;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -745,7 +749,7 @@ function SendPanel({
   if (artifact.sent) {
     return (
       <>
-        <div className="sent-strip">
+        <div className="sent-strip" ref={anchorRef}>
           <strong>✔ sent as {EVENT_LABEL[artifact.sent.event]}</strong>
           <span className="faint">
             {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
@@ -770,7 +774,7 @@ function SendPanel({
   }
 
   return (
-    <div className="send-panel">
+    <div className="send-panel" ref={anchorRef}>
       <div className="send-top">
         <span className="lab">send to github</span>
         <span className="grow" />
@@ -916,6 +920,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const verdictEl = useRef<HTMLDivElement | null>(null);
+  const summaryEl = useRef<HTMLDivElement | null>(null);
+  const whyEl = useRef<HTMLDivElement | null>(null);
+  const chatEl = useRef<HTMLElement | null>(null);
+  const sendEl = useRef<HTMLDivElement | null>(null);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
@@ -1056,6 +1064,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       return next;
     });
     return ch;
+  };
+
+  /** Scroll to the first of these that is on the page — the verdict bar is
+      absent on a review you can no longer change, the send panel never is. */
+  const jump = (...targets: React.RefObject<HTMLElement | null>[]) => {
+    for (const t of targets) {
+      if (t.current) return t.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   const goChapter = (i: number) => {
@@ -1224,6 +1240,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <a className="review-title" href={artifact.pr.url} target="_blank" rel="noreferrer">
                 {artifact.pr.title}
               </a>
+              <span className="grow" />
+              {/* What the review says and how to run it again — both live to the
+                  right, away from the title, so the title reads as one line. */}
               {artifact.verdict &&
                 (readOnly ? (
                   <span className={`chip tone-${tone}`}>
@@ -1235,13 +1254,27 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                   <button
                     className={`chip chip-btn tone-${tone}`}
                     title="change it, or send — both are at the foot of the page"
-                    onClick={() => verdictEl.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                    onClick={() => jump(verdictEl, sendEl)}
                   >
                     {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
                     <Icon name="down" size={12} />
                   </button>
                 ))}
-              <span className="grow" />
+              {!readOnly && artifact.status !== "running" && (
+                <button
+                  className="btn btn-sm"
+                  disabled={rerunning}
+                  title={
+                    artifact.run
+                      ? "Review the current head again — this draft is replaced, your own comments are kept"
+                      : "Draft a review of this PR"
+                  }
+                  onClick={() => onRerun(true)}
+                >
+                  <Icon name="rerun" />
+                  {rerunning ? "starting…" : artifact.run ? "re-review at head" : "review now"}
+                </button>
+              )}
             </div>
             <div className="review-head-meta">
               <span>{artifact.pr.author}</span>
@@ -1267,6 +1300,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                   </span>
                 </>
               )}
+              <span className="crumb-sep">·</span>
+              <span title="Where this review has got to: drafted, settled locally, or sent.">
+                {artifact.status}
+              </span>
             </div>
           </div>
         </div>
@@ -1274,9 +1311,37 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       <div className="wrap review-body">
         <aside className="rail">
+          {/* Every section of the page, in the order the page has them — the
+              three short ones first, then the two that bring a list with them.
+              Six chapters of diff is a long way to scroll to say one thing to
+              the reviewer. */}
+          <div className="rail-jumps">
+            <button className="lab rail-lab-btn" onClick={() => jump(summaryEl)}>
+              summary
+            </button>
+            {artifact.verdict && (
+              <button className="lab rail-lab-btn" onClick={() => jump(whyEl)}>
+                why
+              </button>
+            )}
+            {/* Focus, not just scroll: on a wide screen the panel is already
+                in view, and what you wanted was the cursor in it. */}
+            <button
+              className="lab rail-lab-btn"
+              onClick={() => {
+                jump(chatEl);
+                chatInput.current?.focus();
+              }}
+            >
+              chat
+            </button>
+          </div>
+
           {chapters.length > 0 && (
             <>
-              <div className="lab">walkthrough</div>
+              <button className="lab rail-lab rail-lab-btn" onClick={() => goChapter(0)}>
+                changes
+              </button>
               {chapters.map((ch, i) => (
                 <div key={ch.id} className="rail-group">
                   <button
@@ -1310,7 +1375,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             </>
           )}
 
-          <div className={`lab${chapters.length > 0 ? " rail-lab" : ""}`}>comments</div>
+          {/* The comment counts sit under the verdict because they are what a
+              send would carry: the decision, and what goes with it. */}
+          <button
+            className={`lab rail-lab-btn${chapters.length > 0 ? " rail-lab" : ""}`}
+            onClick={() => jump(verdictEl, sendEl)}
+          >
+            verdict
+          </button>
           <div className="rail-facts">
             <div>
               {artifact.comments.length - dropped.length} keeping · {dropped.length} dropped
@@ -1322,18 +1394,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <div className="warn" title="The code these comments pointed at is gone from the diff.">
                 {drifted} drifted
               </div>
-            )}
-          </div>
-
-          <div className="lab rail-lab">run</div>
-          <div className="rail-facts">
-            <div>
-              status <b>{artifact.status}</b>
-            </div>
-            {!readOnly && artifact.status !== "running" && (
-              <button className="link" disabled={rerunning} onClick={() => onRerun(true)}>
-                {rerunning ? "starting…" : artifact.run ? "re-review at head" : "review now"}
-              </button>
             )}
           </div>
         </aside>
@@ -1354,7 +1414,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           {error && <div className="error">{error}</div>}
           {artifact.run?.error && <div className="error">Run failed: {artifact.run.error}</div>}
 
-          <div className="card">
+          <div className="card card-summary" ref={summaryEl}>
             <div className="card-body">
               <div className="lab">summary</div>
               <Markdown className="prose lead" text={artifact.summary || "(no summary)"} />
@@ -1368,7 +1428,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           </div>
 
           {artifact.verdict && (
-            <div className={`card card-why tone-border-${tone}`}>
+            <div className={`card card-why tone-border-${tone}`} ref={whyEl}>
               <div className="card-body">
                 <div className="lab">why</div>
                 {severitySummary(artifact) && (
@@ -1436,7 +1496,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </div>
             </section>
           )}
+        </div>
 
+        {/* The two things you do rather than read. On a wide screen they are a
+            column of their own, in view the whole way down the diffs; narrower,
+            they fall in under them, which is where the page used to end. */}
+        <aside className="cockpit">
           <ChatPanel
             artifact={artifact}
             reviewKey={reviewKey}
@@ -1446,79 +1511,83 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             onArtifact={setArtifact}
             readOnly={readOnly}
             inputRef={chatInput}
+            anchorRef={chatEl}
           />
 
-          {/* The verdict was written against findings that may since have been
-              dropped, edited or re-graded. Nothing auto-rewrites it — the hint
-              says they disagree, and one click hands it to the chat, which
-              already knows how to revise a draft. */}
-          {!readOnly && mismatch && (
-            <div className="verdict-hint">
-              <span>
-                <strong>{mismatch}</strong> — the verdict was written before those edits.
-              </span>
-              <button className="btn btn-sm" onClick={retrue} disabled={chatBusy}>
-                <Icon name="comment" />
-                {chatBusy ? "the reviewer is busy…" : "ask the reviewer to re-true it"}
-              </button>
-            </div>
-          )}
-          {artifact.verdict && !readOnly && (
-            <div className="verdict-bar" ref={verdictEl}>
-              <span className="lab">verdict</span>
-              {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
-              <span className="grow" />
-              <span className="faint">what you send follows this unless you say otherwise</span>
-            </div>
-          )}
+          <div className="cockpit-decide">
+            {/* The verdict was written against findings that may since have been
+                dropped, edited or re-graded. Nothing auto-rewrites it — the hint
+                says they disagree, and one click hands it to the chat, which
+                already knows how to revise a draft. */}
+            {!readOnly && mismatch && (
+              <div className="verdict-hint">
+                <span>
+                  <strong>{mismatch}</strong> — the verdict was written before those edits.
+                </span>
+                <button className="btn btn-sm" onClick={retrue} disabled={chatBusy}>
+                  <Icon name="comment" />
+                  {chatBusy ? "the reviewer is busy…" : "ask the reviewer to re-true it"}
+                </button>
+              </div>
+            )}
+            {artifact.verdict && !readOnly && (
+              <div className="verdict-bar" ref={verdictEl}>
+                <span className="lab">verdict</span>
+                {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
+                <span className="grow" />
+                <span className="faint">what you send follows this unless you say otherwise</span>
+              </div>
+            )}
 
-          <SendPanel
-            artifact={artifact}
-            reviewKey={reviewKey}
-            event={event}
-            overridden={eventOverride != null}
-            onPickEvent={setEventOverride}
-            sending={sending}
-            onSend={doSend}
-            error={sendError}
-            next={next}
-            onAdvance={advance}
-            footer={
-              <>
-                <span className="faint">not sending?</span>
-                {!readOnly && (
-                  <>
-                    {/* Both mean "I'm done with this one" — so they move you on. */}
-                    <button
-                      className="btn btn-sm"
-                      title={
-                        next
-                          ? `Settle it locally and go to ${next.id}`
-                          : "Settle it locally and go back to the queue"
-                      }
-                      onClick={() => settle("reviewed")}
-                    >
-                      <Icon name="check" />
-                      mark reviewed
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      title={next ? `Leave it and go to ${next.id}` : "Leave it and go back to the queue"}
-                      onClick={() => settle("skipped")}
-                    >
-                      <Icon name="skip" />
-                      skip
-                    </button>
-                  </>
-                )}
-                <a className="btn btn-sm" href={exportUrl(reviewKey)}>
-                  <Icon name="download" />
-                  export .md
-                </a>
-              </>
-            }
-          />
-        </div>
+            <SendPanel
+              artifact={artifact}
+              reviewKey={reviewKey}
+              event={event}
+              overridden={eventOverride != null}
+              onPickEvent={setEventOverride}
+              sending={sending}
+              onSend={doSend}
+              error={sendError}
+              next={next}
+              onAdvance={advance}
+              anchorRef={sendEl}
+              footer={
+                <>
+                  <span className="faint">not sending?</span>
+                  {!readOnly && (
+                    <>
+                      {/* Both mean "I'm done with this one" — so they move you on. */}
+                      <button
+                        className="btn btn-sm"
+                        title={
+                          next
+                            ? `Settle it locally and go to ${next.id}`
+                            : "Settle it locally and go back to the queue"
+                        }
+                        onClick={() => settle("reviewed")}
+                      >
+                        <Icon name="check" />
+                        mark reviewed
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        title={next ? `Leave it and go to ${next.id}` : "Leave it and go back to the queue"}
+                        onClick={() => settle("skipped")}
+                      >
+                        <Icon name="skip" />
+                        skip
+                      </button>
+                    </>
+                  )}
+                  <a className="btn btn-sm" href={exportUrl(reviewKey)}>
+                    <Icon name="download" />
+                    export .md
+                  </a>
+                </>
+              }
+            />
+          </div>
+        </aside>
       </div>
     </div>
   );
