@@ -912,6 +912,10 @@ button {
 .chapter,
 .comment,
 .card-summary,
+.card-why,
+.chat-panel,
+.send-panel,
+.sent-strip,
 .verdict-bar {
   scroll-margin-top: calc(var(--top-h, 0px) + 12px);
 }
@@ -919,6 +923,35 @@ button {
 .rail-lab {
   display: block;
   margin-top: 22px;
+}
+
+/* The page's first two sections have no list under them, so they sit together
+   at the top as a pair rather than as two headings with an empty gap each. */
+.rail-jumps {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.rail .rail-jumps .lab {
+  margin-bottom: 0;
+}
+
+/* A section of the rail that is itself the jump — reads as a heading beside
+   "walkthrough" and "comments", clicks like the items under them. */
+.rail-lab-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.rail-lab-btn:hover {
+  color: var(--fg);
 }
 
 .rail .lab {

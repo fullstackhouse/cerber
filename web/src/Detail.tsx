@@ -514,6 +514,7 @@ function ChatPanel({
   onArtifact,
   readOnly,
   inputRef,
+  anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -523,6 +524,7 @@ function ChatPanel({
   onArtifact: (a: Artifact) => void;
   readOnly: boolean;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  anchorRef: React.RefObject<HTMLElement | null>;
 }) {
   const [draft, setDraft] = useState("");
   const [starting, setStarting] = useState(false);
@@ -554,7 +556,7 @@ function ChatPanel({
     });
 
   return (
-    <section className="card chat-panel">
+    <section className="card chat-panel" ref={anchorRef}>
       <header className="card-head">
         <h2>talk to the reviewer</h2>
         <span className="faint">
@@ -711,6 +713,7 @@ function SendPanel({
   footer,
   next,
   onAdvance,
+  anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
@@ -726,6 +729,7 @@ function SendPanel({
   /** Where the queue goes next, once this one is done with. */
   next: ReviewListItem | null;
   onAdvance: () => void;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -745,7 +749,7 @@ function SendPanel({
   if (artifact.sent) {
     return (
       <>
-        <div className="sent-strip">
+        <div className="sent-strip" ref={anchorRef}>
           <strong>✔ sent as {EVENT_LABEL[artifact.sent.event]}</strong>
           <span className="faint">
             {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
@@ -770,7 +774,7 @@ function SendPanel({
   }
 
   return (
-    <div className="send-panel">
+    <div className="send-panel" ref={anchorRef}>
       <div className="send-top">
         <span className="lab">send to github</span>
         <span className="grow" />
@@ -917,6 +921,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const verdictEl = useRef<HTMLDivElement | null>(null);
   const summaryEl = useRef<HTMLDivElement | null>(null);
+  const whyEl = useRef<HTMLDivElement | null>(null);
+  const chatEl = useRef<HTMLElement | null>(null);
+  const sendEl = useRef<HTMLDivElement | null>(null);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
@@ -1057,6 +1064,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       return next;
     });
     return ch;
+  };
+
+  /** Scroll to the first of these that is on the page — the verdict bar is
+      absent on a review you can no longer change, the send panel never is. */
+  const jump = (...targets: React.RefObject<HTMLElement | null>[]) => {
+    for (const t of targets) {
+      if (t.current) return t.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   const goChapter = (i: number) => {
@@ -1275,14 +1290,26 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       <div className="wrap review-body">
         <aside className="rail">
-          {/* The summary is what the page opens with, so the rail opens with it
-              too — a way back to the top of the story after a long walkthrough. */}
-          <button
-            className="rail-item"
-            onClick={() => summaryEl.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          >
-            <span className="grow">summary</span>
-          </button>
+          {/* The page's other sections, which the walkthrough sits between: what
+              the PR is about, what the reviewer made of it, the conversation
+              about the draft and the decision. Six chapters of diff is a long
+              way to scroll to say one thing to the reviewer. */}
+          <div className="rail-jumps">
+            <button className="lab rail-lab-btn" onClick={() => jump(summaryEl)}>
+              summary
+            </button>
+            {artifact.verdict && (
+              <button className="lab rail-lab-btn" onClick={() => jump(whyEl)}>
+                why
+              </button>
+            )}
+            <button className="lab rail-lab-btn" onClick={() => jump(chatEl)}>
+              talk
+            </button>
+            <button className="lab rail-lab-btn" onClick={() => jump(verdictEl, sendEl)}>
+              {readOnly || artifact.sent ? "sent" : "send"}
+            </button>
+          </div>
 
           {chapters.length > 0 && (
             <>
@@ -1378,7 +1405,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           </div>
 
           {artifact.verdict && (
-            <div className={`card card-why tone-border-${tone}`}>
+            <div className={`card card-why tone-border-${tone}`} ref={whyEl}>
               <div className="card-body">
                 <div className="lab">why</div>
                 {severitySummary(artifact) && (
@@ -1456,6 +1483,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             onArtifact={setArtifact}
             readOnly={readOnly}
             inputRef={chatInput}
+            anchorRef={chatEl}
           />
 
           {/* The verdict was written against findings that may since have been
@@ -1493,6 +1521,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             error={sendError}
             next={next}
             onAdvance={advance}
+            anchorRef={sendEl}
             footer={
               <>
                 <span className="faint">not sending?</span>
