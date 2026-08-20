@@ -64,11 +64,11 @@ Adds `isDraft` to the artifact schema, removes the filter, and keeps the flag ho
 
 ### Phase 1: Draft PRs reach the inbox
 
-- [ ] 1.1 Add isDraft to PrInfoSchema and fetch it in fetchPrInfo
-- [ ] 1.2 Remove the draft filter from mapSearchResults and invert its test
-- [ ] 1.3 Carry isDraft into stubArtifact
-- [ ] 1.4 Keep isDraft fresh in both syncQueue refresh points
-- [ ] 1.5 Draft badge in the cockpit queue
+- [x] 1.1 Add isDraft to PrInfoSchema and fetch it in fetchPrInfo — d15c108
+- [x] 1.2 Remove the draft filter from mapSearchResults and invert its test — d15c108
+- [x] 1.3 Carry isDraft into stubArtifact — d15c108
+- [x] 1.4 Keep isDraft fresh in both syncQueue refresh points — d15c108
+- [x] 1.5 Draft badge in the cockpit queue — d15c108
 
 ### Phase 2: Start a review from the cockpit
 
