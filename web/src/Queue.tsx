@@ -228,7 +228,7 @@ function PullBox({ autoFocus }: { autoFocus?: boolean }) {
         autoFocus={autoFocus}
         disabled={busy}
         onChange={(e) => setInput(e.target.value)}
-        placeholder="Review any PR — paste a URL, or owner/repo#123"
+        placeholder="Paste a PR URL or owner/repo#123"
         aria-label="Review any PR by URL"
       />
       <button className="btn" type="submit" disabled={busy || !input.trim()}>

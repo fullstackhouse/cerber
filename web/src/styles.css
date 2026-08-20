@@ -523,7 +523,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  position: relative;
 }
 
 .pull-input {
@@ -547,10 +547,24 @@ button {
   color: var(--muted);
 }
 
+/* Floated clear of the flow: a wrong paste should explain itself without
+   reflowing the tab strip it sits in, and it lands over the table head, so it
+   carries its own surface rather than colliding with the column labels. */
 .pull-error {
-  flex-basis: 100%;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  margin-top: 4px;
+  max-width: 360px;
+  padding: 5px 8px;
   font-size: 11px;
+  line-height: 1.4;
   color: var(--red);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(20, 23, 26, 0.08);
 }
 
 /* A draft that still wants your review. Deliberately quiet: it qualifies the
