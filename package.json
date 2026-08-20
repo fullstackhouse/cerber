@@ -1,6 +1,6 @@
 {
   "name": "@fullstackhouse/cerber",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "AI code-review cockpit: Claude reviews your PRs into local artifacts; nothing reaches GitHub until you say so.",
   "license": "MIT",
   "author": "Full Stack House (https://fullstack.house)",
