@@ -2,7 +2,7 @@ import { html } from "diff2html";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { patchForFiles, unclaimedFiles } from "../../src/core/diff";
-import { severityBadge } from "../../src/core/severity";
+import { withGrade } from "../../src/core/severity";
 import {
   addComment,
   deleteComment,
@@ -193,20 +193,6 @@ function CommentCard({
           {comment.line != null ? `:${comment.line}` : ""}
         </span>
         <span className={`tag tag-${comment.origin === "user" ? "yours" : tag}`}>{tag}</span>
-        {comment.severity && (
-          <span
-            className={`tag tag-sev-${comment.severity}`}
-            title={
-              comment.severity === "blocker"
-                ? "Stands between this PR and approval."
-                : comment.severity === "minor"
-                  ? "Should be fixed — the author's call, nobody will chase it."
-                  : "Taste. Take it or leave it."
-            }
-          >
-            {severityBadge(comment.severity)}
-          </span>
-        )}
         {comment.drifted && (
           <span
             className="tag tag-drift"
@@ -291,7 +277,10 @@ function CommentCard({
           rows={Math.max(3, draft.split("\n").length)}
         />
       ) : (
-        <Markdown className="comment-body prose" text={comment.body} />
+        // The grade reads as the first words of the comment, exactly as it will
+        // on GitHub — not as a chip that only exists here. Prefixed at render
+        // time from `severity`, so the body being edited stays the body sent.
+        <Markdown className="comment-body prose" text={withGrade(comment.body, comment.severity ?? null)} />
       )}
     </div>
   );

@@ -89,8 +89,7 @@ Summary shape:
 - Past two paragraphs, break the summary into sections under \`###\` headings. Use these headings, in this order, and drop every one you have nothing real to say under — four sections of substance beat six with filler:
   - \`### 🎯 The problem\` — the symptom someone hit and what it cost them, in plain words. No identifiers yet; a product manager should follow this section. For a PR that fixes nothing, this is the goal instead.
   - \`### 🔧 The fix\` — the cause in a sentence, then what the PR does about it. A reviewer in a hurry stops here.
-  - \`### 🔍 Details\` — the technical narration: names, the choice behind the approach, anything counter-intuitive worth knowing.
-  - \`### 🧪 Tests\` — what the PR's own tests pin down, and what stays uncovered. Only what the diff shows; never invent a run.
+  - \`### 🔍 Details\` — the technical narration: names, the choice behind the approach, what the PR's own tests pin down, anything counter-intuitive worth knowing.
   - \`### ⚠️ Worth knowing\` — risk, follow-up, breaking change. Skip it when there is none.
 - Keep the emoji and the order fixed; the words after the emoji are yours, and a heading that names this PR's specifics beats a generic one ("🎯 Searching an order number returned every order").
 - A small PR gets one or two short paragraphs and NO headings. Headings on a three-line summary are noise.
@@ -102,7 +101,7 @@ Verdict shape ("reasoning"):
 
 Comment shape ("body"):
 - The first sentence is the finding, and stands on its own line. Then a blank line, then the evidence, the fix, or a code suggestion. A five-sentence paragraph is a wall — break it.
-- Never write the grade into the body. The cockpit and GitHub both prefix it from "severity", so a body opening with "Minor:" says it twice.
+- Never write the grade into the body. Every surface prefixes it from "severity" — "⚠️ **minor** — " and so on — so a body opening with "Minor:" says it twice.
 
 Rules:
 - Group ALL changed files into chapters that tell the story of the PR (schema first, then logic, then tests, etc). Every changed file must appear in exactly one chapter.
@@ -281,7 +280,7 @@ Rules:
 - "line" is a line in the NEW version of the file and must appear in the diff. Use null for a file-level comment.
 - "severity" is the finding's merge impact — "blocker" (would not approve with this in; the only tier that blocks), "minor" (should fix, author's call), "nit" (taste), null (not a finding: a question, a note). Grade as if the finding is true; hedge in the reply, never in the grade. A verdict revision must still follow from the worst finding left standing.
 - Your reply is prose to a person, not a changelog. The cockpit already shows what you changed — do not list your own edits back to them.
-- A revision keeps the shape the review is written in: a rewritten summary keeps its \`###\` sections (🎯 the problem, 🔧 the fix, 🔍 details, 🧪 tests, ⚠️ worth knowing — the ones that earn their place), a rewritten "reasoning" stays one lead sentence plus bullets, and a comment body leads with the finding on its own line and never writes its own grade in — the cockpit prefixes that from "severity".
+- A revision keeps the shape the review is written in: a rewritten summary keeps its \`###\` sections (🎯 the problem, 🔧 the fix, 🔍 details, ⚠️ worth knowing — the ones that earn their place), a rewritten "reasoning" stays one lead sentence plus bullets, and a comment body leads with the finding on its own line and never writes its own grade in — every surface prefixes that from "severity".
 
 Writing style:
 - Plain words, short sentences, no jargon. Someone who has NOT read the diff should follow you.

@@ -26,8 +26,8 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   effect before mechanism ("a code block was never closed, so everything after
   it displayed as code" — not the parser-level account). It is also shaped
   rather than poured: past two paragraphs a summary breaks into fixed sections
-  (🎯 problem, 🔧 fix, 🔍 details, 🧪 tests, ⚠️ worth knowing — drop the ones
-  with nothing to say, and a small PR gets no headings at all), the verdict is
+  (🎯 problem, 🔧 fix, 🔍 details, ⚠️ worth knowing — drop the ones with
+  nothing to say, and a small PR gets no headings at all), the verdict is
   one lead sentence then bullets, and a comment leads with the finding on its
   own line. The rules live in `src/runner/prompt.ts` and were tuned against
   real reviews — change them from evidence, not taste.
@@ -38,8 +38,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   from the worst finding still standing. Severity is advisory — no code
   derives or enforces the verdict from it; the cockpit only points out when
   they disagree. The grade is rendered from the field, never written into the
-  body: one badge (`src/core/severity.ts`) prefixes it in the cockpit chip, on
-  GitHub, and in the export, so a comment reads the same in all three.
+  body: one badge (`src/core/severity.ts`) opens the comment's own text in the
+  cockpit, on GitHub and in the export, so a comment reads the same in all
+  three — and the grade survives GitHub, where a chip would not exist.
 
 ## Architecture
 

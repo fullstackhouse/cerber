@@ -1837,24 +1837,8 @@ button {
   background: rgba(160, 106, 0, 0.1);
 }
 
-/* Finding grades. Only the blocker shouts — it is the only tier that blocks. */
-.tag-sev-blocker {
-  color: var(--red);
-  background: rgba(194, 49, 74, 0.1);
-  font-weight: 600;
-}
-
-.tag-sev-minor {
-  color: var(--amber);
-  background: rgba(160, 106, 0, 0.1);
-}
-
-.tag-sev-nit {
-  color: var(--muted);
-  background: #f0f1f3;
-}
-
-/* "1 blocker · 2 nits" beside the verdict's reasoning. */
+/* "🚨 1 blocker · 🎨 2 nits" beside the verdict's reasoning. The grade of a
+   single finding is not a chip — it opens the comment's own text. */
 .sev-counts {
   font-size: 12px;
   color: var(--muted);
