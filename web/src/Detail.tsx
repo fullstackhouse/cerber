@@ -1422,9 +1422,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       startChatTurn(reviewKey, {
         message,
         refs: [{ target: "line", id: null, path: pick.path, line: pick.line, side: pick.side }],
+      }).then((a) => {
+        // Only once the turn is really under way. A refused start (the daemon
+        // is re-reviewing this PR) would otherwise send you to a panel with
+        // nothing new in it, while the reason sits back up the page.
+        chatEl.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return a;
       }),
     );
-    chatEl.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const readLabel = artifact.run?.trusted
