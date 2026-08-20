@@ -1240,6 +1240,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <a className="review-title" href={artifact.pr.url} target="_blank" rel="noreferrer">
                 {artifact.pr.title}
               </a>
+              <span className="grow" />
+              {/* What the review says and how to run it again — both live to the
+                  right, away from the title, so the title reads as one line. */}
               {artifact.verdict &&
                 (readOnly ? (
                   <span className={`chip tone-${tone}`}>
@@ -1251,13 +1254,27 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                   <button
                     className={`chip chip-btn tone-${tone}`}
                     title="change it, or send — both are at the foot of the page"
-                    onClick={() => verdictEl.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                    onClick={() => jump(verdictEl, sendEl)}
                   >
                     {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
                     <Icon name="down" size={12} />
                   </button>
                 ))}
-              <span className="grow" />
+              {!readOnly && artifact.status !== "running" && (
+                <button
+                  className="btn btn-sm"
+                  disabled={rerunning}
+                  title={
+                    artifact.run
+                      ? "Review the current head again — this draft is replaced, your own comments are kept"
+                      : "Draft a review of this PR"
+                  }
+                  onClick={() => onRerun(true)}
+                >
+                  <Icon name="rerun" />
+                  {rerunning ? "starting…" : artifact.run ? "re-review at head" : "review now"}
+                </button>
+              )}
             </div>
             <div className="review-head-meta">
               <span>{artifact.pr.author}</span>
@@ -1283,6 +1300,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                   </span>
                 </>
               )}
+              <span className="crumb-sep">·</span>
+              <span title="Where this review has got to: drafted, settled locally, or sent.">
+                {artifact.status}
+              </span>
             </div>
           </div>
         </div>
@@ -1290,10 +1311,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       <div className="wrap review-body">
         <aside className="rail">
-          {/* The page's other sections, which the walkthrough sits between: what
-              the PR is about, what the reviewer made of it, the conversation
-              about the draft and the decision. Six chapters of diff is a long
-              way to scroll to say one thing to the reviewer. */}
+          {/* Every section of the page, in the order the page has them — the
+              three short ones first, then the two that bring a list with them.
+              Six chapters of diff is a long way to scroll to say one thing to
+              the reviewer. */}
           <div className="rail-jumps">
             <button className="lab rail-lab-btn" onClick={() => jump(summaryEl)}>
               summary
@@ -1304,16 +1325,15 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </button>
             )}
             <button className="lab rail-lab-btn" onClick={() => jump(chatEl)}>
-              talk
-            </button>
-            <button className="lab rail-lab-btn" onClick={() => jump(verdictEl, sendEl)}>
-              {readOnly || artifact.sent ? "sent" : "send"}
+              chat
             </button>
           </div>
 
           {chapters.length > 0 && (
             <>
-              <div className="lab rail-lab">walkthrough</div>
+              <button className="lab rail-lab rail-lab-btn" onClick={() => goChapter(0)}>
+                changes
+              </button>
               {chapters.map((ch, i) => (
                 <div key={ch.id} className="rail-group">
                   <button
@@ -1347,7 +1367,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             </>
           )}
 
-          <div className={`lab${chapters.length > 0 ? " rail-lab" : ""}`}>comments</div>
+          {/* The comment counts sit under the verdict because they are what a
+              send would carry: the decision, and what goes with it. */}
+          <button
+            className={`lab rail-lab-btn${chapters.length > 0 ? " rail-lab" : ""}`}
+            onClick={() => jump(verdictEl, sendEl)}
+          >
+            verdict
+          </button>
           <div className="rail-facts">
             <div>
               {artifact.comments.length - dropped.length} keeping · {dropped.length} dropped
@@ -1359,18 +1386,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <div className="warn" title="The code these comments pointed at is gone from the diff.">
                 {drifted} drifted
               </div>
-            )}
-          </div>
-
-          <div className="lab rail-lab">run</div>
-          <div className="rail-facts">
-            <div>
-              status <b>{artifact.status}</b>
-            </div>
-            {!readOnly && artifact.status !== "running" && (
-              <button className="link" disabled={rerunning} onClick={() => onRerun(true)}>
-                {rerunning ? "starting…" : artifact.run ? "re-review at head" : "review now"}
-              </button>
             )}
           </div>
         </aside>
@@ -1424,6 +1439,21 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             </div>
           )}
 
+          {/* Above the diffs, next to what it is mostly about: the summary and
+              the verdict you have just read. Anything you point it at from
+              further down scrolls back up to here. */}
+          <ChatPanel
+            artifact={artifact}
+            reviewKey={reviewKey}
+            refs={chatRefs}
+            onClearRefs={() => setChatRefs([])}
+            onDropRef={(i) => setChatRefs((refs) => refs.filter((_, n) => n !== i))}
+            onArtifact={setArtifact}
+            readOnly={readOnly}
+            inputRef={chatInput}
+            anchorRef={chatEl}
+          />
+
           {chapters.map((ch, i) => (
             <ChapterSection
               key={ch.id}
@@ -1473,18 +1503,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </div>
             </section>
           )}
-
-          <ChatPanel
-            artifact={artifact}
-            reviewKey={reviewKey}
-            refs={chatRefs}
-            onClearRefs={() => setChatRefs([])}
-            onDropRef={(i) => setChatRefs((refs) => refs.filter((_, n) => n !== i))}
-            onArtifact={setArtifact}
-            readOnly={readOnly}
-            inputRef={chatInput}
-            anchorRef={chatEl}
-          />
 
           {/* The verdict was written against findings that may since have been
               dropped, edited or re-graded. Nothing auto-rewrites it — the hint
