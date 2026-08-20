@@ -1,7 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactSchema } from "../core/artifact.js";
-import { mapSearchResults } from "../core/gh.js";
-import { isPureStub, stubArtifact } from "./daemon.js";
+import { loadConfig } from "../core/config.js";
+import { mapSearchResults, searchAwaitingMe } from "../core/gh.js";
+import { isPureStub, startDaemon, stubArtifact } from "./daemon.js";
+
+// The loop's own bookkeeping is what's under test — not gh, and not the runner.
+vi.mock("../core/gh.js", async (orig) => ({
+  ...(await orig<typeof import("../core/gh.js")>()),
+  searchAwaitingMe: vi.fn(),
+  fetchPrInfo: vi.fn(),
+}));
+vi.mock("../core/config.js", async (orig) => ({
+  ...(await orig<typeof import("../core/config.js")>()),
+  loadConfig: vi.fn(),
+}));
+
+const search = searchAwaitingMe as Mock;
+const config = loadConfig as Mock;
+
+process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
 
 const DISCOVERED = {
   owner: "acme",
@@ -13,6 +33,70 @@ const DISCOVERED = {
   isDraft: false,
   author: "someone",
 };
+
+describe("the awaiting list the daemon publishes", () => {
+  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+
+  const options = {
+    repos: [],
+    // Short enough that a second tick lands inside the test, not the interval a
+    // real cockpit polls on.
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: false,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // A fresh state dir per test: stubs one poll writes must not survive into
+    // the next test's queue reconciliation.
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+  });
+
+  /** Run the daemon until it has finished `polls` polls, then stop it. */
+  async function pollTimes(polls: number) {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
+      return handle.status();
+    } finally {
+      handle.stop();
+    }
+  }
+
+  it("names the PRs GitHub is waiting on, so the cockpit can say what it hides", async () => {
+    search.mockResolvedValue([
+      { ...DISCOVERED, owner: "acme", repo: "widgets", number: 7 },
+      { ...DISCOVERED, owner: "acme", repo: "gadgets", number: 3 },
+    ]);
+    const status = await pollTimes(1);
+    expect(status.awaiting).toEqual(["acme/widgets#7", "acme/gadgets#3"]);
+    // The same refs the summary counts — one answer, two readouts.
+    expect(status.lastSummary).toContain("2 awaiting");
+  });
+
+  it("claims nothing while polling is off", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().awaiting).toHaveLength(1));
+      config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, poll: false } });
+      await vi.waitFor(() => expect(handle.status().awaiting).toEqual([]));
+    } finally {
+      handle.stop();
+    }
+  });
+
+  it("keeps the last good list when a poll cannot reach GitHub", async () => {
+    search.mockResolvedValueOnce([DISCOVERED]).mockRejectedValue(new Error("gh: not authenticated"));
+    const status = await pollTimes(2);
+    expect(status.awaiting).toEqual(["acme/widgets#7"]);
+    expect(status.lastPollError).toContain("not authenticated");
+  });
+});
 
 describe("stubArtifact", () => {
   it("produces a schema-valid awaiting artifact from a search hit", () => {

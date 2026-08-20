@@ -39,6 +39,7 @@ const daemon = (over: Partial<Extract<DaemonStatus, { enabled: true }>> = {}): D
   lastPollAt: null,
   nextPollAt: null,
   lastSummary: null,
+  awaiting: [],
   lastPollError: null,
   autoSend: "shadow",
   autoSendThreshold: 85,

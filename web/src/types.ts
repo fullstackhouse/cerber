@@ -169,6 +169,12 @@ export type DaemonStatus =
       lastPollAt: string | null;
       nextPollAt: string | null;
       lastSummary: string | null;
+      /**
+       * Artifact ids GitHub still wants a review from you on, as of the last
+       * poll that reached it. The queue filters on what you settled locally, so
+       * this is what tells it which awaiting PRs its own filters are hiding.
+       */
+      awaiting: string[];
       /** GitHub discovery is failing (gh unauthed, offline); local queue still works. */
       lastPollError: string | null;
       autoSend: "shadow" | "on";

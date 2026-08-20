@@ -55,6 +55,14 @@ export interface DaemonStatus {
   lastPollAt: string | null;
   nextPollAt: string | null;
   lastSummary: string | null;
+  /**
+   * Artifact ids GitHub still wants a review from you on, from the last poll
+   * that reached it. The cockpit filters its queue on what you have dealt with
+   * locally, which stops matching this the moment you skip a PR or mark one
+   * reviewed without sending — so it needs this list to say what it is hiding.
+   * Empty while polling is off: discovery you turned off makes no claim.
+   */
+  awaiting: string[];
   /** Set while GitHub discovery is failing (gh unauthed, offline) — the queue still works. */
   lastPollError: string | null;
   autoSend: "shadow" | "on";
@@ -143,6 +151,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     lastPollAt: null,
     nextPollAt: new Date(Date.now()).toISOString(),
     lastSummary: null,
+    awaiting: [],
     lastPollError: null,
     autoSend: opts.autoSend,
     autoSendThreshold: opts.autoSendThreshold,
@@ -283,14 +292,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
 
       if (!knobs.poll) {
-        // Deliberately off is not an outage — don't leave a stale error up.
+        // Deliberately off is not an outage — don't leave a stale error up, or
+        // a list of PRs we are no longer checking are still awaiting you.
         status.lastPollError = null;
+        status.awaiting = [];
         status.lastSummary = "polling off (settings) — the queue only shows what you review by hand";
         return;
       }
 
       const refs = await discover();
       status.lastPollError = null;
+      // The same refs behind lastSummary's count, so the number the strip shows
+      // and the rows the cockpit can name always come from one answer.
+      // A failed poll leaves the last good list up; lastPollError says so.
+      status.awaiting = refs.map((ref) => artifactId(ref));
       const { discovered } = await syncQueue(refs);
 
       if (autoReview) {
