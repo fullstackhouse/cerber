@@ -460,6 +460,56 @@ button {
   color: var(--accent);
 }
 
+/* Work already dealt with filters the same way the inbox does, but it is not
+   the day's work: the rule and the lighter weight keep the two halves of the
+   row apart without spending a second control on it. */
+.tab-split {
+  width: 1px;
+  /* A flex item shrinks by default, and a 1px rule shrinks to nothing: the
+     narrower the window, the more the two halves need telling apart. */
+  flex-shrink: 0;
+  align-self: stretch;
+  margin: 4px 10px 6px;
+  background: var(--line-2);
+}
+
+.tab-filed {
+  color: var(--faint);
+}
+
+.tab-filed:hover,
+.tab-filed.tab-on {
+  color: var(--muted);
+}
+
+/* The one filed tab that is not finished business: GitHub is still asking. */
+.tab-requests {
+  color: var(--amber);
+}
+
+.tab-requests:hover,
+.tab-requests.tab-on {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+
+.tab-requests .tab-count,
+.tab-requests.tab-on .tab-count {
+  color: var(--amber);
+}
+
+/* The tab you picked has nothing in it — say so where the rows would be. The
+   table is as wide as the window; a paragraph read at that measure is not. */
+.empty-tab {
+  padding: 22px 10px;
+  font-size: 12.5px;
+  max-width: 88ch;
+}
+
+.empty-tab .btn {
+  margin-top: 10px;
+}
+
 .table-head,
 .row {
   display: flex;
@@ -501,16 +551,17 @@ button {
   font-weight: 500;
 }
 
-/* What settled a review, on its row in the drawer. */
+/* What settled a review, or what became of the PR: your own decision, or
+   merged/closed. Inert in the inbox, where nothing is settled yet. */
 .tag-done {
   flex-shrink: 0;
   color: var(--muted);
   background: var(--line-3);
 }
 
-/* A drawer row GitHub is still asking you for, whatever you decided here. It
-   is the one thing in a drawer of finished work that isn't finished, so it
-   carries the queue's own attention colour rather than the drawer's grey. */
+/* A filed row GitHub is still asking you for, whatever you decided here. It is
+   the one thing among finished work that isn't finished, so it carries the
+   queue's own attention colour rather than the filed rows' grey. */
 .tag-awaiting {
   flex-shrink: 0;
   color: var(--amber);
@@ -768,44 +819,6 @@ button {
 .cursor-strip-row .btn {
   flex-grow: 1;
   padding: 7px 0;
-}
-
-/* What you already dealt with, folded away under the queue. */
-.drawers {
-  margin-top: 16px;
-  padding-bottom: 8px;
-}
-
-.drawer + .drawer {
-  margin-top: 6px;
-}
-
-.drawer-toggle {
-  font-size: 11.5px;
-  color: var(--muted);
-  background: none;
-  border: none;
-  padding: 4px 0;
-}
-
-.drawer-toggle:hover {
-  color: var(--fg);
-}
-
-.drawer-rows {
-  margin: 8px 0 14px;
-}
-
-/* Dealt-with work reads quieter than the queue — dimmed per row rather than on
-   the drawer, so a row can opt back out (hover, or one GitHub still wants).
-   A group opacity on the container would cap its children and neither could. */
-.row-settled {
-  opacity: 0.62;
-}
-
-.row-settled:hover,
-.row-awaiting {
-  opacity: 1;
 }
 
 /* ---- review: breadcrumb + head ---- */
