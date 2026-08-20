@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
@@ -292,7 +292,10 @@ function StripProse({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
 
-  useEffect(() => {
+  // Before paint, not after: the text changes on every row you hover, and an
+  // effect that measured afterwards would show one frame of the bare cut —
+  // or of the last row's fade over prose that fits — before correcting itself.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     // Re-measured on width too, not just on the text: narrowing the window
