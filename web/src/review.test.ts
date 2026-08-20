@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildReviewPayload } from "../../src/core/send";
 import { Artifact as CoreArtifact } from "../../src/core/artifact";
-import { eventForVerdict, payloadSummary, severitySummary, splitComments, verdictMismatch } from "./review";
+import {
+  eventForVerdict,
+  payloadSummary,
+  rowLine,
+  severitySummary,
+  splitComments,
+  verdictMismatch,
+} from "./review";
 import { Artifact, ReviewComment, Verdict } from "./types";
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
@@ -158,5 +165,23 @@ describe("payloadSummary", () => {
     expect(payloadSummary(artifact([comment(), comment({ id: "c2", line: null })]))).toBe(
       "1 inline · 1 folded into the body",
     );
+  });
+});
+
+describe("rowLine", () => {
+  it("reads a surviving line off the new-side number", () => {
+    // A context row carries both; an added row carries only the new one.
+    expect(rowLine("41", "42")).toEqual({ line: 42, side: "new" });
+    expect(rowLine("", "42")).toEqual({ line: 42, side: "new" });
+  });
+
+  it("falls back to the old side for a line the PR removes", () => {
+    expect(rowLine("41", "")).toEqual({ line: 41, side: "old" });
+  });
+
+  it("has nothing to point at on a hunk header or a spacer", () => {
+    expect(rowLine("", "")).toBeNull();
+    expect(rowLine(null, undefined)).toBeNull();
+    expect(rowLine("...", "...")).toBeNull();
   });
 });

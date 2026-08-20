@@ -180,8 +180,15 @@ export const ChatTurnSchema = z.object({
   refs: z
     .array(
       z.object({
-        target: z.enum(["summary", "verdict", "chapter", "comment"]),
+        target: z.enum(["summary", "verdict", "chapter", "comment", "line"]),
         id: z.string().nullable().default(null),
+        /** A "line" ref: the file, and the line as numbered on `side`. */
+        path: z.string().nullish(),
+        line: z.number().nullish(),
+        /** Which column of the diff the number came from — a removed line is
+            only numbered on the old side, and can still be asked about.
+            Absent means the new side. */
+        side: z.enum(["new", "old"]).optional(),
       }),
     )
     .default([]),

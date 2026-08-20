@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { patchForFiles, splitDiffByFile, unclaimedFiles } from "./diff.js";
+import {
+  newSideLineText,
+  oldSideLineText,
+  patchForFiles,
+  splitDiffByFile,
+  unclaimedFiles,
+} from "./diff.js";
 
 const SAMPLE = `diff --git a/src/a.ts b/src/a.ts
 index 111..222 100644
@@ -63,5 +69,20 @@ describe("unclaimedFiles", () => {
   it("finds files not covered by any chapter", () => {
     const chapters = [{ files: ["src/a.ts"] }, { files: ["src/old.ts"] }];
     expect(unclaimedFiles(SAMPLE, chapters)).toEqual(["docs/readme.md"]);
+  });
+});
+
+describe("oldSideLineText", () => {
+  it("maps old-side line numbers to the code that was there", () => {
+    const lines = oldSideLineText(SAMPLE).get("src/a.ts")!;
+    expect(lines.get(1)).toBe("const a = 1;");
+    // The added line is on the new side only, so the old side never shifts.
+    expect(lines.get(2)).toBe("export { a };");
+    expect(lines.has(3)).toBe(false);
+  });
+
+  it("keeps the lines of a deleted file, which the new side has none of", () => {
+    expect(oldSideLineText(SAMPLE).get("src/old.ts")!.get(1)).toBe("const gone = true;");
+    expect(newSideLineText(SAMPLE).get("src/old.ts")!.size).toBe(0);
   });
 });

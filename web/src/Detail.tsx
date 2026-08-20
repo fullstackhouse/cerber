@@ -1,7 +1,7 @@
 import { html } from "diff2html";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { patchForFiles, unclaimedFiles } from "../../src/core/diff";
+import { patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
 import {
   addComment,
@@ -30,6 +30,7 @@ import {
   eventForVerdict,
   inlineComments,
   payloadSummary,
+  rowLine,
   severitySummary,
   splitComments,
   verdictMismatch,
@@ -87,19 +88,132 @@ function typing(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable === true;
 }
 
+/** A line of the diff the user clicked, waiting for what they want to say. */
+interface LinePick {
+  path: string;
+  line: number;
+  /** "old" means the PR removes this line — nothing can post against it. */
+  side: "new" | "old";
+}
+
+/** A `<tr>` spanning the diff's two columns, parked under `row`. */
+function insertRow(row: Element, className: string): { tr: HTMLElement; holder: HTMLElement } {
+  const tr = document.createElement("tr");
+  tr.className = className;
+  const td = document.createElement("td");
+  td.colSpan = 2;
+  const holder = document.createElement("div");
+  td.appendChild(holder);
+  tr.appendChild(td);
+  row.after(tr);
+  return { tr, holder };
+}
+
+/**
+ * Say something about one line of the diff — a comment of your own, or a
+ * question for the reviewer.
+ *
+ * One box with two exits, because at the moment you notice something you don't
+ * yet know which one you want: writing the note and asking about it start the
+ * same way. Asking sends the turn straight off — the chat panel at the foot of
+ * the page is where the answer lands.
+ */
+function LineComposer({
+  pick,
+  chatBusy,
+  onAdd,
+  onAsk,
+  onClose,
+}: {
+  pick: LinePick;
+  chatBusy: boolean;
+  onAdd: (body: string) => void;
+  onAsk: (message: string) => void;
+  onClose: () => void;
+}) {
+  const [body, setBody] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => input.current?.focus(), []);
+  const text = body.trim();
+
+  return (
+    <div className="line-composer">
+      <div className="line-composer-head">
+        <span className="comment-loc">
+          {pick.path}:{pick.line}
+        </span>
+        {pick.side === "old" && (
+          <span className="faint" title="GitHub only takes inline comments on the new side of a diff.">
+            this line is gone from the new file — a comment on it posts on the file, not the line
+          </span>
+        )}
+      </div>
+      <textarea
+        ref={input}
+        className="comment-edit"
+        rows={3}
+        placeholder="what about this line?"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text) onAdd(text);
+        }}
+      />
+      <div className="line-composer-actions">
+        <button className="btn" disabled={!text} onClick={() => onAdd(text)}>
+          <Icon name="plus" />
+          add comment
+          <Key>⌘↵</Key>
+        </button>
+        <button
+          className="btn btn-accent"
+          disabled={!text || chatBusy}
+          title={
+            chatBusy
+              ? "the reviewer is still answering the last question"
+              : "Ask the reviewer about this line — the answer lands in the chat below"
+          }
+          onClick={() => onAsk(text)}
+        >
+          <Icon name="comment" />
+          ask the reviewer
+        </button>
+        <span className="grow" />
+        <button className="btn btn-sm" onClick={onClose}>
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Diff rendered by diff2html, with review comments injected inline under the
  * diff row they point at (like the GitHub PR view). Comments whose row can't
  * be found in the rendered HTML fall back to normal cards below the diff.
+ *
+ * Every numbered row also carries a gutter button, so a line you want to say
+ * something about is one click away rather than a file-and-line form at the
+ * foot of the chapter.
  */
 function DiffBlock({
   patch,
   comments,
   renderComment,
+  readOnly,
+  chatBusy,
+  onAddLineComment,
+  onAskAboutLine,
 }: {
   patch: string;
   comments: ReviewComment[];
   renderComment: (c: ReviewComment) => ReactNode;
+  readOnly: boolean;
+  /** A chat turn is in flight — one more would be refused. */
+  chatBusy: boolean;
+  onAddLineComment: (pick: LinePick, body: string) => void;
+  onAskAboutLine: (pick: LinePick, message: string) => void;
 }) {
   const rendered = useMemo(
     () =>
@@ -108,8 +222,21 @@ function DiffBlock({
         : "",
     [patch],
   );
+  // The paths as the diff itself spells them: the rendered header shows a
+  // rename as "old → new", which is not something to hang a comment on.
+  const paths = useMemo(() => splitDiffByFile(patch).map((p) => p.path), [patch]);
+  // Where the comments hang, not what they say. The cockpit re-polls the whole
+  // artifact every few seconds while a chat turn runs, and rebuilding the diff
+  // on each of those would flicker the page and throw away a composer someone
+  // is typing into — an edited body re-renders through its portal regardless.
+  const anchors = useMemo(
+    () => comments.map((c) => `${c.id}@${c.path}:${c.line}`).join("|"),
+    [comments],
+  );
   const ref = useRef<HTMLDivElement>(null);
   const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
+  const [pick, setPick] = useState<LinePick | null>(null);
+  const [pickSlot, setPickSlot] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = ref.current;
@@ -117,15 +244,22 @@ function DiffBlock({
     root.innerHTML = rendered;
     highlightDiff(root);
 
-    const byFile = new Map<string, Element>();
-    for (const wrapper of root.querySelectorAll(".d2h-file-wrapper")) {
+    const byFile = new Map<string, HTMLElement>();
+    root.querySelectorAll<HTMLElement>(".d2h-file-wrapper").forEach((wrapper, i) => {
       const name = wrapper.querySelector(".d2h-file-name")?.textContent?.trim();
+      // diff2html renders the files in the order the patch lists them, so
+      // position is what still names a file whose header reads as a rename.
+      const path = name && paths.includes(name) ? name : paths[i];
       if (name) byFile.set(name, wrapper);
-    }
+      if (path) {
+        byFile.set(path, wrapper);
+        wrapper.dataset.path = path;
+      }
+    });
 
     const placed: { id: string; el: HTMLElement }[] = [];
     // When several comments target the same line, insert each after the last.
-    const anchors = new Map<Element, Element>();
+    const parked = new Map<Element, Element>();
     for (const c of comments) {
       if (c.line == null) continue;
       const wrapper = byFile.get(c.path);
@@ -134,19 +268,86 @@ function DiffBlock({
         (tr) => tr.querySelector(".line-num2")?.textContent?.trim() === String(c.line),
       );
       if (!row) continue;
-      const tr = document.createElement("tr");
-      tr.className = "inline-comment-row";
-      const td = document.createElement("td");
-      td.colSpan = 2;
-      const holder = document.createElement("div");
-      td.appendChild(holder);
-      tr.appendChild(td);
-      (anchors.get(row) ?? row).after(tr);
-      anchors.set(row, tr);
-      placed.push({ id: c.id, el: holder });
+      const inserted = insertRow(parked.get(row) ?? row, "inline-comment-row");
+      parked.set(row, inserted.tr);
+      placed.push({ id: c.id, el: inserted.holder });
     }
     setSlots(placed);
-  }, [rendered, comments]);
+
+    if (readOnly) {
+      setPickSlot(null);
+      return;
+    }
+
+    // One button per numbered row, sitting invisibly over the line numbers
+    // until the row is hovered — the same place GitHub puts it.
+    for (const wrapper of root.querySelectorAll<HTMLElement>(".d2h-file-wrapper")) {
+      const path = wrapper.dataset.path;
+      if (!path) continue;
+      for (const gutter of wrapper.querySelectorAll<HTMLElement>(
+        ".d2h-diff-tbody > tr > td.d2h-code-linenumber",
+      )) {
+        const target = rowLine(
+          gutter.querySelector(".line-num1")?.textContent,
+          gutter.querySelector(".line-num2")?.textContent,
+        );
+        if (!target) continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "line-add";
+        button.title = `Say something about ${path}:${target.line}`;
+        button.dataset.path = path;
+        button.dataset.line = String(target.line);
+        button.dataset.side = target.side;
+        gutter.appendChild(button);
+      }
+    }
+
+    const onClick = (e: MouseEvent) => {
+      const button = (e.target as HTMLElement).closest<HTMLElement>(".line-add");
+      if (!button) return;
+      const { path, line, side } = button.dataset;
+      if (!path || !line) return;
+      setPick({ path, line: Number(line), side: side === "old" ? "old" : "new" });
+    };
+    root.addEventListener("click", onClick);
+    // The rendered HTML is about to be replaced, and with it every row the
+    // open composer was measured against.
+    setPickSlot(null);
+    return () => root.removeEventListener("click", onClick);
+    // `comments` is deliberately absent: `anchors` is the part of it this
+    // effect renders, and re-running on every poll would flicker the diff.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rendered, anchors, paths, readOnly]);
+
+  // Park the composer under the picked row. Separate from the render above so
+  // that opening and closing it doesn't rebuild the whole diff.
+  useEffect(() => {
+    const root = ref.current;
+    if (!root || !pick) {
+      setPickSlot(null);
+      return;
+    }
+    const wrapper = Array.from(root.querySelectorAll<HTMLElement>(".d2h-file-wrapper")).find(
+      (w) => w.dataset.path === pick.path,
+    );
+    const row = Array.from(wrapper?.querySelectorAll(".d2h-diff-tbody > tr") ?? []).find((tr) => {
+      const gutter = tr.querySelector(".d2h-code-linenumber");
+      const target = rowLine(
+        gutter?.querySelector(".line-num1")?.textContent,
+        gutter?.querySelector(".line-num2")?.textContent,
+      );
+      return target?.line === pick.line && target.side === pick.side;
+    });
+    if (!row) {
+      setPick(null);
+      return;
+    }
+    // Under the row, but above any comment already parked there.
+    const inserted = insertRow(row, "line-composer-row");
+    setPickSlot(inserted.holder);
+    return () => inserted.tr.remove();
+  }, [pick, slots]);
 
   if (!rendered) return <p className="muted">No diff for this chapter.</p>;
   const unplaced = comments.filter((c) => !slots.some((s) => s.id === c.id));
@@ -157,6 +358,25 @@ function DiffBlock({
         const c = comments.find((x) => x.id === id);
         return c ? createPortal(renderComment(c), el, id) : null;
       })}
+      {pick &&
+        pickSlot &&
+        createPortal(
+          <LineComposer
+            pick={pick}
+            chatBusy={chatBusy}
+            onAdd={(body) => {
+              onAddLineComment(pick, body);
+              setPick(null);
+            }}
+            onAsk={(message) => {
+              onAskAboutLine(pick, message);
+              setPick(null);
+            }}
+            onClose={() => setPick(null)}
+          />,
+          pickSlot,
+          `pick-${pick.path}-${pick.side}-${pick.line}`,
+        )}
       {unplaced.map((c) => renderComment(c))}
     </>
   );
@@ -358,6 +578,8 @@ function ChapterSection({
   onDeleteComment,
   onAddComment,
   onDiscuss,
+  onAskAboutLine,
+  chatBusy,
   readOnly,
   anchorRef,
   flash,
@@ -373,6 +595,9 @@ function ChapterSection({
   onDeleteComment: (id: string) => void;
   onAddComment: (c: { path: string; line: number | null; body: string; chapterId: string | null }) => void;
   onDiscuss?: (ref: ChatRef) => void;
+  onAskAboutLine: (pick: LinePick, message: string) => void;
+  /** A chat turn is in flight — one more would be refused. */
+  chatBusy: boolean;
   readOnly: boolean;
   anchorRef: (el: HTMLElement | null) => void;
 }) {
@@ -425,7 +650,25 @@ function ChapterSection({
         <div className="chapter-body">
           <Markdown className="prose chapter-explanation" text={chapter.explanation} />
           {floating.map(renderComment)}
-          <DiffBlock patch={patch} comments={inline} renderComment={renderComment} />
+          <DiffBlock
+            patch={patch}
+            comments={inline}
+            renderComment={renderComment}
+            readOnly={readOnly}
+            chatBusy={chatBusy}
+            // A line the PR removes has no new-side number, so a comment on it
+            // can only be a comment on the file — which is where it would end
+            // up at send time anyway.
+            onAddLineComment={(pick, body) =>
+              onAddComment({
+                path: pick.path,
+                line: pick.side === "new" ? pick.line : null,
+                body,
+                chapterId: chapter.id,
+              })
+            }
+            onAskAboutLine={onAskAboutLine}
+          />
           {!readOnly && chapter.files.length > 0 && (
             <AddComment files={chapter.files} chapterId={chapter.id} onAdd={onAddComment} />
           )}
@@ -464,6 +707,9 @@ function describeRef(ref: ChatRef, artifact: Artifact): string {
   if (ref.target === "verdict") return "the verdict";
   if (ref.target === "chapter") {
     return artifact.chapters.find((c) => c.id === ref.id)?.title ?? "a chapter";
+  }
+  if (ref.target === "line") {
+    return `${ref.path}:${ref.line}${ref.side === "old" ? " (removed)" : ""}`;
   }
   const c = artifact.comments.find((x) => x.id === ref.id);
   return c ? `${c.path}:${c.line ?? "file"}` : "a comment";
@@ -1165,6 +1411,22 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         refs: [{ target: "verdict", id: null }],
       }),
     );
+  /**
+   * Ask the reviewer about one line of the diff. The turn goes off there and
+   * then — the question was already typed, and staging it in the chat box
+   * below would be a second click for nothing. The answer lands in the chat
+   * panel, so the page follows it down.
+   */
+  const askAboutLine = (pick: LinePick, message: string) => {
+    apply(
+      startChatTurn(reviewKey, {
+        message,
+        refs: [{ target: "line", id: null, path: pick.path, line: pick.line, side: pick.side }],
+      }),
+    );
+    chatEl.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const readLabel = artifact.run?.trusted
     ? "ran the code"
     : artifact.run?.withSource
@@ -1467,6 +1729,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               onDeleteComment={onDeleteComment}
               onAddComment={onAddComment}
               onDiscuss={readOnly ? undefined : discuss}
+              onAskAboutLine={askAboutLine}
+              chatBusy={chatBusy}
               readOnly={readOnly}
               flash={flash}
               anchorRef={(el) => {

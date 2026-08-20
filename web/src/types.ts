@@ -67,8 +67,14 @@ export interface ReviewComment {
 
 /** What the user pointed at with "discuss this". */
 export interface ChatRef {
-  target: "summary" | "verdict" | "chapter" | "comment";
+  target: "summary" | "verdict" | "chapter" | "comment" | "line";
   id: string | null;
+  /** A "line" ref: the file, and the line as numbered on `side`. */
+  path?: string | null;
+  line?: number | null;
+  /** Which column of the diff the number came from. A removed line is only
+      numbered on the old side, and can still be asked about. */
+  side?: "new" | "old";
 }
 
 /** One edit a chat turn made to the review. Already applied — not a proposal. */

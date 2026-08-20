@@ -41,6 +41,28 @@ export function inlineComments(patch: string, comments: ReviewComment[]): Review
 }
 
 /**
+ * Which line of a file a diff row is, read off its two gutter numbers.
+ *
+ * A row carries the new-side number when the line survives the PR, and only an
+ * old-side one when the PR removes it. Both can be talked about; only the first
+ * can carry a comment GitHub will post inline, which is what `side` is for.
+ * Hunk headers and spacers have neither and can't be pointed at.
+ */
+export function rowLine(
+  num1: string | null | undefined,
+  num2: string | null | undefined,
+): { line: number; side: "new" | "old" } | null {
+  const parse = (v: string | null | undefined) => {
+    const n = Number((v ?? "").trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+  const next = parse(num2);
+  if (next != null) return { line: next, side: "new" };
+  const prev = parse(num1);
+  return prev != null ? { line: prev, side: "old" } : null;
+}
+
+/**
  * Mirrors buildReviewPayload: a comment posts inline when it can be anchored;
  * everything else that isn't dropped folds into the review body.
  */

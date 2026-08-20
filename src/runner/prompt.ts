@@ -1,4 +1,5 @@
 import { Artifact, ChatTurn, PrInfo } from "../core/artifact.js";
+import { newSideLineText, oldSideLineText } from "../core/diff.js";
 
 /** Keep the prompt within a sane context budget. */
 export const MAX_DIFF_CHARS = 300_000;
@@ -171,12 +172,27 @@ function describeRefs(artifact: Artifact, refs: ChatTurn["refs"]): string {
       const ch = artifact.chapters.find((c) => c.id === ref.id);
       return `- the chapter "${ch?.title ?? ref.id}" (chapterId: ${ref.id})`;
     }
+    if (ref.target === "line") return describeLineRef(artifact, ref);
     const c = artifact.comments.find((x) => x.id === ref.id);
     return c
       ? `- the comment on ${c.path}:${c.line ?? "file"} (commentId: ${c.id})`
       : `- comment ${ref.id}`;
   });
   return `\n## What the user is pointing at\n\n${lines.join("\n")}\n`;
+}
+
+/**
+ * A line of the diff the user clicked, quoted back so the model is looking at
+ * the same thing they are — a number alone would make it count rows.
+ */
+function describeLineRef(artifact: Artifact, ref: ChatTurn["refs"][number]): string {
+  if (ref.path == null || ref.line == null) return "- a line of the diff";
+  const removed = ref.side === "old";
+  const where = `${ref.path}:${ref.line}${removed ? " (a line this PR removes)" : ""}`;
+  const text = (removed ? oldSideLineText : newSideLineText)(artifact.diff)
+    .get(ref.path)
+    ?.get(ref.line);
+  return text?.trim() ? `- ${where} — \`${text.trim()}\`` : `- ${where}`;
 }
 
 /** The review as it stands right now, with the ids a revision has to name. */
