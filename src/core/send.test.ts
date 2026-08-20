@@ -86,7 +86,7 @@ describe("buildReviewPayload", () => {
     expect(payload.body).toContain("cerber");
   });
 
-  it("prefixes graded comments with the word, inline and folded, and leaves ungraded ones bare", () => {
+  it("badges graded comments, inline and folded, and leaves ungraded ones bare", () => {
     const artifact = makeArtifact({
       comments: [
         { id: "1", path: "src/a.ts", line: 2, body: "will corrupt state", chapterId: null, severity: "blocker", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
@@ -95,8 +95,8 @@ describe("buildReviewPayload", () => {
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
-    expect(payload.comments[0]!.body).toBe("**blocker:** will corrupt state");
-    expect(payload.body).toContain("**nit:** typo in the name");
+    expect(payload.comments[0]!.body).toBe("🚨 **blocker** — will corrupt state");
+    expect(payload.body).toContain("🎨 **nit** — typo in the name");
     expect(payload.body).toContain("— why this order?");
     expect(payload.body).not.toContain("null");
   });

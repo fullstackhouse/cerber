@@ -2,6 +2,7 @@ import { html } from "diff2html";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { patchForFiles, unclaimedFiles } from "../../src/core/diff";
+import { severityBadge } from "../../src/core/severity";
 import {
   addComment,
   deleteComment,
@@ -203,7 +204,7 @@ function CommentCard({
                   : "Taste. Take it or leave it."
             }
           >
-            {comment.severity}
+            {severityBadge(comment.severity)}
           </span>
         )}
         {comment.drifted && (

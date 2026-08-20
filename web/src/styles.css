@@ -1639,11 +1639,28 @@ button {
   color: var(--muted);
 }
 
+/* Section headings carry the summary's shape: they have to be findable while
+   skimming, without shouting over the prose they introduce. */
 .md h1,
 .md h2,
-.md h3 {
-  font-size: 1.05em;
-  margin: 12px 0 4px;
+.md h3,
+.md h4 {
+  font-size: 1em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 18px 0 2px;
+  color: var(--fg);
+}
+
+.md h1 + p,
+.md h2 + p,
+.md h3 + p,
+.md h4 + p,
+.md h1 + ul,
+.md h2 + ul,
+.md h3 + ul,
+.md h4 + ul {
+  margin-top: 4px;
 }
 
 /* ---- settings ---- */
