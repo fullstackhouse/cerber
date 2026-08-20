@@ -60,9 +60,11 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 - **Chapters** — the changed files grouped into a logical walkthrough, each
   with a title, an explanation, and its slice of the diff
 - **Draft comments** — inline, anchored to file/line, only things worth a
-  human's time
+  human's time. Findings are graded **blocker / minor / nit** — the words mean
+  what they mean everywhere, and only a blocker stands between the PR and
+  approval; a question or note carries no grade at all
 - **Verdict** — approve / comment / request changes, with a 0–100 confidence
-  score and reasoning
+  score and reasoning that names the worst finding still standing
 - **Run metadata** — model, whether it read the source or only the diff, and
   the token spend as an API-rate equivalent
 
