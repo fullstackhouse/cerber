@@ -725,6 +725,9 @@ function describeRef(ref: ChatRef, artifact: Artifact): string {
     return artifact.chapters.find((c) => c.id === ref.id)?.title ?? "a chapter";
   }
   if (ref.target === "line") {
+    // Artifacts are hand-editable, so a ref can arrive without its file or
+    // line — say what it is rather than rendering "undefined:undefined".
+    if (ref.path == null || ref.line == null) return "a line of the diff";
     return `${ref.path}:${ref.line}${ref.side === "old" ? " (removed)" : ""}`;
   }
   const c = artifact.comments.find((x) => x.id === ref.id);
