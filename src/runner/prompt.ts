@@ -66,6 +66,7 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
       "path": "path/to/file.ts",
       "line": 42,
       "body": "markdown — the review comment. First sentence states the problem plainly; then the evidence or fix. Concrete, actionable, kind.",
+      "severity": "blocker" | "minor" | "nit" | null,
       "chapterId": "short-kebab-id"
     }
   ],
@@ -87,6 +88,13 @@ Rules:
 - Group ALL changed files into chapters that tell the story of the PR (schema first, then logic, then tests, etc). Every changed file must appear in exactly one chapter.
 - "line" is the line number in the NEW version of the file (the "+" side of the diff). Use null for file-level comments. Only reference lines that appear in the diff.
 - Only write comments that are worth a human reading: real bugs, risky patterns, missing tests, unclear naming. No nitpicks a linter would catch. An empty comments array is a perfectly good review of a clean PR.
+- "severity" is the finding's merge impact. The words mean what they mean everywhere:
+  - "blocker" — you would not approve with this in: data loss, a security hole, wrong behavior on a path people actually hit, a broken build. The only tier that blocks.
+  - "minor" — should be fixed, but the author's call; you would approve and not chase it.
+  - "nit" — taste: naming, wording, formatting.
+  - null — not a finding at all: a question, a note, praise.
+- Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "confidence", nowhere else.
+- The verdict must follow from the worst finding still standing: any blocker → "request_changes"; none → "approve" (or "comment" when you genuinely take no position). Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
 ${confidenceRule}
 - Never invent files or lines not present in the diff.
 
@@ -159,7 +167,8 @@ function renderReview(artifact: Artifact): string {
     .map((c) => {
       const mine = c.origin === "user" || c.editedByUser ? " [THE USER'S OWN WRITING]" : "";
       const dropped = c.status === "dropped" ? " [dropped]" : "";
-      return `- ${c.id} — ${c.path}:${c.line ?? "file-level"}${mine}${dropped}\n  ${c.body}`;
+      const graded = c.severity ? ` [${c.severity}]` : "";
+      return `- ${c.id} — ${c.path}:${c.line ?? "file-level"}${graded}${mine}${dropped}\n  ${c.body}`;
     })
     .join("\n");
   const verdict = artifact.verdict
@@ -237,9 +246,9 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
     { "kind": "summary", "body": "the rewritten summary" },
     { "kind": "verdict", "verdict": { "recommendation": "approve" | "comment" | "request_changes", "confidence": 0-100, "reasoning": "..." } },
     { "kind": "chapter", "chapterId": "...", "title": "optional new title", "explanation": "optional new explanation" },
-    { "kind": "comment-edit", "commentId": "...", "body": "the rewritten comment" },
+    { "kind": "comment-edit", "commentId": "...", "body": "the rewritten comment", "severity": "blocker" | "minor" | "nit" | null (optional — omit to leave the grade as it is) },
     { "kind": "comment-drop", "commentId": "..." },
-    { "kind": "comment-add", "path": "path/to/file.ts", "line": 42, "body": "...", "chapterId": "..." }
+    { "kind": "comment-add", "path": "path/to/file.ts", "line": 42, "body": "...", "severity": "blocker" | "minor" | "nit" | null, "chapterId": "..." }
   ]
 }
 
@@ -250,6 +259,7 @@ Rules:
 - Comments marked [THE USER'S OWN WRITING] are theirs. Do not edit or drop them. If one of them is what needs changing, say so in your reply and let them do it.
 - Every "commentId" and "chapterId" must be one listed below. Never invent one.
 - "line" is a line in the NEW version of the file and must appear in the diff. Use null for a file-level comment.
+- "severity" is the finding's merge impact — "blocker" (would not approve with this in; the only tier that blocks), "minor" (should fix, author's call), "nit" (taste), null (not a finding: a question, a note). Grade as if the finding is true; hedge in the reply, never in the grade. A verdict revision must still follow from the worst finding left standing.
 - Your reply is prose to a person, not a changelog. The cockpit already shows what you changed — do not list your own edits back to them.
 
 Writing style:
