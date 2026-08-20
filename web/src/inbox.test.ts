@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   ageLabel,
+  bucket,
   hiddenAwaiting,
   hiddenAwaitingNote,
   isArchived,
   replyOf,
   replyTag,
+  rowTag,
   sortReviews,
-  stillAwaitingLabel,
   strip,
   tabOf,
   verdictCell,
@@ -146,14 +147,14 @@ describe("hiddenAwaitingNote", () => {
   it("reports the open request, rather than telling you what you owe", () => {
     expect(hiddenAwaitingNote([row({ status: "reviewed" }), row({ status: "skipped" })])).toBe(
       "Nothing new in the inbox — but GitHub still has 2 review requests open on you. " +
-        "You settled them here without submitting a review, so they sit in the drawers below, tagged with whose move it is.",
+        "You settled them here without submitting a review, so they are under open requests, tagged with whose move it is.",
     );
   });
 
   it("reads as one request when there is one", () => {
     expect(hiddenAwaitingNote([row({ status: "skipped" })])).toBe(
       "Nothing new in the inbox — but GitHub still has 1 review request open on you. " +
-        "You settled it here without submitting a review, so it sits in the drawers below, tagged with whose move it is.",
+        "You settled it here without submitting a review, so it is under open requests, tagged with whose move it is.",
     );
   });
 
@@ -200,19 +201,55 @@ describe("replyOf / replyTag", () => {
   });
 });
 
-describe("stillAwaitingLabel", () => {
-  const a = row({ id: "acme/web#1", key: "a", status: "reviewed" });
-  const b = row({ id: "acme/web#2", key: "b", status: "skipped" });
+describe("bucket", () => {
+  const list = [
+    row({ id: "acme/web#1", key: "ready", status: "ready" }),
+    row({ id: "acme/web#2", key: "queued", status: "awaiting" }),
+    row({ id: "acme/web#3", key: "running", status: "running" }),
+    row({ id: "acme/web#4", key: "reviewed", status: "reviewed" }),
+    row({ id: "acme/web#5", key: "skipped", status: "skipped" }),
+    row({ id: "acme/web#6", key: "sent", status: "sent" }),
+    row({ id: "acme/web#7", key: "merged", pr: { ...row().pr, state: "MERGED" } }),
+  ];
 
-  it("counts the open requests in this drawer, without claiming whose move it is", () => {
-    // The rows say whose move it is. A label asserting they are all on you
-    // would contradict a row that reads "waiting on them".
-    expect(stillAwaitingLabel([a, b], [a])).toBe(" · 1 open review request");
-    expect(stillAwaitingLabel([a, b], [a, b])).toBe(" · 2 open review requests");
+  it("files every review under exactly one tab, and the inbox under three", () => {
+    const b = bucket(list, daemon());
+    expect(b.inbox.map((r) => r.key)).toEqual(["ready", "queued", "running"]);
+    expect(b.awaiting.map((r) => r.key)).toEqual(["queued", "running"]);
+    expect(b.drafted.map((r) => r.key)).toEqual(["ready"]);
+    expect(b.settled.map((r) => r.key)).toEqual(["reviewed", "skipped"]);
+    expect(b.sent.map((r) => r.key)).toEqual(["sent"]);
+    expect(b.archived.map((r) => r.key)).toEqual(["merged"]);
   });
 
-  it("leaves a drawer of finished work reading as it always did", () => {
-    expect(stillAwaitingLabel([a, b], [])).toBe("");
+  it("keeps a merged PR out of every tab but archived, whatever its status says", () => {
+    const b = bucket([row({ key: "merged", status: "ready", pr: { ...row().pr, state: "MERGED" } })], null);
+    expect(b.inbox).toEqual([]);
+    expect(b.drafted).toEqual([]);
+    expect(b.archived.map((r) => r.key)).toEqual(["merged"]);
+  });
+
+  it("crosses the filed tabs with open requests rather than moving rows out of them", () => {
+    // A settled row GitHub still asks you for belongs in both: settled is where
+    // you put it, open requests is the question you have not answered.
+    const b = bucket(list, daemon({ awaiting: at("acme/web#4", "acme/web#6") }));
+    expect(b.requests.map((r) => r.key)).toEqual(["reviewed", "sent"]);
+    expect(b.settled.map((r) => r.key)).toContain("reviewed");
+    expect(b.sent.map((r) => r.key)).toContain("sent");
+  });
+});
+
+describe("rowTag", () => {
+  it("says what became of the PR, or what you did with it", () => {
+    expect(rowTag(row({ status: "reviewed" }))).toBe("reviewed");
+    expect(rowTag(row({ status: "skipped" }))).toBe("skipped");
+    expect(rowTag(row({ pr: { ...row().pr, state: "MERGED" } }))).toBe("merged");
+  });
+
+  it("leaves the row alone when the verdict column already says it", () => {
+    // "sent · approve" is in the verdict column; a `sent` tag would repeat it.
+    expect(rowTag(row({ status: "sent" }))).toBeNull();
+    expect(rowTag(row({ status: "ready" }))).toBeNull();
   });
 });
 

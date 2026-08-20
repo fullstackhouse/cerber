@@ -7,17 +7,46 @@
 
 import { DaemonStatus, Reply, ReviewListItem } from "./types";
 
-export type Tab = "all" | "awaiting" | "drafted" | "sent";
+export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
 
 /**
- * The tabs filter the live queue. Sent reviews are records and merged PRs are
- * history — both keep their own drawer under the table rather than a tab, so
- * neither pushes work you haven't done off the top of the list.
+ * One filter row, one list. Every bucket the queue can show is a tab: the work
+ * still waiting on you first, then what you already dealt with. Two mechanisms
+ * — tabs over the live rows and accordions over the rest — meant "all 2" sat
+ * above a drawer holding twelve more, and neither strip told you the other
+ * existed.
  */
-export const TABS: Tab[] = ["all", "awaiting", "drafted"];
+export const INBOX_TABS: Tab[] = ["inbox", "awaiting", "drafted"];
 
-/** Which filter tab a review belongs to. Every status lands in exactly one. */
-export function tabOf(r: ReviewListItem): Exclude<Tab, "all"> {
+/** The quieter half of the row: work that is done, or done here at least. */
+export const FILED_TABS: Tab[] = ["requests", "settled", "sent", "archived"];
+
+/** What each tab is called, and what it holds. The title is the whole answer. */
+export const TAB_META: Record<Tab, { label: string; title: string }> = {
+  inbox: {
+    label: "inbox",
+    title: "Everything still waiting on you — drafted reviews and PRs the poll found but nobody has read.",
+  },
+  awaiting: {
+    label: "awaiting",
+    title: "Found by the inbox poll, not drafted yet — or a run is in flight right now.",
+  },
+  drafted: { label: "drafted", title: "A draft is written and waiting for you to read it." },
+  requests: {
+    label: "open requests",
+    title:
+      "GitHub still lists you as a requested reviewer on these. You settled or archived them here without submitting a review, so they also appear under whichever tab you filed them in.",
+  },
+  settled: {
+    label: "settled",
+    title: "You marked these reviewed or skipped. Nothing was sent to GitHub.",
+  },
+  sent: { label: "sent", title: "Reviews that reached GitHub. Kept here as a record." },
+  archived: { label: "archived", title: "PRs that have since been merged or closed." },
+};
+
+/** Which inbox tab a live review belongs to. Every status lands in exactly one. */
+export function tabOf(r: ReviewListItem): "awaiting" | "drafted" | "sent" {
   if (r.status === "awaiting" || r.status === "running") return "awaiting";
   if (r.status === "sent") return "sent";
   return "drafted";
@@ -75,6 +104,37 @@ export function hiddenAwaiting(list: ReviewListItem[], daemon: DaemonStatus | nu
 export const isHiddenAwaiting = (r: ReviewListItem, hidden: ReviewListItem[]) =>
   hidden.some((h) => h.id === r.id);
 
+/**
+ * Every tab's rows, worked out once. The queue reads its list and its counts
+ * from the same object, so a tab can never claim a number the table then
+ * disagrees with. `requests` deliberately overlaps the tabs after it: it is a
+ * question about GitHub, not a fourth place a review can be filed.
+ */
+export function bucket(all: ReviewListItem[], daemon: DaemonStatus | null): Record<Tab, ReviewListItem[]> {
+  const open = all.filter((r) => !isArchived(r));
+  const live = sortReviews(open.filter((r) => !SETTLED.includes(r.status)));
+  return {
+    inbox: live,
+    awaiting: live.filter((r) => tabOf(r) === "awaiting"),
+    drafted: live.filter((r) => tabOf(r) === "drafted"),
+    requests: hiddenAwaiting(all, daemon),
+    settled: sortReviews(open.filter((r) => r.status === "reviewed" || r.status === "skipped")),
+    sent: sortReviews(open.filter((r) => r.status === "sent")),
+    archived: sortReviews(all.filter(isArchived)),
+  };
+}
+
+/**
+ * What happened to this row, when the verdict column doesn't already say it:
+ * your own decision, or GitHub's. A sent review says "sent · approve" in the
+ * verdict column, so a tag there would only repeat it.
+ */
+export function rowTag(r: ReviewListItem): string | null {
+  if (isArchived(r)) return r.pr.state?.toLowerCase() ?? null;
+  if (r.status === "reviewed" || r.status === "skipped") return r.status;
+  return null;
+}
+
 /** Whose move it is on this row, as the last poll left it. */
 export function replyOf(r: ReviewListItem, daemon: DaemonStatus | null): Reply {
   if (!daemon?.enabled) return "unknown";
@@ -129,20 +189,8 @@ export function hiddenAwaitingNote(hidden: ReviewListItem[]): string {
   return (
     `Nothing new in the inbox — but GitHub still has ${requests} open on you. ` +
     `You ${how} ${n === 1 ? "it" : "them"} here without submitting a review, ` +
-    `so ${n === 1 ? "it sits" : "they sit"} in the drawers below, tagged with whose move it is.`
+    `so ${n === 1 ? "it is" : "they are"} under open requests, tagged with whose move it is.`
   );
-}
-
-/**
- * What a drawer's label adds when GitHub still holds requests for some of what
- * it holds: " · 2 open review requests". Deliberately neutral about whose move
- * it is — the rows say that, and a label claiming they are all on you would
- * contradict a row reading "waiting on them". Empty when there are none, so a
- * drawer of finished work reads exactly as it did before.
- */
-export function stillAwaitingLabel(rows: ReviewListItem[], hidden: ReviewListItem[]): string {
-  const n = rows.filter((r) => isHiddenAwaiting(r, hidden)).length;
-  return n === 0 ? "" : ` · ${n} open review request${n === 1 ? "" : "s"}`;
 }
 
 /** "now", "40s", "12m", "2h", "5d" — the queue's `upd` column. */

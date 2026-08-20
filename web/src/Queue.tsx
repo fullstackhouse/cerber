@@ -2,20 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
-  SETTLED,
+  FILED_TABS,
+  INBOX_TABS,
+  TAB_META,
   Tab,
-  TABS,
   ageLabel,
-  hiddenAwaiting,
+  bucket,
   hiddenAwaitingNote,
-  isArchived,
   isHiddenAwaiting,
   replyOf,
   replyTag,
-  sortReviews,
-  stillAwaitingLabel,
+  rowTag,
   strip,
-  tabOf,
   verdictCell,
 } from "./inbox";
 import { DaemonStatus, Reply, ReviewListItem } from "./types";
@@ -87,18 +85,28 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
   );
 }
 
+/**
+ * One row shape for every tab. What you already dealt with used to render
+ * through a second, thinner component in a drawer — same PR, different columns,
+ * no cursor. A filed review is the same row; the tags say what became of it.
+ */
 function Row({
   r,
   selected,
   onSelect,
   onOpen,
+  awaiting,
 }: {
   r: ReviewListItem;
   selected: boolean;
   onSelect: () => void;
   onOpen: () => void;
+  /** Whose move it is on GitHub, when GitHub still asks you for this one. */
+  awaiting?: Reply | null;
 }) {
   const v = verdictCell(r);
+  const tag = rowTag(r);
+  const request = awaiting ? replyTag(awaiting) : null;
   return (
     <div
       className={`row${selected ? " row-on" : ""}`}
@@ -127,6 +135,12 @@ function Row({
           draft
         </span>
       )}
+      {request && (
+        <span className="tag tag-awaiting" title={request.title}>
+          {request.label}
+        </span>
+      )}
+      {tag && <span className="tag tag-done">{tag}</span>}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -139,56 +153,6 @@ function Row({
         )}
       </span>
       <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
-    </div>
-  );
-}
-
-/** A row in one of the drawers: still openable, but out of the day's way. */
-function SettledRow({
-  r,
-  verdict,
-  tag,
-  awaiting,
-}: {
-  r: ReviewListItem;
-  verdict: string;
-  tag?: string;
-  /** Whose move it is on GitHub, when GitHub still asks you for this one. */
-  awaiting?: Reply | null;
-}) {
-  const request = awaiting ? replyTag(awaiting) : null;
-  return (
-    <div
-      className={`row row-settled${request ? " row-awaiting" : ""}`}
-      onClick={() => openReview(r.key)}
-      role="button"
-      tabIndex={-1}
-    >
-      <span className="col-caret" />
-      <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
-        {r.pr.repo}#{r.pr.number}
-      </span>
-      <span className="col-author" title={r.pr.author}>
-        {r.pr.author}
-      </span>
-      <span className="col-title" title={r.pr.title}>
-        {r.pr.title}
-      </span>
-      {r.pr.isDraft && (
-        <span className="tag tag-draft" title="Still a draft — its author asked for your review anyway">
-          draft
-        </span>
-      )}
-      {request && (
-        <span className="tag tag-awaiting" title={request.title}>
-          {request.label}
-        </span>
-      )}
-      {tag && <span className="tag tag-done">{tag}</span>}
-      <span className="col-comments">{r.commentCount || ""}</span>
-      <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
-      <span className="col-verdict">{verdict}</span>
       <span className="col-age">{ageLabel(r.updatedAt)}</span>
     </div>
   );
@@ -252,37 +216,12 @@ function PullBox({ autoFocus }: { autoFocus?: boolean }) {
   );
 }
 
-/** One of the collapsed drawers under the queue: work already dealt with. */
-function Drawer({
-  open,
-  onToggle,
-  label,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="drawer">
-      <button className="drawer-toggle" onClick={onToggle}>
-        <span className="faint">{open ? "▾" : "▸"}</span> {label}
-      </button>
-      {open && <div className="drawer-rows">{children}</div>}
-    </div>
-  );
-}
-
 export function Queue() {
   const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
   const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
-  const [showSent, setShowSent] = useState(false);
-  const [showSettled, setShowSettled] = useState(false);
   const [starting, setStarting] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<Tab>("all");
+  const [tab, setTab] = useState<Tab>("inbox");
   // The cursor is a review, not a row number: the list re-sorts under it every
   // poll, and the strip below must keep explaining the same PR.
   const [cursor, setCursor] = useState<string | null>(null);
@@ -313,35 +252,13 @@ export function Queue() {
   }, []);
 
   const all = reviews ?? [];
-  const archived = useMemo(() => sortReviews(all.filter(isArchived)), [all]);
-  // The queue is what still wants you; everything you have dealt with drops
-  // into a drawer under it. Sent and settled stay apart because that is the
-  // line the whole tool is drawn along: one reached GitHub, the other didn't.
-  const open = useMemo(() => all.filter((r) => !isArchived(r)), [all]);
-  const live = useMemo(() => sortReviews(open.filter((r) => !SETTLED.includes(r.status))), [open]);
-  const settled = useMemo(
-    () => sortReviews(open.filter((r) => r.status === "reviewed" || r.status === "skipped")),
-    [open],
-  );
-  const sent = useMemo(() => sortReviews(open.filter((r) => r.status === "sent")), [open]);
-  // What GitHub still wants from you that none of the above is showing. The
-  // strip has always counted these; until now nothing could point at them.
-  const hidden = useMemo(() => hiddenAwaiting(all, daemon), [all, daemon]);
-  const rows = useMemo(
-    () => (tab === "all" ? live : live.filter((r) => tabOf(r) === tab)),
-    [live, tab],
-  );
-  const counts = useMemo(
-    () =>
-      TABS.reduce<Record<Tab, number>>(
-        (acc, t) => {
-          acc[t] = t === "all" ? live.length : live.filter((r) => tabOf(r) === t).length;
-          return acc;
-        },
-        { all: 0, awaiting: 0, drafted: 0, sent: 0 },
-      ),
-    [live],
-  );
+  // Every tab's rows in one pass. Sent and settled stay separate tabs because
+  // that is the line the whole tool is drawn along: one reached GitHub, the
+  // other didn't. `requests` is what GitHub still wants from you that your own
+  // filing has hidden — the strip has always counted these.
+  const buckets = useMemo(() => bucket(all, daemon), [all, daemon]);
+  const hidden = buckets.requests;
+  const rows = buckets[tab];
 
   // Keep the cursor on a row that still exists in the current filter.
   const selected = rows.find((r) => r.key === cursor) ?? rows[0] ?? null;
@@ -389,10 +306,27 @@ export function Queue() {
   if (error && !reviews) return <p className="error">{error}</p>;
   if (!reviews) return <p className="muted pad">Loading…</p>;
 
-  // Only the rows the stats describe — what is in a drawer is history.
-  const totalCost = live.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  // What the rows on screen cost — the figure has to be about the list it
+  // sits over, not about some other tab's.
+  const totalCost = rows.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   const detail = selected ? strip(selected, daemon) : null;
   const busy = selected ? starting.has(selected.key) : false;
+  // The inbox trio always shows — its counts are the triage. A filed tab
+  // appears as it fills and goes as it empties: an empty one is a filter
+  // nobody can want, and a fresh install should not open onto four of them.
+  const filed = FILED_TABS.filter((t) => buckets[t].length > 0);
+  const tabButton = (t: Tab) => (
+    <button
+      key={t}
+      className={`tab${tab === t ? " tab-on" : ""}${FILED_TABS.includes(t) ? " tab-filed" : ""}${
+        t === "requests" ? " tab-requests" : ""
+      }`}
+      title={TAB_META[t].title}
+      onClick={() => setTab(t)}
+    >
+      {TAB_META[t].label} <span className="tab-count">{buckets[t].length}</span>
+    </button>
+  );
 
   return (
     <>
@@ -403,35 +337,14 @@ export function Queue() {
         </div>
       )}
 
-      {live.length === 0 ? (
+      {all.length === 0 ? (
         <div className="wrap">
           <div className="empty">
             {daemon?.enabled ? (
-              hidden.length > 0 ? (
-                // Never "nothing awaits your review" over the top of a poll that
-                // just counted some: say how many, and open the drawer they are in.
-                <>
-                  <p>{hiddenAwaitingNote(hidden)}</p>
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      // Only the drawers that actually hold one — opening the
-                      // rest would bury what you asked to see.
-                      if (settled.some((r) => isHiddenAwaiting(r, hidden))) setShowSettled(true);
-                      if (sent.some((r) => isHiddenAwaiting(r, hidden))) setShowSent(true);
-                      if (archived.some((r) => isHiddenAwaiting(r, hidden))) setShowArchived(true);
-                    }}
-                  >
-                    <Icon name="arrowRight" />
-                    show {hidden.length === 1 ? "it" : `all ${hidden.length}`}
-                  </button>
-                </>
-              ) : (
-                <p>
-                  Inbox empty — nothing awaits your review.
-                  {daemon.lastPollError ? " (Discovery is offline; check gh auth.)" : ""}
-                </p>
-              )
+              <p>
+                Inbox empty — nothing awaits your review.
+                {daemon.lastPollError ? " (Discovery is offline; check gh auth.)" : ""}
+              </p>
             ) : (
               <p>No reviews yet.</p>
             )}
@@ -440,16 +353,12 @@ export function Queue() {
         </div>
       ) : (
         <div className="wrap">
+          {/* One filter row for every bucket: what still wants you on the left,
+              what you have already dealt with on the right. */}
           <div className="tabs">
-            {TABS.map((t) => (
-              <button
-                key={t}
-                className={`tab${tab === t ? " tab-on" : ""}`}
-                onClick={() => setTab(t)}
-              >
-                {t} <span className="tab-count">{counts[t]}</span>
-              </button>
-            ))}
+            {INBOX_TABS.map(tabButton)}
+            {filed.length > 0 && <span className="tab-split" aria-hidden />}
+            {filed.map(tabButton)}
             <span className="grow" />
             <PullBox />
             {totalCost > 0 && (
@@ -474,7 +383,29 @@ export function Queue() {
           </div>
 
           {rows.length === 0 ? (
-            <p className="muted pad">Nothing {tab} right now.</p>
+            <div className="empty-tab">
+              {tab === "inbox" && hidden.length > 0 ? (
+                // Never "nothing awaits your review" over the top of a poll that
+                // just counted some: say how many, and point at the tab they are in.
+                <>
+                  <p>{hiddenAwaitingNote(hidden)}</p>
+                  <button className="btn" onClick={() => setTab("requests")}>
+                    <Icon name="arrowRight" />
+                    show {hidden.length === 1 ? "it" : `all ${hidden.length}`}
+                  </button>
+                </>
+              ) : (
+                <p className="muted">
+                  {tab === "inbox"
+                    ? `Inbox empty — nothing awaits your review.${
+                        daemon?.enabled && daemon.lastPollError
+                          ? " (Discovery is offline; check gh auth.)"
+                          : ""
+                      }`
+                    : `Nothing ${TAB_META[tab].label} right now.`}
+                </p>
+              )}
+            </div>
           ) : (
             rows.map((r) => (
               <Row
@@ -483,6 +414,7 @@ export function Queue() {
                 selected={r.key === selected?.key}
                 onSelect={() => setCursor(r.key)}
                 onOpen={() => openReview(r.key)}
+                awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
               />
             ))
           )}
@@ -548,60 +480,6 @@ export function Queue() {
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      )}
-
-      {(settled.length > 0 || sent.length > 0 || archived.length > 0) && (
-        <div className="wrap drawers">
-          {settled.length > 0 && (
-            <Drawer
-              open={showSettled}
-              onToggle={() => setShowSettled(!showSettled)}
-              label={`settled — ${settled.length} you marked reviewed or skipped${stillAwaitingLabel(settled, hidden)}`}
-            >
-              {settled.map((r) => (
-                <SettledRow
-                  key={r.key}
-                  r={r}
-                  verdict={verdictCell(r).label}
-                  tag={r.status}
-                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-                />
-              ))}
-            </Drawer>
-          )}
-          {sent.length > 0 && (
-            <Drawer
-              open={showSent}
-              onToggle={() => setShowSent(!showSent)}
-              label={`sent — ${sent.length} review${sent.length === 1 ? "" : "s"} on GitHub${stillAwaitingLabel(sent, hidden)}`}
-            >
-              {sent.map((r) => (
-                <SettledRow
-                  key={r.key}
-                  r={r}
-                  verdict={verdictCell(r).label}
-                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-                />
-              ))}
-            </Drawer>
-          )}
-          {archived.length > 0 && (
-            <Drawer
-              open={showArchived}
-              onToggle={() => setShowArchived(!showArchived)}
-              label={`archived — ${archived.length} merged/closed PR${archived.length === 1 ? "" : "s"}${stillAwaitingLabel(archived, hidden)}`}
-            >
-              {archived.map((r) => (
-                <SettledRow
-                  key={r.key}
-                  r={r}
-                  verdict={r.pr.state?.toLowerCase() ?? ""}
-                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-                />
-              ))}
-            </Drawer>
           )}
         </div>
       )}
