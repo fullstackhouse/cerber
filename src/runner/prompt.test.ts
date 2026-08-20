@@ -58,6 +58,25 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("The only tier that blocks");
   });
 
+  it("asks for a summary in sections, and for none on a small PR", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("### 🎯 ");
+    expect(prompt).toContain("### 🔧 ");
+    expect(prompt).toContain("The emoji and the order are fixed. The words after the emoji are yours");
+    expect(prompt).toContain("A small PR gets one or two short paragraphs and NO headings");
+  });
+
+  it("asks for a verdict of one lead sentence plus bullets", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("One lead sentence");
+    expect(prompt).toContain("never a second paragraph");
+  });
+
+  it("keeps the grade out of the comment body — cerber prefixes it", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("Never write the grade into the body");
+  });
+
   it("ties the verdict to the worst finding still standing", () => {
     const { prompt } = buildReviewPrompt(pr, "d");
     expect(prompt).toContain('any blocker → "request_changes"');

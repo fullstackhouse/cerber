@@ -24,16 +24,23 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   rather than shipping it behind a warning (see the repo-trust refusal below).
 - Review prose is written for someone who has NOT read the diff: plain words,
   effect before mechanism ("a code block was never closed, so everything after
-  it displayed as code" — not the parser-level account). The rules live in
-  `src/runner/prompt.ts` and were tuned against real reviews — change them from
-  evidence, not taste.
+  it displayed as code" — not the parser-level account). It is also shaped
+  rather than poured: past two paragraphs a summary breaks into fixed sections
+  (🎯 problem, 🔧 fix, 🔍 details, ⚠️ worth knowing — drop the ones with
+  nothing to say, and a small PR gets no headings at all), the verdict is
+  one lead sentence then bullets, and a comment leads with the finding on its
+  own line. The rules live in `src/runner/prompt.ts` and were tuned against
+  real reviews — change them from evidence, not taste.
 - Findings are graded `blocker | minor | nit`; only a blocker blocks approval,
   and an ungraded comment is not a finding (a question, a note) — never
   "unknown severity". Grades assume the finding is true: doubt lives in the
   verdict's confidence, never in a softened grade. The verdict must follow
   from the worst finding still standing. Severity is advisory — no code
   derives or enforces the verdict from it; the cockpit only points out when
-  they disagree.
+  they disagree. The grade is rendered from the field, never written into the
+  body: one badge (`src/core/severity.ts`) opens the comment's own text in the
+  cockpit, on GitHub and in the export, so a comment reads the same in all
+  three — and the grade survives GitHub, where a chip would not exist.
 
 ## Architecture
 

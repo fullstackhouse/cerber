@@ -118,7 +118,7 @@ describe("severitySummary", () => {
       comment({ id: "gone", severity: "blocker", status: "dropped" }),
       comment({ id: "note" }),
     ]);
-    expect(severitySummary(a)).toBe("1 blocker · 2 nits");
+    expect(severitySummary(a)).toBe("🚨 1 blocker · 🎨 2 nits");
   });
 
   it("says nothing about an ungraded review", () => {

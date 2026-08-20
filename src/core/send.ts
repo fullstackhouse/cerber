@@ -1,5 +1,6 @@
 import { Artifact, Calibration, Comment, Verdict } from "./artifact.js";
 import { newSideLines } from "./diff.js";
+import { withGrade } from "./severity.js";
 
 export type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
 
@@ -26,13 +27,8 @@ export interface ReviewPayload {
   commitId?: string;
 }
 
-/**
- * The grade travels in the text: to a reader used to review convention, an
- * unprefixed comment says "please change this", so leaving a nit bare would
- * invert its meaning. Ungraded remarks (questions, notes) stay bare.
- */
-function withGrade(c: Comment): string {
-  return c.severity ? `**${c.severity}:** ${c.body}` : c.body;
+function graded(c: Comment): string {
+  return withGrade(c.body, c.severity);
 }
 
 /**
@@ -51,7 +47,7 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
     // holds different code — posting there would point the author at something
     // the comment was never about.
     if (!c.drifted && c.line != null && anchorable.get(c.path)?.has(c.line)) {
-      inline.push({ path: c.path, line: c.line, side: "RIGHT", body: withGrade(c) });
+      inline.push({ path: c.path, line: c.line, side: "RIGHT", body: graded(c) });
     } else {
       folded.push(c);
     }
@@ -73,7 +69,7 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
       // A drifted comment's line no longer exists, so name it as "was at" —
       // pointing a reader at a line number that moved is worse than no number.
       const at = c.line != null ? `:${c.drifted ? `~${c.line}` : c.line}` : "";
-      parts.push(`- \`${c.path}${at}\` — ${withGrade(c)}`);
+      parts.push(`- \`${c.path}${at}\` — ${graded(c)}`);
     }
   }
   parts.push("", "---", "_Reviewed with [cerber](https://github.com/fullstackhouse/cerber) 🐕 — drafted by AI, sent by a human._");

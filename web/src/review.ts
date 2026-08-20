@@ -5,6 +5,7 @@
 // the body" before anything is posted, without a round trip per keystroke.
 
 import { newSideLines } from "../../src/core/diff";
+import { SEVERITY_BADGE } from "../../src/core/severity";
 import { Artifact, ReviewComment, Severity, Verdict } from "./types";
 
 export type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
@@ -54,14 +55,14 @@ export function splitComments(artifact: Artifact): {
   return { inline, folded: active.filter((c) => !inline.includes(c)), dropped };
 }
 
-/** "1 blocker · 2 nits" — live findings only; "" when nothing is graded. */
+/** "🚨 1 blocker · 🎨 2 nits" — live findings only; "" when nothing is graded. */
 export function severitySummary(artifact: Artifact): string {
   const live = artifact.comments.filter((c) => c.status !== "dropped");
   const tiers: Severity[] = ["blocker", "minor", "nit"];
   const parts = tiers
     .map((tier) => ({ tier, n: live.filter((c) => c.severity === tier).length }))
     .filter(({ n }) => n > 0)
-    .map(({ tier, n }) => `${n} ${tier}${n === 1 ? "" : "s"}`);
+    .map(({ tier, n }) => `${SEVERITY_BADGE[tier]} ${n} ${tier}${n === 1 ? "" : "s"}`);
   return parts.join(" · ");
 }
 

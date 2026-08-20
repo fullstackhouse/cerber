@@ -52,7 +52,7 @@ export function buildReviewPrompt(
 Respond with ONLY a JSON object (no markdown fences, no prose before or after) matching exactly this shape:
 
 {
-  "summary": "markdown — what this PR actually does and why, written top-down: problem first in plain language, then the solution, then notable technical details. A reader should be able to stop after any paragraph with a correct, just less detailed, picture. 1-3 paragraphs.",
+  "summary": "markdown — what this PR actually does and why, in headed sections. See \\"Summary shape\\" below.",
   "chapters": [
     {
       "id": "short-kebab-id",
@@ -65,7 +65,7 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
     {
       "path": "path/to/file.ts",
       "line": 42,
-      "body": "markdown — the review comment. First sentence states the problem plainly; then the evidence or fix. Concrete, actionable, kind.",
+      "body": "markdown — the review comment. See \\"Comment shape\\" below.",
       "severity": "blocker" | "minor" | "nit" | null,
       "chapterId": "short-kebab-id"
     }
@@ -73,7 +73,7 @@ Respond with ONLY a JSON object (no markdown fences, no prose before or after) m
   "verdict": {
     "recommendation": "approve" | "comment" | "request_changes",
     "confidence": 0-100,
-    "reasoning": "why this recommendation, and what makes you more/less sure"
+    "reasoning": "markdown — why this recommendation, and what makes you more/less sure. See \\"Verdict shape\\" below."
   }
 }
 
@@ -83,6 +83,25 @@ Writing style (applies to every markdown field):
 - Keep comments to ~3 sentences unless a code suggestion needs more. Length must buy clarity, not cover uncertainty — if you are unsure, say so in one plain sentence.
 - Do NOT imitate the PR description's writing style. Keep this plain register even when the PR itself is dense or writerly.
 - Describe the effect a person would see before the mechanism behind it. Not: "A stray closing code fence with prose on the same line left the block open, rendering the conditions below as code." But: "Also fixes a markdown typo: a code block was never closed, so everything after it displayed as code."
+
+Summary shape:
+- General to specific, and a reader must be able to stop after any section with a correct, just less detailed, picture.
+- Past two paragraphs, break the summary into sections under \`###\` headings. These four sections, in this order, each opening with its emoji — drop every one you have nothing real to say under; four sections of substance beat six with filler:
+  - \`### 🎯 \` the problem — the symptom someone hit and what it cost them, in plain words. No identifiers yet; a product manager should follow this section. For a PR that fixes nothing, this is the goal instead.
+  - \`### 🔧 \` the fix — the cause in a sentence, then what the PR does about it. A reviewer in a hurry stops here.
+  - \`### 🔍 \` details — the technical narration: names, the choice behind the approach, what the PR's own tests pin down, anything counter-intuitive worth knowing.
+  - \`### ⚠️ \` worth knowing — risk, follow-up, breaking change. Skip it when there is none.
+- The emoji and the order are fixed. The words after the emoji are yours: write the heading this PR needs ("### 🎯 Searching an order number returned every order"), and fall back to the plain label ("### 🎯 The problem") only when nothing sharper fits.
+- A small PR gets one or two short paragraphs and NO headings. Headings on a three-line summary are noise.
+
+Verdict shape ("reasoning"):
+- One lead sentence: the finding that decides it, or "No blockers." Then bullets — never a second paragraph.
+- Each bullet opens with a bolded two-or-three-word lead and holds one fact: "**Ran the tests** — ...", "**Read the caller** — ...", "**Couldn't check** — ...". Two to five of them.
+- What you could not settle gets its own bullet at the end. Say what would settle it.
+
+Comment shape ("body"):
+- The first sentence is the finding, and stands on its own line. Then a blank line, then the evidence, the fix, or a code suggestion. A five-sentence paragraph is a wall — break it.
+- Never write the grade into the body. Every surface prefixes it from "severity" — "⚠️ **minor** — " and so on — so a body opening with "Minor:" says it twice.
 
 Rules:
 - Group ALL changed files into chapters that tell the story of the PR (schema first, then logic, then tests, etc). Every changed file must appear in exactly one chapter.
@@ -261,6 +280,7 @@ Rules:
 - "line" is a line in the NEW version of the file and must appear in the diff. Use null for a file-level comment.
 - "severity" is the finding's merge impact — "blocker" (would not approve with this in; the only tier that blocks), "minor" (should fix, author's call), "nit" (taste), null (not a finding: a question, a note). Grade as if the finding is true; hedge in the reply, never in the grade. A verdict revision must still follow from the worst finding left standing.
 - Your reply is prose to a person, not a changelog. The cockpit already shows what you changed — do not list your own edits back to them.
+- A revision keeps the shape the review is written in: a rewritten summary keeps its \`###\` sections (🎯 the problem, 🔧 the fix, 🔍 details, ⚠️ worth knowing — the ones that earn their place), a rewritten "reasoning" stays one lead sentence plus bullets, and a comment body leads with the finding on its own line and never writes its own grade in — every surface prefixes that from "severity".
 
 Writing style:
 - Plain words, short sentences, no jargon. Someone who has NOT read the diff should follow you.
