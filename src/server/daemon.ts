@@ -140,7 +140,19 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
   };
 }
 
-/** An artifact nothing has touched yet — safe to delete when its PR leaves the queue. */
+/**
+ * An artifact nothing has touched yet — safe to delete when its PR leaves the
+ * queue.
+ *
+ * Read this before loosening it. Artifacts now arrive two ways: the daemon
+ * discovers them, and the user pastes a PR into the cockpit. The reaper below
+ * deletes anything absent from the awaiting search, which is only ever correct
+ * for the first kind — a pasted PR was never in that search and never will be.
+ * What keeps it safe is `run === null`: the cockpit's create endpoint persists
+ * a run block before it answers, so a pulled-in review is never a pure stub,
+ * not even during the minutes before its first AI output lands. Widen this
+ * predicate and you delete work the user asked for.
+ */
 export function isPureStub(artifact: Artifact): boolean {
   return artifact.status === "awaiting" && artifact.comments.length === 0 && artifact.run === null;
 }

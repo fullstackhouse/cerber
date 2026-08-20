@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
+import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
   SETTLED,
@@ -194,6 +194,51 @@ function SettledRow({
   );
 }
 
+/**
+ * The other way in. The inbox only knows what GitHub asks you to review; this
+ * takes anything — your own PR, one you were never requested on, a draft a
+ * colleague linked you. Pasting starts the review straight away rather than
+ * parking it: a queued-but-unreviewed PR nobody requested is exactly what the
+ * daemon's reaper cleans up, and waiting to be told twice is a click for nothing.
+ */
+function PullBox({ autoFocus }: { autoFocus?: boolean }) {
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = input.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    createReview(value)
+      .then((r) => openReview(r.key))
+      .catch((err) => {
+        setError(String(err instanceof Error ? err.message : err));
+        setBusy(false);
+      });
+  };
+
+  return (
+    <form className="pull" onSubmit={submit}>
+      <input
+        className="pull-input"
+        value={input}
+        autoFocus={autoFocus}
+        disabled={busy}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Review any PR — paste a URL, or owner/repo#123"
+        aria-label="Review any PR by URL"
+      />
+      <button className="btn" type="submit" disabled={busy || !input.trim()}>
+        {busy ? "starting…" : "review"}
+      </button>
+      {error && <span className="pull-error">{error}</span>}
+    </form>
+  );
+}
+
 /** One of the collapsed drawers under the queue: work already dealt with. */
 function Drawer({
   open,
@@ -375,11 +420,9 @@ export function Queue() {
                 </p>
               )
             ) : (
-              <>
-                <p>No reviews yet.</p>
-                <pre>cerber review https://github.com/owner/repo/pull/123</pre>
-              </>
+              <p>No reviews yet.</p>
             )}
+            <PullBox autoFocus />
           </div>
         </div>
       ) : (
@@ -395,6 +438,7 @@ export function Queue() {
               </button>
             ))}
             <span className="grow" />
+            <PullBox />
             {totalCost > 0 && (
               <span
                 className="faint"

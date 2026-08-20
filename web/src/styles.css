@@ -517,6 +517,42 @@ button {
   background: rgba(160, 106, 0, 0.1);
 }
 
+/* The paste-a-PR box. Sits at the end of the tab strip and in the empty state,
+   because "there is nothing here" is exactly when you want to add something. */
+.pull {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pull-input {
+  width: 300px;
+  max-width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+}
+
+.pull-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pull-input::placeholder {
+  color: var(--muted);
+}
+
+.pull-error {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--red);
+}
+
 /* A draft that still wants your review. Deliberately quiet: it qualifies the
    row rather than competing with it — the review is real work either way. */
 .tag-draft {

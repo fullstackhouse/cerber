@@ -7,9 +7,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { DaemonHandle } from "./daemon.js";
-import { Artifact, ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
+import {
+  Artifact,
+  ArtifactStatusSchema,
+  SCHEMA_VERSION,
+  VerdictSchema,
+  artifactId,
+  artifactKey,
+} from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
-import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.js";
 import { z } from "zod";
 import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
@@ -17,8 +24,10 @@ import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../co
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   listArtifacts,
+  loadArtifact,
   loadArtifactByKey,
   reconcileRunning,
+  saveArtifact,
   updateArtifactByKey,
 } from "../core/state.js";
 import { isReviewRunning } from "../runner/inflight.js";
@@ -189,6 +198,105 @@ export async function buildApp(
         sent: a.sent ? { at: a.sent.at, event: a.sent.event, url: a.sent.url, auto: a.sent.auto ?? false } : null,
       })),
     );
+  });
+
+  // ---- Pull a PR in: review anything, not just what the inbox found ----
+  //
+  // The daemon only ever discovers PRs GitHub is asking *you* to review. This
+  // is the other door: paste a URL and cerber reviews it — your own PR, one you
+  // were never requested on, one you already settled and want a second read of.
+
+  const CreateReviewSchema = z.object({ input: z.string().min(1) });
+
+  app.post("/api/reviews", async (c) => {
+    const parsed = CreateReviewSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "expected { input: \"<pr url>\" }" }, 400);
+
+    let ref;
+    try {
+      ref = parsePrRef(parsed.data.input.trim());
+    } catch (err: unknown) {
+      // A bare number is the one parse failure worth explaining: parsePrRef can
+      // resolve it against a repo, and the cockpit has none to offer.
+      const message = /bare number/.test(err instanceof Error ? err.message : "")
+        ? "A number alone doesn't say which repo — paste the full PR URL, or owner/repo#123."
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      return c.json({ error: message }, 400);
+    }
+
+    // Already here? Hand back what we have rather than starting a second review
+    // of the same PR. Whatever state it is in, the cockpit can open it.
+    const existing = await loadArtifact(artifactId(ref));
+    if (existing) return c.json({ ...existing, key: artifactKey(existing.id) }, 200);
+
+    // Validated in-request, on purpose. The run below is detached, so a typo'd
+    // URL, a private repo or a logged-out `gh` would otherwise fail with no
+    // artifact to record it on and no response left to report it in. The PR
+    // this fetches is also what the artifact is built from, so it costs nothing.
+    let pr;
+    try {
+      pr = await fetchPrInfo(ref);
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+
+    const withSource = opts.withSource;
+    const now = new Date().toISOString();
+    // Saved as `running`, with a run block, BEFORE the 202 — not as an
+    // `awaiting` stub. reviewPr spends minutes on the diff, trust and checkout
+    // before it first writes the artifact itself, and for a PR that isn't in
+    // the awaiting search a stub sitting in that window is exactly what the
+    // daemon's reaper deletes (isPureStub). Persisting the run up front is what
+    // makes this artifact survive its own first poll.
+    const artifact: Artifact = {
+      schemaVersion: SCHEMA_VERSION,
+      id: artifactId(ref),
+      status: "running",
+      createdAt: now,
+      updatedAt: now,
+      pr,
+      diff: "",
+      summary: "",
+      chapters: [],
+      comments: [],
+      verdict: null,
+      run: {
+        model: null,
+        startedAt: now,
+        finishedAt: null,
+        costUsd: null,
+        error: null,
+        withSource: withSource !== false,
+        trusted: false,
+        sessionId: null,
+      },
+      sent: null,
+      refresh: null,
+      calibration: null,
+      chat: [],
+      preChat: null,
+      pendingChat: null,
+    };
+    await saveArtifact(artifact);
+
+    void reviewPr(ref, {
+      force: true,
+      withSource,
+      trust: opts.trust,
+      onProgress: (m) => console.log(`[pull ${artifact.id}] ${m}`),
+    }).catch(async (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[pull ${artifact.id}] failed: ${message}`);
+      await updateArtifactByKey(artifactKey(artifact.id), (a) =>
+        a.status === "running"
+          ? { ...a, status: "failed" as const, run: a.run ? { ...a.run, error: message } : null }
+          : a,
+      ).catch(() => {});
+    });
+
+    return c.json({ ...artifact, key: artifactKey(artifact.id) }, 202);
   });
 
   app.get("/api/reviews/:key", async (c) => {
