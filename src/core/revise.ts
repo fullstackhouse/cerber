@@ -67,7 +67,7 @@ export function mergeConcurrentEdits(
     const then = wasThere.get(id);
     // Absent from `before` means the user added it while the turn ran.
     if (!then) return true;
-    return then.body !== now.body || then.status !== now.status;
+    return then.body !== now.body || then.status !== now.status || then.severity !== now.severity;
   };
 
   const merged = current.comments.map((now) =>
@@ -167,7 +167,14 @@ export function applyRevisions(
         next = {
           ...next,
           comments: next.comments.map((c) =>
-            c.id === revision.commentId ? { ...c, body: revision.body } : c,
+            c.id === revision.commentId
+              ? {
+                  ...c,
+                  body: revision.body,
+                  // Omitted = the turn is not re-grading; null = "not a finding".
+                  severity: revision.severity === undefined ? c.severity : revision.severity,
+                }
+              : c,
           ),
         };
         applied.push(revision);
@@ -204,6 +211,7 @@ export function applyRevisions(
               line: revision.line,
               body: revision.body,
               chapterId: revision.chapterId,
+              severity: revision.severity,
               origin: "ai" as const,
               status: "draft" as const,
               editedByUser: false,

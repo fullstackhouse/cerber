@@ -7,6 +7,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id" | "path" | "li
   return {
     body: "note",
     chapterId: null,
+    severity: null,
     origin: "ai",
     status: "draft",
     editedByUser: false,

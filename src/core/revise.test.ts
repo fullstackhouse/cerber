@@ -9,6 +9,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     line: 10,
     body: "AI wrote this.",
     chapterId: "one",
+    severity: null,
     origin: "ai",
     status: "draft",
     editedByUser: false,
@@ -104,7 +105,7 @@ describe("applyRevisions", () => {
   it("adds a comment as an AI draft", () => {
     const r = applyRevisions(
       artifact(),
-      [{ kind: "comment-add", path: "src/b.ts", line: 3, body: "Missed this.", chapterId: null }],
+      [{ kind: "comment-add", path: "src/b.ts", line: 3, body: "Missed this.", chapterId: null, severity: null }],
       { newId: ids() },
     );
     expect(r.artifact.comments).toHaveLength(2);
@@ -118,13 +119,46 @@ describe("applyRevisions", () => {
     });
   });
 
+  describe("severity", () => {
+    it("lands with a comment-add", () => {
+      const r = applyRevisions(
+        artifact(),
+        [{ kind: "comment-add", path: "src/b.ts", line: 3, body: "Broken.", chapterId: null, severity: "blocker" }],
+        { newId: ids() },
+      );
+      expect(r.artifact.comments[1]!.severity).toBe("blocker");
+    });
+
+    it("re-grades on a comment-edit that names one", () => {
+      const a = artifact({ comments: [comment({ severity: "blocker" })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "Softer.", severity: "nit" },
+      ]);
+      expect(r.artifact.comments[0]!.severity).toBe("nit");
+    });
+
+    it("keeps the grade when a comment-edit does not mention it", () => {
+      const a = artifact({ comments: [comment({ severity: "minor" })] });
+      const r = applyRevisions(a, [{ kind: "comment-edit", commentId: "c1", body: "Reworded." }]);
+      expect(r.artifact.comments[0]!.severity).toBe("minor");
+    });
+
+    it("clears the grade when a comment-edit sets it to null — no longer a finding", () => {
+      const a = artifact({ comments: [comment({ severity: "minor" })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "Actually just a question?", severity: null },
+      ]);
+      expect(r.artifact.comments[0]!.severity).toBeNull();
+    });
+  });
+
   it("applies several revisions in one turn, in order", () => {
     const r = applyRevisions(
       artifact(),
       [
         { kind: "summary", body: "Rewritten." },
         { kind: "comment-drop", commentId: "c1" },
-        { kind: "comment-add", path: "src/b.ts", line: null, body: "File-level.", chapterId: "one" },
+        { kind: "comment-add", path: "src/b.ts", line: null, body: "File-level.", chapterId: "one", severity: null },
       ],
       { newId: ids() },
     );
@@ -252,11 +286,31 @@ describe("mergeConcurrentEdits", () => {
     const b = before();
     const { artifact: after } = applyRevisions(
       b,
-      [{ kind: "comment-add", path: "src/b.ts", line: 1, body: "New.", chapterId: null }],
+      [{ kind: "comment-add", path: "src/b.ts", line: 1, body: "New.", chapterId: null, severity: null }],
       { newId: ids() },
     );
     const merged = mergeConcurrentEdits(b, after, artifact({ comments: [comment({ id: "c1" })] }));
     expect(merged.comments.map((c) => c.id)).toEqual(["c1", "new-1"]);
+  });
+
+  it("keeps a severity the user set while the turn was running", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const current = artifact({ comments: [comment({ id: "c1", severity: "blocker" })] });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.severity).toBe("blocker");
+    expect(merged.comments[0]!.body).toBe("AI wrote this.");
+  });
+
+  it("carries the turn's severity when the user left the comment alone", () => {
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "Rewritten.", severity: "minor" },
+    ]);
+    const merged = mergeConcurrentEdits(b, after, artifact({ comments: [comment({ id: "c1" })] }));
+    expect(merged.comments[0]!.severity).toBe("minor");
   });
 
   it("keeps a queue status the user set while the turn was running", () => {

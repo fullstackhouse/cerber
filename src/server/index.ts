@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { DaemonHandle } from "./daemon.js";
-import { Artifact, ArtifactStatusSchema, VerdictSchema, artifactKey } from "../core/artifact.js";
+import { Artifact, ArtifactStatusSchema, SeveritySchema, VerdictSchema, artifactKey } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { z } from "zod";
@@ -227,6 +227,9 @@ export async function buildApp(
           ? {
               ...cm,
               ...(body.body !== undefined ? { body: String(body.body) } : {}),
+              ...(body.severity !== undefined
+                ? { severity: SeveritySchema.nullable().parse(body.severity) }
+                : {}),
               ...(body.status !== undefined
                 ? { status: body.status as "draft" | "approved" | "dropped" }
                 : {}),
@@ -253,6 +256,7 @@ export async function buildApp(
           line: body.line != null ? Number(body.line) : null,
           body: String(body.body ?? ""),
           chapterId: body.chapterId ?? null,
+          severity: SeveritySchema.nullable().parse(body.severity ?? null),
           origin: "user" as const,
           status: "draft" as const,
           editedByUser: false,

@@ -15,6 +15,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     line: 10,
     body: "The AI's point.",
     chapterId: "one",
+    severity: null,
     origin: "ai",
     status: "draft",
     editedByUser: false,
