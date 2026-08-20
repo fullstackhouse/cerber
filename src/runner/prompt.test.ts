@@ -50,6 +50,19 @@ describe("buildReviewPrompt", () => {
     const { prompt } = buildReviewPrompt(pr, "x".repeat(400_000), { source: true });
     expect(prompt).toContain("the rest of the change is in the checkout");
   });
+
+  it("asks for a severity per finding, graded as if the finding is true", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain('"severity": "blocker" | "minor" | "nit" | null');
+    expect(prompt).toContain("Grade severity as if the finding is true");
+    expect(prompt).toContain("The only tier that blocks");
+  });
+
+  it("ties the verdict to the worst finding still standing", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain('any blocker → "request_changes"');
+    expect(prompt).toContain("Never request changes without a blocker");
+  });
 });
 
 describe("buildReviewPrompt — trusted", () => {

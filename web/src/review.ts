@@ -5,7 +5,7 @@
 // the body" before anything is posted, without a round trip per keystroke.
 
 import { newSideLines } from "../../src/core/diff";
-import { Artifact, ReviewComment, Verdict } from "./types";
+import { Artifact, ReviewComment, Severity, Verdict } from "./types";
 
 export type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
 
@@ -52,6 +52,41 @@ export function splitComments(artifact: Artifact): {
   const active = artifact.comments.filter((c) => c.status !== "dropped");
   const inline = inlineComments(artifact.diff, active);
   return { inline, folded: active.filter((c) => !inline.includes(c)), dropped };
+}
+
+/** "1 blocker · 2 nits" — live findings only; "" when nothing is graded. */
+export function severitySummary(artifact: Artifact): string {
+  const live = artifact.comments.filter((c) => c.status !== "dropped");
+  const tiers: Severity[] = ["blocker", "minor", "nit"];
+  const parts = tiers
+    .map((tier) => ({ tier, n: live.filter((c) => c.severity === tier).length }))
+    .filter(({ n }) => n > 0)
+    .map(({ tier, n }) => `${n} ${tier}${n === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+/**
+ * The verdict no longer follows from the findings, in one plain sentence —
+ * or null while they agree. Only blockers block, so the two ways to disagree
+ * are an approve past a live blocker and a request-changes with none left.
+ * A review that never graded anything (drafted before severities existed)
+ * makes no claim, so it can't disagree.
+ */
+export function verdictMismatch(artifact: Artifact): string | null {
+  if (!artifact.verdict) return null;
+  const graded = artifact.comments.some((c) => c.severity != null);
+  if (!graded) return null;
+  const blockers = artifact.comments.filter(
+    (c) => c.status !== "dropped" && c.severity === "blocker",
+  ).length;
+  const rec = artifact.verdict.recommendation;
+  if (rec === "approve" && blockers > 0) {
+    return `the verdict says approve, but ${blockers} blocker${blockers === 1 ? "" : "s"} still stand${blockers === 1 ? "s" : ""}`;
+  }
+  if (rec === "request_changes" && blockers === 0) {
+    return "the verdict says request changes, but no blocker still stands";
+  }
+  return null;
 }
 
 /** "5 inline · 1 folded into the body" — what send is about to put on the PR. */

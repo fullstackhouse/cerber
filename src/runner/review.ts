@@ -217,6 +217,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         line: c.line,
         body: c.body,
         chapterId: c.chapterId ?? null,
+        severity: c.severity ?? null,
         origin: "ai" as const,
         status: "draft" as const,
         editedByUser: false,

@@ -69,10 +69,10 @@ describe("buildReviewPayload", () => {
   it("sends anchorable comments inline and folds the rest into the body", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false },
-        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, severity: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false },
+        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -86,12 +86,27 @@ describe("buildReviewPayload", () => {
     expect(payload.body).toContain("cerber");
   });
 
+  it("prefixes graded comments with the word, inline and folded, and leaves ungraded ones bare", () => {
+    const artifact = makeArtifact({
+      comments: [
+        { id: "1", path: "src/a.ts", line: 2, body: "will corrupt state", chapterId: null, severity: "blocker", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 999, body: "typo in the name", chapterId: null, severity: "nit", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "3", path: "src/a.ts", line: null, body: "why this order?", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+      ],
+    });
+    const payload = buildReviewPayload(artifact, "COMMENT");
+    expect(payload.comments[0]!.body).toBe("**blocker:** will corrupt state");
+    expect(payload.body).toContain("**nit:** typo in the name");
+    expect(payload.body).toContain("— why this order?");
+    expect(payload.body).not.toContain("null");
+  });
+
   it("folds drifted comments even when their line still exists", () => {
     // Line 2 is in the diff, but the code the comment was written about is
     // gone — posting inline would attach it to whatever took that line over.
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "stale anchor", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: true },
+        { id: "1", path: "src/a.ts", line: 2, body: "stale anchor", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: true },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -117,8 +132,8 @@ describe("toMarkdown", () => {
   it("renders a full review document without dropped comments", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     const md = toMarkdown(artifact);

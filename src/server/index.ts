@@ -11,6 +11,7 @@ import {
   Artifact,
   ArtifactStatusSchema,
   SCHEMA_VERSION,
+  SeveritySchema,
   VerdictSchema,
   artifactId,
   artifactKey,
@@ -350,6 +351,9 @@ export async function buildApp(
           ? {
               ...cm,
               ...(body.body !== undefined ? { body: String(body.body) } : {}),
+              ...(body.severity !== undefined
+                ? { severity: SeveritySchema.nullable().parse(body.severity) }
+                : {}),
               ...(body.status !== undefined
                 ? { status: body.status as "draft" | "approved" | "dropped" }
                 : {}),
@@ -376,6 +380,7 @@ export async function buildApp(
           line: body.line != null ? Number(body.line) : null,
           body: String(body.body ?? ""),
           chapterId: body.chapterId ?? null,
+          severity: SeveritySchema.nullable().parse(body.severity ?? null),
           origin: "user" as const,
           status: "draft" as const,
           editedByUser: false,

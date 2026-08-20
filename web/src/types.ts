@@ -46,12 +46,17 @@ export interface Chapter {
   files: string[];
 }
 
+/** Merge impact of a finding. Absent/null = not a finding (question, note). */
+export type Severity = "blocker" | "minor" | "nit";
+
 export interface ReviewComment {
   id: string;
   path: string;
   line: number | null;
   body: string;
   chapterId: string | null;
+  /** Only "blocker" stands between the PR and approval. */
+  severity?: Severity | null;
   origin: "ai" | "user";
   status: "draft" | "approved" | "dropped";
   /** Line this comment was written against, if a refresh has since moved it. */
@@ -71,9 +76,9 @@ export type Revision =
   | { kind: "summary"; body: string }
   | { kind: "verdict"; verdict: Verdict }
   | { kind: "chapter"; chapterId: string; title?: string; explanation?: string }
-  | { kind: "comment-edit"; commentId: string; body: string }
+  | { kind: "comment-edit"; commentId: string; body: string; severity?: Severity | null }
   | { kind: "comment-drop"; commentId: string }
-  | { kind: "comment-add"; path: string; line: number | null; body: string; chapterId: string | null };
+  | { kind: "comment-add"; path: string; line: number | null; body: string; chapterId: string | null; severity?: Severity | null };
 
 export interface ChatTurn {
   id: string;

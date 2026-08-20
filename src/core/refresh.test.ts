@@ -27,6 +27,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id">): Comment {
     line: 2,
     body: "note",
     chapterId: null,
+    severity: null,
     origin: "ai",
     status: "draft",
     editedByUser: false,
@@ -112,6 +113,18 @@ describe("refreshArtifact", () => {
     expect(moved.status).toBe("approved");
     expect(moved.origin).toBe("user");
   });
+
+  it("keeps a finding's severity through re-anchoring, moved or drifted", () => {
+    const artifact = makeArtifact({
+      comments: [
+        comment({ id: "moves", severity: "blocker" }),
+        comment({ id: "drifts", line: 999, severity: "nit" }),
+      ],
+    });
+    const refreshed = refreshArtifact(artifact, HEAD2, DIFF_AT_HEAD2).artifact;
+    expect(refreshed.comments.find((c) => c.id === "moves")!.severity).toBe("blocker");
+    expect(refreshed.comments.find((c) => c.id === "drifts")!.severity).toBe("nit");
+  });
 });
 
 describe("carryOverComments", () => {
@@ -146,5 +159,13 @@ describe("carryOverComments", () => {
     const { comments, carried } = carryOverComments(untouched, fresh);
     expect(carried).toBe(0);
     expect(comments).toBe(fresh.comments);
+  });
+
+  it("carries a comment's severity across a re-review", () => {
+    const graded = makeArtifact({
+      comments: [comment({ id: "mine", origin: "user", severity: "blocker" })],
+    });
+    const { comments } = carryOverComments(graded, fresh);
+    expect(comments.find((c) => c.id === "mine")!.severity).toBe("blocker");
   });
 });

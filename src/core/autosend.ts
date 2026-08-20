@@ -20,6 +20,17 @@ export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSen
       reason: `recommendation is ${artifact.verdict.recommendation} — only approve auto-sends`,
     };
   }
+  // An approve verdict standing next to a live blocker finding contradicts
+  // itself; a contradiction is a human's to resolve, never auto-sent.
+  const blockers = artifact.comments.filter(
+    (c) => c.status !== "dropped" && c.severity === "blocker",
+  );
+  if (blockers.length > 0) {
+    return {
+      eligible: false,
+      reason: `verdict says approve but ${blockers.length} blocker finding(s) still stand — a human resolves that`,
+    };
+  }
   if (artifact.verdict.confidence < threshold) {
     return {
       eligible: false,

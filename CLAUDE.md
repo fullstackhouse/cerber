@@ -27,6 +27,13 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   it displayed as code" — not the parser-level account). The rules live in
   `src/runner/prompt.ts` and were tuned against real reviews — change them from
   evidence, not taste.
+- Findings are graded `blocker | minor | nit`; only a blocker blocks approval,
+  and an ungraded comment is not a finding (a question, a note) — never
+  "unknown severity". Grades assume the finding is true: doubt lives in the
+  verdict's confidence, never in a softened grade. The verdict must follow
+  from the worst finding still standing. Severity is advisory — no code
+  derives or enforces the verdict from it; the cockpit only points out when
+  they disagree.
 
 ## Architecture
 

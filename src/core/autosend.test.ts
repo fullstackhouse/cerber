@@ -62,6 +62,32 @@ describe("evaluateAutoSend", () => {
     }
   });
 
+  it("rejects an approve that still has a live blocker finding", () => {
+    const finding = {
+      id: "1", path: "f", line: 1, body: "broken", chapterId: null,
+      severity: "blocker" as const, origin: "ai" as const, status: "draft" as const,
+      editedByUser: false, originalLine: null, drifted: false,
+    };
+    const d = evaluateAutoSend(makeArtifact({ comments: [finding] }), 90);
+    expect(d.eligible).toBe(false);
+    expect(d.reason).toContain("blocker");
+  });
+
+  it("still accepts an approve whose blocker was dropped, and one with only minors and nits", () => {
+    const c = (severity: "blocker" | "minor" | "nit", status: "draft" | "dropped") => ({
+      id: severity, path: "f", line: 1, body: "x", chapterId: null,
+      severity, origin: "ai" as const, status, editedByUser: false,
+      originalLine: null, drifted: false,
+    });
+    expect(
+      evaluateAutoSend(makeArtifact({ comments: [c("blocker", "dropped")] }), 90).eligible,
+    ).toBe(true);
+    expect(
+      evaluateAutoSend(makeArtifact({ comments: [c("minor", "draft"), c("nit", "draft")] }), 90)
+        .eligible,
+    ).toBe(true);
+  });
+
   it("rejects already-sent and non-ready artifacts", () => {
     expect(
       evaluateAutoSend(
@@ -78,10 +104,10 @@ describe("computeCalibration", () => {
   it("counts AI comment outcomes and user additions", () => {
     const a = makeArtifact({
       comments: [
-        { id: "1", path: "f", line: 1, body: "x", chapterId: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "f", line: 2, body: "y", chapterId: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
-        { id: "3", path: "f", line: 3, body: "z", chapterId: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false },
-        { id: "4", path: "f", line: null, body: "mine", chapterId: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false },
+        { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false },
       ],
     });
     expect(computeCalibration(a, "COMMENT")).toEqual({

@@ -172,6 +172,7 @@ describe("stubArtifact", () => {
             line: 1,
             body: "hm",
             chapterId: null,
+            severity: null,
             origin: "user",
             status: "draft",
             editedByUser: false,
