@@ -56,14 +56,14 @@ paragraph.
 
 ### Phase 1: Evidence
 
-- [ ] 1.1 Generate demo review artifacts of cerber's own PRs (#20–22) in a throwaway CERBER_HOME
-- [ ] 1.2 Capture queue, walkthrough, inline-comment and chat screenshots into docs/
+- [x] 1.1 Generate demo review artifacts of cerber's own PRs (#20–22) in a throwaway CERBER_HOME — ce92b78
+- [x] 1.2 Capture queue, walkthrough, inline-comment and chat screenshots into docs/ — ce92b78
 
 ### Phase 2: README
 
-- [ ] 2.1 Add badges, hero screenshot and provenance note to the intro
-- [ ] 2.2 Embed remaining screenshots, add inbox subheads, compress roadmap into Status
+- [x] 2.1 Add badges, hero screenshot and provenance note to the intro — ce92b78
+- [x] 2.2 Embed remaining screenshots, add inbox subheads, compress roadmap into Status — ce92b78
 
 ### Phase 3: Gate
 
-- [ ] 3.1 Run the full validation gate (typecheck, test, build)
+- [x] 3.1 Run the full validation gate (typecheck, test, build) — green: typecheck ✓, 353 tests ✓, build ✓
