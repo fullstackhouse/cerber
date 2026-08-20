@@ -44,17 +44,18 @@ Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
 `~/.cerber/config.json` and apply on the next poll. The queue only lists what
-still wants you: anything you have settled drops into a drawer under it — one
-for reviews you sent, one for the ones you marked reviewed or skipped, one for
-merged and closed PRs — and PRs in archived repos are never picked up at all,
-since the repo is read-only and a review could never be sent.
+still wants you: anything you have settled moves to the filed tabs right of
+the thin rule in the filter row — reviews you sent, ones you marked reviewed
+or skipped, merged and closed PRs — each tab appearing only while it holds
+something. PRs in archived repos are never picked up at all, since the repo
+is read-only and a review could never be sent.
 
 ### Settled means you settled it
 
 Settling a review is your decision, not GitHub's: skip a PR, or mark one
 reviewed without sending, and GitHub still holds its review request open,
 because nothing cerber does here reaches it. Those rows stay marked where they
-sit, counted on the drawer they went into, and named in place of the empty
+sit, counted on the tab they went into, and named in place of the empty
 inbox — cerber never tells you nothing awaits you while its own poll says
 otherwise. It is a report, not a nag: what you decided here stands, and the
 mark clears itself the moment GitHub hears from you.
@@ -270,11 +271,13 @@ The reviewer revises the draft as it answers: there is no accept step, because
 you already asked for the change. What it changed shows up in the transcript
 (*"✎ rewrote the summary"*, *"✎ dropped the comment on line 250"*).
 
-![Talking to the reviewer: asked whether its comment was worth keeping, it re-checks the code, concedes, and drops its own comment — the revision noted right in the transcript.](docs/chat.png)
+![Talking to the reviewer: pushed back on a nit, it re-checks the code, corrects the push-back's own claim, drops the comment anyway — and the revision is noted right in the transcript.](docs/chat.png)
 
-That conversation is real: challenged on one of its comments, the reviewer
-went back to the code, agreed the finding didn't hold, and dropped it —
-leaving the walkthrough rail reading *1 keeping · 1 dropped*.
+That conversation is real: pushed back on a nit, the reviewer re-checked the
+code, corrected the push-back's own claim about the rename's size — and still
+dropped the comment, because a nit hanging off a PR with two real findings
+just dilutes them. The rail counts *2 keeping · 1 dropped*, and nothing about
+the exchange went anywhere near GitHub.
 
 - **It is the same reviewer.** A turn resumes the Claude session the review ran
   in, so it still holds everything it read. Asking "did you actually check
