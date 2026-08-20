@@ -89,4 +89,4 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 ### Phase 5: Evidence and docs
 
 - [ ] 5.1 Replay amended prompt on past reviews; record label calibration
-- [ ] 5.2 Docs: severity vocabulary in CLAUDE.md and README
+- [x] 5.2 Docs: severity vocabulary in CLAUDE.md and README — 5efd7ca
