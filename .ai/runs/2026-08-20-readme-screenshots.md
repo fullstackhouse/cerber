@@ -67,3 +67,8 @@ paragraph.
 ### Phase 3: Gate
 
 - [x] 3.1 Run the full validation gate (typecheck, test, build) — green: typecheck ✓, 353 tests ✓, build ✓
+
+### Phase 4: Review autofix
+
+- [x] 4.1 Recapture all four screenshots on the 0.18 cockpit (Detail view gained a chat column and rail entries in #24)
+- [x] 4.2 Fix the queue paragraphs still describing pre-#22 drawers (found by cerber's own review of #22)
