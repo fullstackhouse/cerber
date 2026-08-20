@@ -84,6 +84,8 @@ cockpit names any awaiting PR its own filters are hiding.
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
+PR: #15
+
 ### Phase 1: The daemon publishes what it found
 
 - [x] 1.1 DaemonStatus.awaiting published from the last successful discovery — 6fd22dd
@@ -96,4 +98,4 @@ cockpit names any awaiting PR its own filters are hiding.
 
 ### Phase 3: Gate
 
-- [ ] 3.1 Full validation gate green
+- [x] 3.1 Full validation gate green — `pnpm typecheck && pnpm test && pnpm build`, 288 tests in 24 files
