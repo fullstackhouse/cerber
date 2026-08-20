@@ -170,9 +170,9 @@ function SettledRow({
       {awaiting && (
         <span
           className="tag tag-awaiting"
-          title="GitHub still lists you as a requested reviewer on this PR. Nothing you do here clears that — only a review submitted on GitHub does."
+          title="You have never submitted a review on GitHub for this PR, so it still lists you as a requested reviewer. What you decided here stands — cerber just can't clear a request it never wrote to."
         >
-          still awaiting you
+          unanswered on GitHub
         </span>
       )}
       {tag && <span className="tag tag-done">{tag}</span>}

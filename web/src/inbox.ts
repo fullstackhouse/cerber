@@ -71,36 +71,39 @@ export function hiddenAwaiting(list: ReviewListItem[], daemon: DaemonStatus | nu
   return sortReviews(list.filter((r) => awaiting.has(r.id) && !shown.has(r.id)));
 }
 
-/** True when GitHub wants a review on this row but the queue filed it away. */
+/** True when GitHub has no answer from you on this row, but the queue filed it away. */
 export const isHiddenAwaiting = (r: ReviewListItem, hidden: ReviewListItem[]) =>
   hidden.some((h) => h.id === r.id);
 
 /**
  * What to say instead of "nothing awaits your review" when something does.
- * Effect first — how many GitHub is still asking you for — then where they went.
+ *
+ * Says what it actually knows — GitHub holds a review request you never
+ * answered — rather than telling you what you owe. Settling is a decision you
+ * made and it stands; this only reports the half of it GitHub never heard.
  */
 export function hiddenAwaitingNote(hidden: ReviewListItem[]): string {
   const n = hidden.length;
-  const reviews = n === 1 ? "1 review" : `${n} reviews`;
-  const subject = n === 1 ? "It is" : "They are";
+  const requests = n === 1 ? "1 review request" : `${n} review requests`;
   // A row can also be hidden because cerber has it archived while GitHub still
   // lists the PR as open — its cached state is behind, and "settled" would be
   // the wrong word for it.
-  const how = hidden.some(isArchived) ? "already settled or archived" : "already settled";
+  const how = hidden.some(isArchived) ? "settled or archived" : "settled";
   return (
-    `Nothing new in the inbox — but GitHub still asks you for ${reviews}. ` +
-    `${subject} ${how} here, so ${n === 1 ? "it sits" : "they sit"} in the drawers below.`
+    `Nothing new in the inbox — but GitHub still has ${requests} open on you. ` +
+    `You ${how} ${n === 1 ? "it" : "them"} here without answering GitHub, ` +
+    `so ${n === 1 ? "it sits" : "they sit"} in the drawers below.`
   );
 }
 
 /**
- * What a drawer's label adds when some of what it holds is still on your plate:
- * " · 2 still awaiting you". Empty when none of it is, so a drawer of finished
- * work reads exactly as it did before.
+ * What a drawer's label adds when GitHub never heard about some of what it
+ * holds: " · 2 unanswered on GitHub". Empty when it heard about all of them, so
+ * a drawer of finished work reads exactly as it did before.
  */
 export function stillAwaitingLabel(rows: ReviewListItem[], hidden: ReviewListItem[]): string {
   const n = rows.filter((r) => isHiddenAwaiting(r, hidden)).length;
-  return n === 0 ? "" : ` · ${n} still awaiting you`;
+  return n === 0 ? "" : ` · ${n} unanswered on GitHub`;
 }
 
 /** "now", "40s", "12m", "2h", "5d" — the queue's `upd` column. */

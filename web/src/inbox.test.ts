@@ -138,23 +138,31 @@ describe("hiddenAwaiting", () => {
 });
 
 describe("hiddenAwaitingNote", () => {
-  it("leads with how many GitHub wants, then says where they went", () => {
+  it("reports the open request, rather than telling you what you owe", () => {
     expect(hiddenAwaitingNote([row({ status: "reviewed" }), row({ status: "skipped" })])).toBe(
-      "Nothing new in the inbox — but GitHub still asks you for 2 reviews. " +
-        "They are already settled here, so they sit in the drawers below.",
+      "Nothing new in the inbox — but GitHub still has 2 review requests open on you. " +
+        "You settled them here without answering GitHub, so they sit in the drawers below.",
     );
   });
 
-  it("reads as one review when there is one", () => {
+  it("reads as one request when there is one", () => {
     expect(hiddenAwaitingNote([row({ status: "skipped" })])).toBe(
-      "Nothing new in the inbox — but GitHub still asks you for 1 review. " +
-        "It is already settled here, so it sits in the drawers below.",
+      "Nothing new in the inbox — but GitHub still has 1 review request open on you. " +
+        "You settled it here without answering GitHub, so it sits in the drawers below.",
     );
+  });
+
+  it("never contradicts the decision the row already shows", () => {
+    // "still awaiting you" beside a `skipped` badge read as two opposite claims
+    // about the same row. The note states GitHub's side and leaves the decision be.
+    const note = hiddenAwaitingNote([row({ status: "skipped" })]);
+    expect(note).not.toMatch(/awaits? you|still asks you for/);
+    expect(note).toContain("without answering GitHub");
   });
 
   it("does not call an archived row settled — nobody settled it", () => {
     const closed = row({ pr: { ...row().pr, state: "CLOSED" } });
-    expect(hiddenAwaitingNote([closed])).toContain("already settled or archived here");
+    expect(hiddenAwaitingNote([closed])).toContain("settled or archived it here");
   });
 });
 
@@ -162,9 +170,9 @@ describe("stillAwaitingLabel", () => {
   const a = row({ id: "acme/web#1", key: "a", status: "reviewed" });
   const b = row({ id: "acme/web#2", key: "b", status: "skipped" });
 
-  it("counts only the rows in this drawer that GitHub still wants", () => {
-    expect(stillAwaitingLabel([a, b], [a])).toBe(" · 1 still awaiting you");
-    expect(stillAwaitingLabel([a, b], [a, b])).toBe(" · 2 still awaiting you");
+  it("counts only the rows in this drawer GitHub never heard an answer on", () => {
+    expect(stillAwaitingLabel([a, b], [a])).toBe(" · 1 unanswered on GitHub");
+    expect(stillAwaitingLabel([a, b], [a, b])).toBe(" · 2 unanswered on GitHub");
   });
 
   it("leaves a drawer of finished work reading as it always did", () => {
