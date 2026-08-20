@@ -29,8 +29,12 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   (🎯 problem, 🔧 fix, 🔍 details, ⚠️ worth knowing — drop the ones with
   nothing to say, and a small PR gets no headings at all), the verdict is
   one lead sentence then bullets, and a comment leads with the finding on its
-  own line. The rules live in `src/runner/prompt.ts` and were tuned against
-  real reviews — change them from evidence, not taste.
+  own line. Summary and verdict split the work rather than overlap: the
+  summary describes the PR, the verdict alone carries the review's own
+  verification ("ran the tests", "couldn't check X") — neither retells the
+  other, and the cockpit shows the summary first. The rules live in
+  `src/runner/prompt.ts` and were tuned against real reviews — change them
+  from evidence, not taste.
 - Findings are graded `blocker | minor | nit`; only a blocker blocks approval,
   and an ungraded comment is not a finding (a question, a note) — never
   "unknown severity". Grades assume the finding is true: doubt lives in the

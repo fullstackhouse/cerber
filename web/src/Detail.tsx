@@ -1354,6 +1354,19 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           {error && <div className="error">{error}</div>}
           {artifact.run?.error && <div className="error">Run failed: {artifact.run.error}</div>}
 
+          <div className="card">
+            <div className="card-body">
+              <div className="lab">summary</div>
+              <Markdown className="prose lead" text={artifact.summary || "(no summary)"} />
+              {!readOnly && (
+                <button className="btn btn-sm" onClick={() => discuss({ target: "summary", id: null })}>
+                  <Icon name="comment" />
+                  discuss the summary
+                </button>
+              )}
+            </div>
+          </div>
+
           {artifact.verdict && (
             <div className={`card card-why tone-border-${tone}`}>
               <div className="card-body">
@@ -1373,19 +1386,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </div>
             </div>
           )}
-
-          <div className="card">
-            <div className="card-body">
-              <div className="lab">summary</div>
-              <Markdown className="prose lead" text={artifact.summary || "(no summary)"} />
-              {!readOnly && (
-                <button className="btn btn-sm" onClick={() => discuss({ target: "summary", id: null })}>
-                  <Icon name="comment" />
-                  discuss the summary
-                </button>
-              )}
-            </div>
-          </div>
 
           {chapters.map((ch, i) => (
             <ChapterSection
