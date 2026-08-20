@@ -91,8 +91,8 @@ cockpit names any awaiting PR its own filters are hiding.
 
 ### Phase 2: The cockpit stops contradicting itself
 
-- [ ] 2.1 hiddenAwaiting + hiddenAwaitingNote in inbox.ts, with tests
-- [ ] 2.2 Truthful empty state, drawer tags and counts, tag style
+- [x] 2.1 hiddenAwaiting + hiddenAwaitingNote in inbox.ts, with tests — efe8a54
+- [x] 2.2 Truthful empty state, drawer tags and counts, tag style — efe8a54
 
 ### Phase 3: Gate
 
