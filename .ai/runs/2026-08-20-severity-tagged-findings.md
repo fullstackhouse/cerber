@@ -78,8 +78,8 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 
 ### Phase 3: Send and autosend
 
-- [ ] 3.1 Send: word prefixes on graded comments, inline and folded
-- [ ] 3.2 Autosend: live-blocker guard
+- [x] 3.1 Send: word prefixes on graded comments, inline and folded — 3824397
+- [x] 3.2 Autosend: live-blocker guard — 3824397
 
 ### Phase 4: Cockpit
 
