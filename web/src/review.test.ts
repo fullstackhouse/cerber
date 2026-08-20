@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildReviewPayload } from "../../src/core/send";
 import { Artifact as CoreArtifact } from "../../src/core/artifact";
-import { eventForVerdict, payloadSummary, splitComments } from "./review";
-import { Artifact, ReviewComment } from "./types";
+import { eventForVerdict, payloadSummary, severitySummary, splitComments, verdictMismatch } from "./review";
+import { Artifact, ReviewComment, Verdict } from "./types";
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -106,6 +106,48 @@ describe("splitComments", () => {
     const split = splitComments(a);
     expect(split.inline.length).toBe(payload.comments.length);
     expect(split.folded.map((c) => c.id)).toEqual(payload.folded.map((c) => c.id));
+  });
+});
+
+describe("severitySummary", () => {
+  it("counts live findings by grade and skips what was dropped", () => {
+    const a = artifact([
+      comment({ id: "b", severity: "blocker" }),
+      comment({ id: "n1", severity: "nit" }),
+      comment({ id: "n2", severity: "nit" }),
+      comment({ id: "gone", severity: "blocker", status: "dropped" }),
+      comment({ id: "note" }),
+    ]);
+    expect(severitySummary(a)).toBe("1 blocker · 2 nits");
+  });
+
+  it("says nothing about an ungraded review", () => {
+    expect(severitySummary(artifact([comment()]))).toBe("");
+  });
+});
+
+describe("verdictMismatch", () => {
+  const withVerdict = (comments: ReviewComment[], recommendation: Verdict["recommendation"]) => ({
+    ...artifact(comments),
+    verdict: { recommendation, confidence: 90, reasoning: "" },
+  });
+
+  it("flags an approve standing next to a live blocker", () => {
+    const a = withVerdict([comment({ severity: "blocker" })], "approve");
+    expect(verdictMismatch(a)).toContain("approve");
+  });
+
+  it("flags a request-changes with no blocker left standing", () => {
+    const a = withVerdict([comment({ severity: "blocker", status: "dropped" })], "request_changes");
+    expect(verdictMismatch(a)).toContain("no blocker");
+  });
+
+  it("stays quiet while they agree, and on reviews that never graded", () => {
+    expect(verdictMismatch(withVerdict([comment({ severity: "blocker" })], "request_changes"))).toBeNull();
+    expect(verdictMismatch(withVerdict([comment({ severity: "nit" })], "approve"))).toBeNull();
+    // Drafted before severities existed: the findings make no claim.
+    expect(verdictMismatch(withVerdict([comment()], "request_changes"))).toBeNull();
+    expect(verdictMismatch(artifact([comment({ severity: "blocker" })]))).toBeNull();
   });
 });
 

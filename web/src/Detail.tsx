@@ -29,7 +29,9 @@ import {
   eventForVerdict,
   inlineComments,
   payloadSummary,
+  severitySummary,
   splitComments,
+  verdictMismatch,
 } from "./review";
 import {
   Artifact,
@@ -190,6 +192,20 @@ function CommentCard({
           {comment.line != null ? `:${comment.line}` : ""}
         </span>
         <span className={`tag tag-${comment.origin === "user" ? "yours" : tag}`}>{tag}</span>
+        {comment.severity && (
+          <span
+            className={`tag tag-sev-${comment.severity}`}
+            title={
+              comment.severity === "blocker"
+                ? "Stands between this PR and approval."
+                : comment.severity === "minor"
+                  ? "Should be fixed — the author's call, nobody will chase it."
+                  : "Taste. Take it or leave it."
+            }
+          >
+            {comment.severity}
+          </span>
+        )}
         {comment.drifted && (
           <span
             className="tag tag-drift"
@@ -1131,6 +1147,18 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const { inline, folded, dropped } = splitComments(artifact);
   const drifted = artifact.comments.filter((c) => c.status !== "dropped" && c.drifted).length;
   const tone = artifact.verdict ? TONE[artifact.verdict.recommendation] : "none";
+  // The findings changed under the verdict (a blocker dropped, a grade edited).
+  // Never auto-rewritten: the hint hands it to the chat, one click, on request.
+  const mismatch = verdictMismatch(artifact);
+  const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
+  const retrue = () =>
+    apply(
+      startChatTurn(reviewKey, {
+        message:
+          "Some findings were dropped, edited or re-graded after this review was drafted. Update the summary and verdict to match what still stands — do not re-review the whole PR.",
+        refs: [{ target: "verdict", id: null }],
+      }),
+    );
   const readLabel = artifact.run?.trusted
     ? "ran the code"
     : artifact.run?.withSource
@@ -1340,6 +1368,11 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             <div className={`card card-why tone-border-${tone}`}>
               <div className="card-body">
                 <div className="lab">why</div>
+                {severitySummary(artifact) && (
+                  <div className="sev-counts" title="Live findings by grade. Only blockers block.">
+                    {severitySummary(artifact)}
+                  </div>
+                )}
                 <Markdown className="prose lead" text={artifact.verdict.reasoning} />
                 {!readOnly && (
                   <button className="btn btn-sm" onClick={() => discuss({ target: "verdict", id: null })}>
@@ -1425,6 +1458,21 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             inputRef={chatInput}
           />
 
+          {/* The verdict was written against findings that may since have been
+              dropped, edited or re-graded. Nothing auto-rewrites it — the hint
+              says they disagree, and one click hands it to the chat, which
+              already knows how to revise a draft. */}
+          {!readOnly && mismatch && (
+            <div className="verdict-hint">
+              <span>
+                <strong>{mismatch}</strong> — the verdict was written before those edits.
+              </span>
+              <button className="btn btn-sm" onClick={retrue} disabled={chatBusy}>
+                <Icon name="comment" />
+                {chatBusy ? "the reviewer is busy…" : "ask the reviewer to re-true it"}
+              </button>
+            </div>
+          )}
           {artifact.verdict && !readOnly && (
             <div className="verdict-bar" ref={verdictEl}>
               <span className="lab">verdict</span>
