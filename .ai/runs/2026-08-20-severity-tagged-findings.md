@@ -83,8 +83,8 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 
 ### Phase 4: Cockpit
 
-- [ ] 4.1 Severity badge, count line, API pass-through
-- [ ] 4.2 Inconsistency hint with one-click re-true chat action
+- [x] 4.1 Severity badge, count line, API pass-through — aff4af1
+- [x] 4.2 Inconsistency hint with one-click re-true chat action — aff4af1
 
 ### Phase 5: Evidence and docs
 
