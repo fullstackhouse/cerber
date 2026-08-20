@@ -170,6 +170,7 @@ export async function buildApp(
           repo: a.pr.repo,
           number: a.pr.number,
           state: a.pr.state,
+          isDraft: a.pr.isDraft,
           additions: a.pr.additions,
           deletions: a.pr.deletions,
           changedFiles: a.pr.changedFiles,

@@ -122,6 +122,11 @@ function Row({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {r.pr.isDraft && (
+        <span className="tag tag-draft" title="Still a draft — its author asked for your review anyway">
+          draft
+        </span>
+      )}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -170,6 +175,11 @@ function SettledRow({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {r.pr.isDraft && (
+        <span className="tag tag-draft" title="Still a draft — its author asked for your review anyway">
+          draft
+        </span>
+      )}
       {request && (
         <span className="tag tag-awaiting" title={request.title}>
           {request.label}

@@ -57,7 +57,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     "--repo",
     `${ref.owner}/${ref.repo}`,
     "--json",
-    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state",
+    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isDraft",
   ]);
   const raw = JSON.parse(out);
   return PrInfoSchema.parse({
@@ -72,6 +72,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     headRefName: raw.headRefName,
     headSha: raw.headRefOid ?? "",
     state: raw.state ?? "OPEN",
+    isDraft: raw.isDraft ?? false,
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
@@ -116,7 +117,16 @@ export interface DiscoveredPr extends PrRef {
   author: string;
 }
 
-/** Map `gh search prs` JSON output to PR refs. Drafts are excluded. */
+/**
+ * Map `gh search prs` JSON output to PR refs.
+ *
+ * Drafts are included. The search is already `--review-requested=@me`, so a
+ * draft that reaches this point carries an explicit review request — the author
+ * pressed the button, which makes it a review someone is waiting on rather than
+ * work-in-progress to leave alone. Filtering drafts here would be redundant with
+ * a stronger filter that already ran, and it would contradict the promise the
+ * daemon config makes: the inbox holds what awaits you, drafts and all.
+ */
 export function mapSearchResults(
   raw: {
     number: number;
@@ -128,24 +138,22 @@ export function mapSearchResults(
     author?: { login?: string };
   }[],
 ): DiscoveredPr[] {
-  return raw
-    .filter((r) => !r.isDraft)
-    .flatMap((r) => {
-      const [owner, repo] = r.repository.nameWithOwner.split("/");
-      if (!owner || !repo) return [];
-      return [
-        {
-          owner,
-          repo,
-          number: r.number,
-          title: r.title,
-          url: r.url,
-          updatedAt: r.updatedAt,
-          isDraft: r.isDraft,
-          author: r.author?.login ?? "",
-        },
-      ];
-    });
+  return raw.flatMap((r) => {
+    const [owner, repo] = r.repository.nameWithOwner.split("/");
+    if (!owner || !repo) return [];
+    return [
+      {
+        owner,
+        repo,
+        number: r.number,
+        title: r.title,
+        url: r.url,
+        updatedAt: r.updatedAt,
+        isDraft: r.isDraft,
+        author: r.author?.login ?? "",
+      },
+    ];
+  });
 }
 
 /**
@@ -244,7 +252,7 @@ export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   return args;
 }
 
-/** Open, non-draft PRs where the current gh user's review is requested. */
+/** Open PRs where the current gh user's review is requested, drafts included. */
 export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
   const out = await gh(searchAwaitingArgs(repoFilter, limit));
   return mapSearchResults(JSON.parse(out));

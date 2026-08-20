@@ -22,6 +22,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
       headRefName: "f",
       headSha: "abc",
       state: "OPEN" as const,
+      isDraft: false,
       additions: 0,
       deletions: 0,
       changedFiles: 0,

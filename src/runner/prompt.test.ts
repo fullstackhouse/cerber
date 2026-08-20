@@ -14,6 +14,7 @@ const pr: PrInfo = {
   headRefName: "feature",
   headSha: "abc1234",
   state: "OPEN",
+  isDraft: false,
   additions: 1,
   deletions: 0,
   changedFiles: 1,

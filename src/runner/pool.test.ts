@@ -48,9 +48,13 @@ describe("mapSearchResults", () => {
     },
   ];
 
-  it("maps results and excludes drafts", () => {
+  // The search is already --review-requested=@me, so a draft here is one whose
+  // author explicitly asked for the review. Dropping it would hide a request
+  // GitHub is actively making, which is the bug, not the feature.
+  it("maps results and keeps drafts, flagged", () => {
     const mapped = mapSearchResults(raw);
-    expect(mapped).toHaveLength(1);
-    expect(mapped[0]).toMatchObject({ owner: "a", repo: "b", number: 7, title: "A PR" });
+    expect(mapped).toHaveLength(2);
+    expect(mapped[0]).toMatchObject({ owner: "a", repo: "b", number: 7, title: "A PR", isDraft: false });
+    expect(mapped[1]).toMatchObject({ owner: "a", repo: "b", number: 8, title: "Draft PR", isDraft: true });
   });
 });
