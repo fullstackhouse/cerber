@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
+import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
   SETTLED,
@@ -122,6 +122,11 @@ function Row({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {r.pr.isDraft && (
+        <span className="tag tag-draft" title="Still a draft — its author asked for your review anyway">
+          draft
+        </span>
+      )}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
@@ -170,6 +175,11 @@ function SettledRow({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {r.pr.isDraft && (
+        <span className="tag tag-draft" title="Still a draft — its author asked for your review anyway">
+          draft
+        </span>
+      )}
       {request && (
         <span className="tag tag-awaiting" title={request.title}>
           {request.label}
@@ -181,6 +191,64 @@ function SettledRow({
       <span className="col-verdict">{verdict}</span>
       <span className="col-age">{ageLabel(r.updatedAt)}</span>
     </div>
+  );
+}
+
+/**
+ * The other way in. The inbox only knows what GitHub asks you to review; this
+ * takes anything — your own PR, one you were never requested on, a draft a
+ * colleague linked you. Pasting starts the review straight away rather than
+ * parking it: a queued-but-unreviewed PR nobody requested is exactly what the
+ * daemon's reaper cleans up, and waiting to be told twice is a click for nothing.
+ */
+function PullBox({ autoFocus }: { autoFocus?: boolean }) {
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = input.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    createReview(value)
+      .then((r) => openReview(r.key))
+      .catch((err) => {
+        setError(String(err instanceof Error ? err.message : err));
+        setBusy(false);
+      });
+  };
+
+  return (
+    <form className="pull" onSubmit={submit}>
+      {/* At rest the strip should say "you can add one", not "fill in this
+          field" — the plus carries that, so the input needs no border until
+          it's actually being used. */}
+      <Icon name="plus" />
+      <input
+        className="pull-input"
+        value={input}
+        autoFocus={autoFocus}
+        disabled={busy}
+        // Clearing on edit, not on submit: an error left standing while the
+        // user retypes describes a value that is no longer in the box.
+        onChange={(e) => {
+          setInput(e.target.value);
+          if (error) setError(null);
+        }}
+        placeholder="paste a PR URL to review it"
+        aria-label="Review any PR by URL"
+      />
+      {/* Nothing to submit, nothing to show. The button appears with the first
+          keystroke, so at rest this is one quiet line rather than a form. */}
+      {input.trim() && (
+        <button className="btn btn-small" type="submit" disabled={busy}>
+          {busy ? "starting…" : "review"}
+        </button>
+      )}
+      {error && <span className="pull-error">{error}</span>}
+    </form>
   );
 }
 
@@ -365,11 +433,9 @@ export function Queue() {
                 </p>
               )
             ) : (
-              <>
-                <p>No reviews yet.</p>
-                <pre>cerber review https://github.com/owner/repo/pull/123</pre>
-              </>
+              <p>No reviews yet.</p>
             )}
+            <PullBox autoFocus />
           </div>
         </div>
       ) : (
@@ -385,6 +451,7 @@ export function Queue() {
               </button>
             ))}
             <span className="grow" />
+            <PullBox />
             {totalCost > 0 && (
               <span
                 className="faint"

@@ -62,6 +62,9 @@ export const PrInfoSchema = z.object({
   headSha: z.string().default(""),
   /** OPEN | CLOSED | MERGED, as of the last fetch. */
   state: z.enum(["OPEN", "CLOSED", "MERGED"]).default("OPEN"),
+  /** GitHub reports a draft's `state` as OPEN, so draftness needs its own field.
+   *  Defaulted: artifacts written before this existed still load. */
+  isDraft: z.boolean().default(false),
   additions: z.number().int().default(0),
   deletions: z.number().int().default(0),
   changedFiles: z.number().int().default(0),

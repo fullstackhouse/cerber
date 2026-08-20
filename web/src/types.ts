@@ -14,6 +14,8 @@ export interface ReviewListItem {
     number: number;
     /** Merged/closed PRs are archived out of the default queue view. */
     state?: "OPEN" | "CLOSED" | "MERGED";
+    /** A draft still awaiting you: reviewable, but its author hasn't finished. */
+    isDraft?: boolean;
     additions: number;
     deletions: number;
     changedFiles: number;

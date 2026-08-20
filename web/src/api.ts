@@ -60,6 +60,18 @@ export const deleteComment = (key: string, id: string) =>
     method: "DELETE",
   });
 
+/**
+ * Review a PR the inbox never offered — pasted as a URL or `owner/repo#123`.
+ * The reference is checked against GitHub before this returns, so a bad paste
+ * throws here with a usable message rather than failing invisibly minutes later.
+ * A PR already in the queue comes back as-is instead of being reviewed twice.
+ */
+export const createReview = (input: string) =>
+  request<Artifact & { key: string }>("/api/reviews", {
+    method: "POST",
+    body: JSON.stringify({ input }),
+  });
+
 /** Pull the review onto the PR's current head, re-anchoring comments. */
 export const refreshReview = (key: string) =>
   request<RefreshResult>(`/api/reviews/${encodeURIComponent(key)}/refresh`, { method: "POST" });

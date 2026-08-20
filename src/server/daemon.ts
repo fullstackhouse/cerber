@@ -120,6 +120,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
       headRefName: "",
       headSha: "",
       state: "OPEN",
+      isDraft: ref.isDraft,
       additions: 0,
       deletions: 0,
       changedFiles: 0,
@@ -139,7 +140,19 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
   };
 }
 
-/** An artifact nothing has touched yet — safe to delete when its PR leaves the queue. */
+/**
+ * An artifact nothing has touched yet — safe to delete when its PR leaves the
+ * queue.
+ *
+ * Read this before loosening it. Artifacts now arrive two ways: the daemon
+ * discovers them, and the user pastes a PR into the cockpit. The reaper below
+ * deletes anything absent from the awaiting search, which is only ever correct
+ * for the first kind — a pasted PR was never in that search and never will be.
+ * What keeps it safe is `run === null`: the cockpit's create endpoint persists
+ * a run block before it answers, so a pulled-in review is never a pure stub,
+ * not even during the minutes before its first AI output lands. Widen this
+ * predicate and you delete work the user asked for.
+ */
 export function isPureStub(artifact: Artifact): boolean {
   return artifact.status === "awaiting" && artifact.comments.length === 0 && artifact.run === null;
 }
@@ -206,7 +219,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: number }> {
     let discovered = 0;
     for (const ref of refs) {
-      if (await loadArtifact(artifactId(ref))) continue;
+      const existing = await loadArtifact(artifactId(ref));
+      if (existing) {
+        // The search result is what the PR is right now; the artifact can
+        // predate a draft→ready flip. Refresh from it — it costs nothing, it's
+        // already in hand — or the queue keeps calling a ready PR a draft until
+        // something happens to re-review it.
+        if (existing.pr.isDraft !== ref.isDraft) {
+          await updateArtifactByKey(artifactKey(existing.id), (a) => ({
+            ...a,
+            pr: { ...a.pr, isDraft: ref.isDraft },
+          }));
+        }
+        continue;
+      }
       await saveArtifact(stubArtifact(ref));
       discovered++;
     }
@@ -247,13 +273,16 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       stateCheckedAt.set(artifact.id, Date.now());
       try {
         const pr = await fetchPrInfo(artifact.pr);
-        if (pr.state !== "OPEN") {
+        // This artifact isn't in the awaiting search, so the cheap draft refresh
+        // above never sees it — a PR pulled in from the cockpit's paste box gets
+        // its draft flag corrected here instead. Same fetch either way.
+        if (pr.state !== "OPEN" || pr.isDraft !== artifact.pr.isDraft) {
           await updateArtifactByKey(artifactKey(artifact.id), (a) => ({
             ...a,
-            pr: { ...a.pr, state: pr.state },
+            pr: { ...a.pr, state: pr.state, isDraft: pr.isDraft },
           }));
-          log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
         }
+        if (pr.state !== "OPEN") log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
       } catch {
         // Same: book-keeping can wait for the next poll.
       }

@@ -38,6 +38,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
       headRefName: "f",
       headSha: "abc",
       state: "OPEN",
+      isDraft: false,
       additions: 1,
       deletions: 0,
       changedFiles: 1,

@@ -517,6 +517,100 @@ button {
   background: rgba(160, 106, 0, 0.1);
 }
 
+/* The paste-a-PR box. Sits at the end of the tab strip and in the empty state,
+   because "there is nothing here" is exactly when you want to add something. */
+.pull {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  color: var(--muted);
+}
+
+/* Only in the tab strip, where the cost readout sits immediately to its right —
+   without the gap the placeholder and the figure read as one run-on sentence. */
+.tabs .pull {
+  margin-right: 16px;
+}
+
+/* The empty state centres its text, but a flex row does not centre itself. */
+.empty .pull {
+  justify-content: center;
+  margin-top: 10px;
+}
+
+/* The whole control lights up together on hover, so the plus and the words
+   read as one target rather than an icon sitting next to some text. */
+.pull:hover,
+.pull:focus-within {
+  color: var(--fg-3);
+}
+
+/* Quiet at rest: no box, no fill — it reads as one more item in the strip
+   rather than a form dropped into it. The line under it only appears on focus,
+   which is also when it widens enough to hold a full PR URL. */
+.pull-input {
+  width: 200px;
+  max-width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  transition: width 120ms ease, border-color 120ms ease;
+}
+
+.pull-input:hover::placeholder {
+  color: var(--fg);
+}
+
+.pull-input:focus {
+  outline: none;
+  width: 320px;
+  border-bottom-color: var(--accent);
+}
+
+.pull-input::placeholder {
+  color: var(--muted);
+  transition: color 120ms ease;
+}
+
+/* Floated clear of the flow: a wrong paste should explain itself without
+   reflowing the tab strip it sits in, and it lands over the table head, so it
+   carries its own surface rather than colliding with the column labels. */
+/* Sized to sit inside a strip of 11px labels without setting the row height. */
+.btn-small {
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
+.pull-error {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  margin-top: 4px;
+  max-width: 360px;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--red);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(20, 23, 26, 0.08);
+}
+
+/* A draft that still wants your review. Deliberately quiet: it qualifies the
+   row rather than competing with it — the review is real work either way. */
+.tag-draft {
+  flex-shrink: 0;
+  color: var(--muted);
+  background: var(--line-3);
+}
+
 .col-caret {
   width: 12px;
   flex-shrink: 0;

@@ -4,7 +4,14 @@ import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactSchema } from "../core/artifact.js";
 import { loadConfig } from "../core/config.js";
-import { currentLogin, fetchConversation, mapSearchResults, searchAwaitingMe } from "../core/gh.js";
+import {
+  currentLogin,
+  fetchConversation,
+  fetchPrInfo,
+  mapSearchResults,
+  searchAwaitingMe,
+} from "../core/gh.js";
+import { loadArtifact, saveArtifact } from "../core/state.js";
 import { isPureStub, startDaemon, stubArtifact } from "./daemon.js";
 
 // The loop's own bookkeeping is what's under test — not gh, and not the runner.
@@ -22,6 +29,7 @@ vi.mock("../core/config.js", async (orig) => ({
 }));
 
 const search = searchAwaitingMe as Mock;
+const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
 const login = currentLogin as Mock;
@@ -222,5 +230,100 @@ describe("mapSearchResults author", () => {
       },
     ]);
     expect(pr?.author).toBe("");
+  });
+});
+
+/**
+ * A draft carrying a review request is a review someone is waiting on, so it
+ * belongs in the queue — and the badge that says so has to keep up when the
+ * author marks the PR ready. Neither refresh below costs an extra GitHub call:
+ * one reuses the search result already in hand, the other rides a fetchPrInfo
+ * the daemon was making anyway.
+ */
+describe("draft PRs in the inbox", () => {
+  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: false,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-draft-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+  });
+
+  async function pollOnce() {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+      return handle.status();
+    } finally {
+      handle.stop();
+    }
+  }
+
+  it("lists a draft awaiting your review instead of hiding it", async () => {
+    search.mockResolvedValue([{ ...DISCOVERED, isDraft: true }]);
+    const status = await pollOnce();
+    expect(status.awaiting.map((a) => a.id)).toEqual(["acme/widgets#7"]);
+    expect((await loadArtifact("acme/widgets#7"))?.pr.isDraft).toBe(true);
+  });
+
+  it("stops calling a PR a draft once its author marks it ready", async () => {
+    await saveArtifact({
+      ...stubArtifact({ ...DISCOVERED, isDraft: true }),
+      status: "ready",
+      comments: [],
+    });
+    expect((await loadArtifact("acme/widgets#7"))?.pr.isDraft).toBe(true);
+
+    // Same PR, next poll, no longer a draft. The search already says so, so
+    // nothing needs to be fetched to find out.
+    search.mockResolvedValue([{ ...DISCOVERED, isDraft: false }]);
+    await pollOnce();
+
+    expect((await loadArtifact("acme/widgets#7"))?.pr.isDraft).toBe(false);
+    expect(prInfo).not.toHaveBeenCalled();
+  });
+
+  it("corrects the flag on a pulled-in PR the awaiting search never returns", async () => {
+    // Pasted into the cockpit rather than discovered: it has a run, so the
+    // reaper leaves it alone, but it will never appear in the search either.
+    await saveArtifact({
+      ...stubArtifact({ ...DISCOVERED, isDraft: true }),
+      status: "ready",
+      run: {
+        model: "claude",
+        startedAt: "2026-08-19T00:00:00Z",
+        finishedAt: "2026-08-19T00:01:00Z",
+        costUsd: 0.1,
+        error: null,
+        withSource: true,
+        trusted: false,
+        sessionId: null,
+      },
+    });
+
+    search.mockResolvedValue([]);
+    prInfo.mockResolvedValue({
+      ...stubArtifact({ ...DISCOVERED, isDraft: false }).pr,
+      state: "OPEN",
+      isDraft: false,
+    });
+    await pollOnce();
+
+    const after = await loadArtifact("acme/widgets#7");
+    expect(after).not.toBeNull();
+    expect(after?.pr.isDraft).toBe(false);
+    // Still here — the periodic refresh corrects the flag, it does not archive
+    // a PR that is merely absent from the search.
+    expect(after?.pr.state).toBe("OPEN");
   });
 });
