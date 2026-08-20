@@ -935,8 +935,11 @@ button {
     --measure: 2100px;
   }
 
+  /* The diff has a natural width — past a point, extra pixels only lengthen
+     the lines. The conversation has no such ceiling, so the room a bigger
+     screen brings goes to the chat rather than to the code. */
   .review-body {
-    grid-template-columns: 236px minmax(0, 1fr) 420px;
+    grid-template-columns: 236px minmax(0, 1fr) clamp(420px, 34%, 680px);
     grid-template-areas: "rail main cockpit";
   }
 
