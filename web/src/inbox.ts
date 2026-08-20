@@ -210,10 +210,16 @@ export function sentTag(sent: NonNullable<ReviewListItem["sent"]>): { label: str
     label: sent.auto ? "auto-sent a review" : "you replied with a review",
     // Never "you" for an auto-send: the daemon sent it under a bar you set,
     // which is not the same as you having answered the PR.
+    //
+    // Two facts and no theory about which one explains the other. A poll that
+    // answered before the send is the likely reason the request is still
+    // listed, but nothing here knows the order, and GitHub keeps some requests
+    // open regardless — naming a cause we haven't checked is the same
+    // over-claiming the tag itself was fixed for.
     title:
       `${sent.auto ? "The daemon auto-sent this review" : "You sent this review"} to GitHub on ` +
-      `${when} as ${event}. The last inbox poll still listed a review request for you — polls run ` +
-      `every few minutes, so one sent since then isn't in that answer yet.`,
+      `${when} as ${event}. The last inbox poll still listed a review request for you — a request ` +
+      `can lag a send, and GitHub holds some open even after one.`,
   };
 }
 

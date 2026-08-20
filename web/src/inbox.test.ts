@@ -186,7 +186,14 @@ describe("requestTag", () => {
     const tag = requestTag(sent(), "none");
     expect(tag.label).toBe("you replied with a review");
     expect(tag.title).toContain("approve");
-    expect(tag.title).toContain("polls run every few minutes");
+  });
+
+  it("states the two facts without claiming which explains the other", () => {
+    // Nothing here knows whether the poll ran before the send, and GitHub
+    // holds some requests open regardless — so the tooltip names no cause.
+    const title = requestTag(sent(), "none").title;
+    expect(title).toContain("The last inbox poll still listed a review request for you");
+    expect(title).not.toMatch(/since then|because|so one sent/);
   });
 
   it("does not put an auto-send in your mouth", () => {
