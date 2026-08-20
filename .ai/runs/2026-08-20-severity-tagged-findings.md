@@ -101,6 +101,8 @@ ships as written.
 
 ## Progress
 
+PR: #16
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Schema and severity survival
