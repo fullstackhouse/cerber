@@ -1391,6 +1391,39 @@ button {
   font-size: 11px;
 }
 
+/* A long line wraps rather than running off the side. diff2html scrolls it
+   sideways, which hides the end of every prose line in a spec or a markdown
+   file — and a sideways scrollbar under the diff is a line you have to go and
+   fetch instead of read. The continuation lines land under the first
+   character, not under the gutter, because the line numbers are their own
+   absolutely positioned column. */
+.diff .d2h-code-line {
+  white-space: normal;
+  /* With nothing left to scroll, the 8em diff2html holds in reserve on the
+     right is width the code could be using. */
+  width: calc(100% - 9em);
+  padding-right: 1em;
+}
+
+/* Only the text span wraps, and only it keeps the line's own spacing: the row
+   around it holds diff2html's markup indentation, which `pre` would print.
+   The span is a full-width inline-block there, which once it could wrap would
+   push itself onto the line below its own +/- marker — inline, it sits beside
+   the marker and wraps under it. */
+.diff .d2h-code-line-ctn {
+  display: inline;
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Word-level highlights are inline-blocks, which would refuse to break in the
+   middle and re-introduce the overflow one changed phrase at a time. */
+.diff .d2h-code-line ins,
+.diff .d2h-code-line del {
+  display: inline;
+}
+
 /* Syntax colouring: keep the hljs token colours, drop its block styling — the
    row already owns its add/delete background. */
 .diff .hljs {
