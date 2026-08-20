@@ -13,6 +13,7 @@ import {
   replyOf,
   replyTag,
   rowTag,
+  shownTab,
   strip,
   verdictCell,
 } from "./inbox";
@@ -221,7 +222,7 @@ export function Queue() {
   const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<Tab>("inbox");
+  const [picked, setTab] = useState<Tab>("inbox");
   // The cursor is a review, not a row number: the list re-sorts under it every
   // poll, and the strip below must keep explaining the same PR.
   const [cursor, setCursor] = useState<string | null>(null);
@@ -258,6 +259,8 @@ export function Queue() {
   // filing has hidden — the strip has always counted these.
   const buckets = useMemo(() => bucket(all, daemon), [all, daemon]);
   const hidden = buckets.requests;
+  // Not necessarily the tab you clicked: a filed tab can empty under you.
+  const tab = shownTab(picked, buckets);
   const rows = buckets[tab];
 
   // Keep the cursor on a row that still exists in the current filter.

@@ -465,6 +465,9 @@ button {
    row apart without spending a second control on it. */
 .tab-split {
   width: 1px;
+  /* A flex item shrinks by default, and a 1px rule shrinks to nothing: the
+     narrower the window, the more the two halves need telling apart. */
+  flex-shrink: 0;
   align-self: stretch;
   margin: 4px 10px 6px;
   background: var(--line-2);

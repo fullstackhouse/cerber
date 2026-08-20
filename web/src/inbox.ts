@@ -45,7 +45,11 @@ export const TAB_META: Record<Tab, { label: string; title: string }> = {
   archived: { label: "archived", title: "PRs that have since been merged or closed." },
 };
 
-/** Which inbox tab a live review belongs to. Every status lands in exactly one. */
+/**
+ * Which tab a review's status puts it in. Every status lands in exactly one —
+ * including `sent`, which `bucket` never asks about because a sent review is
+ * out of the live list before it gets here.
+ */
 export function tabOf(r: ReviewListItem): "awaiting" | "drafted" | "sent" {
   if (r.status === "awaiting" || r.status === "running") return "awaiting";
   if (r.status === "sent") return "sent";
@@ -122,6 +126,18 @@ export function bucket(all: ReviewListItem[], daemon: DaemonStatus | null): Reco
     sent: sortReviews(open.filter((r) => r.status === "sent")),
     archived: sortReviews(all.filter(isArchived)),
   };
+}
+
+/**
+ * The tab actually on screen. A filed tab is only in the row while it holds
+ * something, so the one you are standing on can empty under you — you settle
+ * its last review, or a poll answers the last open request. Fall back to the
+ * inbox rather than leaving you on a tab that is no longer in the row: what
+ * left the tab you were reading went back to the queue, which is where you
+ * now are.
+ */
+export function shownTab(picked: Tab, buckets: Record<Tab, ReviewListItem[]>): Tab {
+  return FILED_TABS.includes(picked) && buckets[picked].length === 0 ? "inbox" : picked;
 }
 
 /**

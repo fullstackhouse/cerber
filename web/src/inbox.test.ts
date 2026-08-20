@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Tab } from "./inbox";
 import {
   ageLabel,
   bucket,
@@ -8,6 +9,7 @@ import {
   replyOf,
   replyTag,
   rowTag,
+  shownTab,
   sortReviews,
   strip,
   tabOf,
@@ -236,6 +238,38 @@ describe("bucket", () => {
     expect(b.requests.map((r) => r.key)).toEqual(["reviewed", "sent"]);
     expect(b.settled.map((r) => r.key)).toContain("reviewed");
     expect(b.sent.map((r) => r.key)).toContain("sent");
+  });
+});
+
+describe("shownTab", () => {
+  const buckets = (over: Partial<Record<Tab, ReviewListItem[]>>) => ({
+    inbox: [],
+    awaiting: [],
+    drafted: [],
+    requests: [],
+    settled: [],
+    sent: [],
+    archived: [],
+    ...over,
+  });
+
+  it("keeps you where you clicked while that tab holds something", () => {
+    expect(shownTab("settled", buckets({ settled: [row()] }))).toBe("settled");
+    expect(shownTab("requests", buckets({ requests: [row()] }))).toBe("requests");
+  });
+
+  it("puts you back in the inbox when the filed tab empties under you", () => {
+    // The tab row drops a filed tab the moment it is empty. Standing on one
+    // that just emptied would leave the table showing a filter the row above
+    // no longer offers — and whatever left it went back to the queue.
+    expect(shownTab("settled", buckets({ inbox: [row()] }))).toBe("inbox");
+    expect(shownTab("requests", buckets({ inbox: [row()] }))).toBe("inbox");
+  });
+
+  it("leaves the inbox tabs alone, empty or not — they are always in the row", () => {
+    expect(shownTab("awaiting", buckets({}))).toBe("awaiting");
+    expect(shownTab("drafted", buckets({}))).toBe("drafted");
+    expect(shownTab("inbox", buckets({}))).toBe("inbox");
   });
 });
 
