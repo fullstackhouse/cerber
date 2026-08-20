@@ -18,6 +18,7 @@ import {
   tabOf,
   verdictCell,
 } from "./inbox";
+import { Markdown } from "./Markdown";
 import { DaemonStatus, Reply, ReviewListItem } from "./types";
 
 const openReview = (key: string) => {
@@ -274,6 +275,43 @@ function Drawer({
   );
 }
 
+/**
+ * The hovered row's reasoning, in the shape the verdict was written in.
+ *
+ * It is markdown — a lead sentence, then a bullet per thing the run did or
+ * couldn't check — so it is rendered, not dumped: a strip reading
+ * `- **Ran the tests** —` asks you to parse markdown by eye, and the bullets
+ * run together into one paragraph, which is exactly what the shaping was for.
+ *
+ * Height is capped because the strip sits under whatever row the pointer is
+ * on: unbounded, every mouse move re-lays out the page beneath it. When there
+ * is more, it fades out and `open review` is the way to the rest — and the cap
+ * only applies when it bites, so a two-line reason still reads as two lines.
+ */
+function StripProse({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Re-measured on width too, not just on the text: narrowing the window
+    // rewraps the prose into more lines, and a cut with no fade over it is
+    // the one state this is meant to avoid.
+    const measure = () => setClipped(el.scrollHeight - el.clientHeight > 4);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <div ref={ref} className={`strip-prose${clipped ? " strip-prose-clipped" : ""}`}>
+      <Markdown className="prose" text={text} />
+    </div>
+  );
+}
+
 export function Queue() {
   const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
   const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
@@ -496,7 +534,7 @@ export function Queue() {
                     ? ` · ${selected.pr.headRefName} → ${selected.pr.baseRefName}`
                     : ""}
                 </div>
-                <p className="prose">{detail.reasoning}</p>
+                <StripProse text={detail.reasoning} />
                 <div className="cursor-strip-meta">
                   {detail.meta.join(" · ")}
                   {selected.sent?.url && (

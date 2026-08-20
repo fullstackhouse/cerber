@@ -692,9 +692,48 @@ button {
   min-width: 0;
 }
 
-.cursor-strip-body .prose {
+/* The reasoning is markdown and is rendered as such. Capped, because the strip
+   follows the pointer down the list and an uncapped one re-lays the page out
+   on every mouse move — but capped above the length verdicts actually run to,
+   so the ordinary one is read here in full and only the outliers are cut. The
+   fade is on the clipped state alone: a fade under text that already ended
+   would promise a rest that isn't there. */
+.strip-prose {
   margin: 6px 0 0;
   max-width: 700px;
+  max-height: 196px;
+  overflow: hidden;
+}
+
+.strip-prose-clipped {
+  -webkit-mask-image: linear-gradient(#000 150px, transparent 194px);
+  mask-image: linear-gradient(#000 150px, transparent 194px);
+}
+
+/* Tighter than the detail view's prose: this is a glance, not a read. The
+   bullets' bold leads ("Ran the tests", "Couldn't check") are what you skim,
+   so they keep full contrast while their explanations sit back. */
+.cursor-strip-body .md p {
+  margin: 5px 0;
+}
+
+.cursor-strip-body .md ul,
+.cursor-strip-body .md ol {
+  margin: 5px 0;
+  padding-left: 17px;
+}
+
+.cursor-strip-body .md li {
+  margin: 2px 0;
+}
+
+.cursor-strip-body .md li::marker {
+  color: var(--faint);
+}
+
+.cursor-strip-body .md strong {
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .cursor-strip-meta {
