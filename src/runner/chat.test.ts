@@ -96,6 +96,16 @@ const ids = () => {
 };
 const clock = () => "2026-08-19T02:00:00Z";
 
+/** One line added, one taken out — a "line" ref can point at either. */
+const LINE_DIFF = `diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,2 +1,2 @@
+ const a = 1;
+-const gone = 0;
++const b = 2;
+`;
+
 describe("buildChatPrompt", () => {
   it("frames the turn as defending a draft, not re-reviewing the PR", () => {
     const { prompt } = buildChatPrompt(artifact(), "why did you say that?");
@@ -141,6 +151,29 @@ describe("buildChatPrompt", () => {
       refs: [{ target: "comment", id: "c1" }],
     });
     expect(prompt).toContain("the comment on src/a.ts:10 (commentId: c1)");
+  });
+
+  it("quotes a pointed-at line back, so the model isn't counting rows", () => {
+    const a = artifact({ diff: LINE_DIFF });
+    const { prompt } = buildChatPrompt(a, "is this right?", {
+      refs: [{ target: "line", id: null, path: "src/a.ts", line: 2 }],
+    });
+    expect(prompt).toContain("- src/a.ts:2 — `const b = 2;`");
+  });
+
+  it("quotes a line the PR removes from the old side, and says it is gone", () => {
+    const a = artifact({ diff: LINE_DIFF });
+    const { prompt } = buildChatPrompt(a, "why drop this?", {
+      refs: [{ target: "line", id: null, path: "src/a.ts", line: 2, side: "old" }],
+    });
+    expect(prompt).toContain("- src/a.ts:2 (a line this PR removes) — `const gone = 0;`");
+  });
+
+  it("names a pointed-at line even when the diff no longer has it", () => {
+    const { prompt } = buildChatPrompt(artifact(), "hm", {
+      refs: [{ target: "line", id: null, path: "src/z.ts", line: 99 }],
+    });
+    expect(prompt).toContain("- src/z.ts:99");
   });
 
   it("replays the conversation so far", () => {

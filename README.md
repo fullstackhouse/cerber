@@ -109,6 +109,13 @@ about, each waiting for you to keep, rewrite, or drop it:
 
 ![A chapter of the walkthrough: the diff with a draft comment card anchored under the line it discusses, explaining the finding in plain words.](docs/comment.png)
 
+Any line of the diff is one click away from being talked about: hover it and a
+`+` appears in the gutter, the way it does on GitHub. What opens is one box
+with two exits — write the comment yourself, or ask the reviewer about that
+line and get the answer in the conversation below. A line the PR removes can be
+asked about too; a comment on one posts on the file, since GitHub only takes
+inline comments on the new side of a diff.
+
 Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
 The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
@@ -304,7 +311,10 @@ the exchange went anywhere near GitHub.
   will tell you one of them needs changing rather than rewriting it. Say so
   explicitly and it will.
 - **Point at things.** *discuss* on any comment, chapter, or the summary drops
-  a reference into your next message.
+  a reference into your next message. From the diff's own gutter, *ask the
+  reviewer* points at one line and sends the question there and then — the
+  line comes along quoted, so it answers about that line rather than counting
+  rows.
 - **Reset** puts the review back the way the AI first wrote it and keeps the
   conversation — you lose the edits, not the reasoning.
 

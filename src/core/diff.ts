@@ -59,28 +59,42 @@ export function patchForFiles(diff: string, files: string[]): string {
  * lines inside hunks — exactly the lines a GitHub comment can attach to.
  */
 export function newSideLineText(diff: string): Map<string, Map<number, string>> {
+  return sideLineText(diff, "new");
+}
+
+/**
+ * Old-side lines with their text, per file: removed and context lines. Nothing
+ * can be posted against these — they only exist to quote a line the PR took
+ * out, which is a fair thing to ask the reviewer about.
+ */
+export function oldSideLineText(diff: string): Map<string, Map<number, string>> {
+  return sideLineText(diff, "old");
+}
+
+function sideLineText(diff: string, side: "new" | "old"): Map<string, Map<number, string>> {
+  const own = side === "new" ? "+" : "-";
   const result = new Map<string, Map<number, string>>();
   for (const { path, patch } of splitDiffByFile(diff)) {
     const lines = new Map<number, string>();
-    let newLine = 0;
+    let n = 0;
     let inHunk = false;
     const patchLines = patch.split("\n");
     for (let i = 0; i < patchLines.length; i++) {
       const line = patchLines[i]!;
-      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (hunk) {
-        newLine = Number(hunk[1]);
+        n = Number(side === "new" ? hunk[2] : hunk[1]);
         inHunk = true;
         continue;
       }
       if (!inHunk) continue;
       if (line === "" && i === patchLines.length - 1) continue; // trailing split artifact
       if (line.startsWith("\\")) continue; // "\ No newline at end of file"
-      if (line.startsWith("+") || line.startsWith(" ") || line === "") {
-        lines.set(newLine, line === "" ? "" : line.slice(1));
-        newLine++;
+      if (line.startsWith(own) || line.startsWith(" ") || line === "") {
+        lines.set(n, line === "" ? "" : line.slice(1));
+        n++;
       }
-      // "-" lines belong to the old side only.
+      // The other side's lines don't exist on this one.
     }
     result.set(path, lines);
   }

@@ -1378,11 +1378,88 @@ button {
   max-width: none;
 }
 
+/* Saying something about a line you clicked in the gutter. */
+.line-composer-row td {
+  padding: 0;
+  background: var(--accent-wash);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  white-space: normal;
+}
+
+/* The diff table is as wide as its longest line and scrolls sideways; the
+   composer is prose, so it keeps to a readable width at the left edge where
+   the code starts — otherwise its buttons sit off the side of the screen. */
+.line-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 10px 44px;
+  max-width: 760px;
+  font-family: var(--mono);
+}
+
+.line-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.line-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ---- diff ---- */
 
 .diff {
   margin-top: 8px;
   font-size: 11.5px;
+}
+
+/* The gutter is a button: hovering a row offers to say something about that
+   line. Invisible until then — a plus on every row of every diff would be
+   louder than the code. diff2html already positions the cell, so the button
+   fills it and paints its plus over the blank left edge of the old number. */
+.diff .line-add {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* It stays clickable while invisible on purpose. The cell underneath holds
+   two line numbers and nothing else — diff2html already marks them
+   unselectable and gives the cell a pointer cursor — so there is no click
+   here to swallow, and gating on hover instead would make the first click
+   after the pointer arrives depend on a repaint having landed. */
+.diff tr:hover .line-add {
+  opacity: 1;
+}
+
+.diff .line-add::before {
+  content: "+";
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  direction: ltr;
 }
 
 .diff .d2h-file-header,
