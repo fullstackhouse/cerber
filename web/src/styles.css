@@ -1725,3 +1725,40 @@ button {
   color: var(--amber);
   background: rgba(160, 106, 0, 0.1);
 }
+
+/* Finding grades. Only the blocker shouts — it is the only tier that blocks. */
+.tag-sev-blocker {
+  color: var(--red);
+  background: rgba(194, 49, 74, 0.1);
+  font-weight: 600;
+}
+
+.tag-sev-minor {
+  color: var(--amber);
+  background: rgba(160, 106, 0, 0.1);
+}
+
+.tag-sev-nit {
+  color: var(--muted);
+  background: #f0f1f3;
+}
+
+/* "1 blocker · 2 nits" beside the verdict's reasoning. */
+.sev-counts {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+/* The findings changed under the verdict — say so, offer the one-click way out. */
+.verdict-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(160, 106, 0, 0.07);
+  border: 1px solid rgba(160, 106, 0, 0.3);
+  color: #57430a;
+  padding: 10px 12px;
+  border-radius: 4px;
+}

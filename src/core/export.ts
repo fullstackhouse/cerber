@@ -1,4 +1,9 @@
-import { Artifact } from "./artifact.js";
+import { Artifact, Comment } from "./artifact.js";
+
+/** Same convention as Send: the grade travels in the text, ungraded stays bare. */
+function grade(c: Comment): string {
+  return c.severity ? `**${c.severity}:** ` : "";
+}
 
 /** Render an artifact as a standalone markdown review document. */
 export function toMarkdown(artifact: Artifact): string {
@@ -35,7 +40,7 @@ export function toMarkdown(artifact: Artifact): string {
       lines.push("");
       const comments = artifact.comments.filter((c) => c.chapterId === ch.id && c.status !== "dropped");
       for (const c of comments) {
-        lines.push(`> **${c.path}${c.line != null ? `:${c.line}` : ""}** — ${c.body.replace(/\n/g, "\n> ")}`);
+        lines.push(`> **${c.path}${c.line != null ? `:${c.line}` : ""}** — ${grade(c)}${c.body.replace(/\n/g, "\n> ")}`);
         lines.push("");
       }
     }

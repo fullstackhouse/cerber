@@ -15,6 +15,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     line: 10,
     body: "The AI's point.",
     chapterId: "one",
+    severity: null,
     origin: "ai",
     status: "draft",
     editedByUser: false,
@@ -114,6 +115,16 @@ describe("buildChatPrompt", () => {
     expect(prompt).toContain("c1 — src/a.ts:10 [THE USER'S OWN WRITING]");
     expect(prompt).toContain("c2 — src/a.ts:10\n");
     expect(prompt).toContain("Do not edit or drop them");
+  });
+
+  it("shows each finding's grade, and no tag for ungraded remarks", () => {
+    const a = artifact({
+      comments: [comment({ severity: "blocker" }), comment({ id: "c2" })],
+    });
+    const { prompt } = buildChatPrompt(a, "hm");
+    expect(prompt).toContain("c1 — src/a.ts:10 [blocker]");
+    expect(prompt).toContain("c2 — src/a.ts:10\n");
+    expect(prompt).toContain('"severity" is the finding\'s merge impact');
   });
 
   it("names what the user pointed at", () => {

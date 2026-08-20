@@ -2,6 +2,15 @@ import { z } from "zod";
 
 export const SCHEMA_VERSION = 1 as const;
 
+/**
+ * How hard a finding presses on the merge. The words carry their own
+ * semantics: a blocker is the only tier that stops approval; minor is
+ * "should fix, author's call"; nit is taste. Absent (null) means the comment
+ * is not a finding at all — a question, a note, praise — not "unknown".
+ */
+export const SeveritySchema = z.enum(["blocker", "minor", "nit"]);
+export type Severity = z.infer<typeof SeveritySchema>;
+
 /** A draft inline comment. Never sent to GitHub unless the user explicitly sends the review. */
 export const CommentSchema = z.object({
   id: z.string(),
@@ -10,6 +19,8 @@ export const CommentSchema = z.object({
   line: z.number().int().positive().nullable(),
   body: z.string(),
   chapterId: z.string().nullable().default(null),
+  /** Merge impact of this finding; null for remarks that are not findings. */
+  severity: SeveritySchema.nullable().default(null),
   origin: z.enum(["ai", "user"]),
   status: z.enum(["draft", "approved", "dropped"]).default("draft"),
   /** Set when the user edits an AI comment's body — calibration signal. */
@@ -131,7 +142,13 @@ export const RevisionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("summary"), body: z.string() }),
   z.object({ kind: z.literal("verdict"), verdict: VerdictSchema }),
   z.object({ kind: z.literal("chapter"), chapterId: z.string(), title: z.string().optional(), explanation: z.string().optional() }),
-  z.object({ kind: z.literal("comment-edit"), commentId: z.string(), body: z.string() }),
+  z.object({
+    kind: z.literal("comment-edit"),
+    commentId: z.string(),
+    body: z.string(),
+    /** Re-grade while editing; omitted = grade unchanged, null = not a finding. */
+    severity: SeveritySchema.nullable().optional(),
+  }),
   z.object({ kind: z.literal("comment-drop"), commentId: z.string() }),
   z.object({
     kind: z.literal("comment-add"),
@@ -139,6 +156,7 @@ export const RevisionSchema = z.discriminatedUnion("kind", [
     line: z.number().int().positive().nullable(),
     body: z.string(),
     chapterId: z.string().nullable().default(null),
+    severity: SeveritySchema.nullable().default(null),
   }),
 ]);
 export type Revision = z.infer<typeof RevisionSchema>;
@@ -254,6 +272,7 @@ export const AiReviewSchema = z.object({
       line: z.number().int().positive().nullable(),
       body: z.string(),
       chapterId: z.string().nullable().optional(),
+      severity: SeveritySchema.nullable().optional(),
     }),
   ),
   verdict: VerdictSchema,
