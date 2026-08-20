@@ -69,14 +69,18 @@ real no-source run) over six artifacts from `~/.cerber/reviews` and compared
 grades with what the human actually did. Script: an untracked
 `/tmp/replay-severity.mts` riding the repo's own `buildReviewPrompt`/`runClaude`.
 
-| Artifact | Human's final action | Amended prompt's verdict | Grades used |
+The corpus is real reviews of private work, so the rows are described by shape
+rather than named — what the evidence turns on is the match rate and the spread
+of verdicts, neither of which needs an address.
+
+| Review | Human's final action | Amended prompt's verdict | Grades used |
 |---|---|---|---|
-| skills#22 | sent APPROVE, 6 comments kept | approve @72% | 2 minor · 2 nit |
-| open-mercato#92 | sent APPROVE, 6 kept | approve @78% | 3 minor · 2 nit · 1 ungraded question |
-| tournee#997 | sent APPROVE, 2 kept | approve @72% | 2 minor · 1 ungraded question |
-| tournee#1006 | sent APPROVE, 2 kept | comment @68% | 3 minor · 1 nit · 1 ungraded question |
-| groomershop-mercato#362 | reviewed (approve), 3 kept | approve @72% | 1 minor · 2 nit · 1 ungraded question |
-| tournee-frontend#9 | request_changes (skipped) | request_changes @72% | 1 **blocker** · 1 minor · 1 nit · 1 ungraded question |
+| A — skills/docs repo, tooling fix | sent APPROVE, 6 comments kept | approve @72% | 2 minor · 2 nit |
+| B — TypeScript monorepo, backend transport feature | sent APPROVE, 6 kept | approve @78% | 3 minor · 2 nit · 1 ungraded question |
+| C — web app, auth flow fix | sent APPROVE, 2 kept | approve @72% | 2 minor · 1 ungraded question |
+| D — web app, infra + e2e plumbing | sent APPROVE, 2 kept | comment @68% | 3 minor · 1 nit · 1 ungraded question |
+| E — commerce integration, sync/label change | reviewed (approve), 3 kept | approve @72% | 1 minor · 2 nit · 1 ungraded question |
+| F — frontend component PR | request_changes (skipped) | request_changes @72% | 1 **blocker** · 1 minor · 1 nit · 1 ungraded question |
 
 Findings:
 
@@ -88,11 +92,11 @@ Findings:
   framed "question, not a finding" with no grade — the rule that severity
   absent means "not a finding" is being exercised, not ignored.
 - **The blocker side holds.** On the corpus's one request_changes review
-  (tournee-frontend#9 — a feature-branch pin in `plasmic.json` that would
+  (F — a build-config file pinned to an unmerged feature branch, which would
   break future syncs), the amended prompt graded exactly that finding
   **blocker**, kept the verdict request_changes, and named it as the deciding
-  issue. It also downgraded "nothing renders this component yet" to an
-  ungraded question — a sharper account than the original's three ungraded
+  issue. It also downgraded a "nothing renders this component yet" remark to
+  an ungraded question — a sharper account than the original's three ungraded
   comments.
 
 Verdict: 6/6 replays consistent with the human's actual decision, the cut
