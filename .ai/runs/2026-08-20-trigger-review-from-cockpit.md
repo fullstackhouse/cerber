@@ -72,11 +72,11 @@ Adds `isDraft` to the artifact schema, removes the filter, and keeps the flag ho
 
 ### Phase 2: Start a review from the cockpit
 
-- [ ] 2.1 POST /api/reviews with in-request validation
-- [ ] 2.2 Return the existing artifact instead of duplicating
-- [ ] 2.3 Persist running state synchronously before the 202
-- [ ] 2.4 createReview in the web API client
-- [ ] 2.5 Paste box on the Queue screen
+- [x] 2.1 POST /api/reviews with in-request validation — 1c0c4be
+- [x] 2.2 Return the existing artifact instead of duplicating — 1c0c4be
+- [x] 2.3 Persist running state synchronously before the 202 — 1c0c4be
+- [x] 2.4 createReview in the web API client — 1c0c4be
+- [x] 2.5 Paste box on the Queue screen — 1c0c4be
 
 ### Phase 3: Tests and validation
 
