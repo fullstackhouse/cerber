@@ -699,15 +699,25 @@ button {
    fade is on the clipped state alone: a fade under text that already ended
    would promise a rest that isn't there. */
 .strip-prose {
+  /* The cap and the fade are one measurement — the fade has to land on the
+     cut — so the cut is stated once and everything else is derived from it. */
+  --strip-cap: 196px;
+  --strip-fade: 46px;
   margin: 6px 0 0;
   max-width: 700px;
-  max-height: 196px;
+  max-height: var(--strip-cap);
   overflow: hidden;
 }
 
 .strip-prose-clipped {
-  -webkit-mask-image: linear-gradient(#000 150px, transparent 194px);
-  mask-image: linear-gradient(#000 150px, transparent 194px);
+  -webkit-mask-image: linear-gradient(
+    #000 calc(var(--strip-cap) - var(--strip-fade)),
+    transparent var(--strip-cap)
+  );
+  mask-image: linear-gradient(
+    #000 calc(var(--strip-cap) - var(--strip-fade)),
+    transparent var(--strip-cap)
+  );
 }
 
 /* Tighter than the detail view's prose: this is a glance, not a read. The
