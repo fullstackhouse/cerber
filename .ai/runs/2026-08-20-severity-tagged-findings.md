@@ -68,8 +68,8 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 
 ### Phase 1: Schema and severity survival
 
-- [ ] 1.1 Optional severity enum on comment, AI-review, and revision schemas
-- [ ] 1.2 Thread severity through runner and revise; survival tests on all rewrite paths
+- [x] 1.1 Optional severity enum on comment, AI-review, and revision schemas — de76acd
+- [x] 1.2 Thread severity through runner and revise; survival tests on all rewrite paths — de76acd
 
 ### Phase 2: Prompts
 
