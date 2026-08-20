@@ -60,6 +60,8 @@ Adds `isDraft` to the artifact schema, removes the filter, and keeps the flag ho
 
 ## Progress
 
+PR: #17
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Draft PRs reach the inbox
