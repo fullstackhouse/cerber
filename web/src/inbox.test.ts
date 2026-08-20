@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell, walkable } from "./inbox";
+import {
+  ageLabel,
+  hiddenAwaiting,
+  hiddenAwaitingNote,
+  isArchived,
+  sortReviews,
+  stillAwaitingLabel,
+  strip,
+  tabOf,
+  verdictCell,
+  walkable,
+} from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
@@ -83,6 +94,81 @@ describe("walkable", () => {
     expect(walkable(list).map((r) => r.key)).toEqual(["a", "b"]);
     const settled = [{ ...list[0]!, status: "reviewed" }, list[1]!];
     expect(walkable(settled).map((r) => r.key)).toEqual(["b"]);
+  });
+});
+
+describe("hiddenAwaiting", () => {
+  // The reported case: the strip counted two, the queue showed none.
+  const settledPair = [
+    row({ id: "fsh/groomershop-mercato#375", key: "a", status: "reviewed" }),
+    row({ id: "fsh/open-mercato#98", key: "b", status: "skipped" }),
+  ];
+
+  it("finds the awaiting PRs the queue filed away", () => {
+    const hidden = hiddenAwaiting(
+      settledPair,
+      daemon({ awaiting: ["fsh/groomershop-mercato#375", "fsh/open-mercato#98"] }),
+    );
+    expect(hidden.map((r) => r.key)).toEqual(["a", "b"]);
+    // …and the queue itself is genuinely empty, which is what made them vanish.
+    expect(walkable(settledPair)).toEqual([]);
+  });
+
+  it("stays quiet about the ones the queue is already showing", () => {
+    const list = [row({ id: "acme/web#1", key: "shown", status: "ready" })];
+    expect(hiddenAwaiting(list, daemon({ awaiting: ["acme/web#1"] }))).toEqual([]);
+  });
+
+  it("surfaces one GitHub still wants even while others fill the queue", () => {
+    const list = [...settledPair, row({ id: "acme/web#9", key: "live", status: "ready" })];
+    const hidden = hiddenAwaiting(list, daemon({ awaiting: ["fsh/open-mercato#98", "acme/web#9"] }));
+    expect(hidden.map((r) => r.key)).toEqual(["b"]);
+  });
+
+  it("surfaces an awaiting PR cerber has archived on stale state", () => {
+    const closed = row({ id: "acme/web#4", key: "c", pr: { ...row().pr, state: "CLOSED" } });
+    expect(hiddenAwaiting([closed], daemon({ awaiting: ["acme/web#4"] })).map((r) => r.key)).toEqual(["c"]);
+  });
+
+  it("claims nothing when there is no poll to claim it", () => {
+    expect(hiddenAwaiting(settledPair, daemon({ awaiting: [] }))).toEqual([]);
+    expect(hiddenAwaiting(settledPair, null)).toEqual([]);
+    expect(hiddenAwaiting(settledPair, { enabled: false })).toEqual([]);
+  });
+});
+
+describe("hiddenAwaitingNote", () => {
+  it("leads with how many GitHub wants, then says where they went", () => {
+    expect(hiddenAwaitingNote([row({ status: "reviewed" }), row({ status: "skipped" })])).toBe(
+      "Nothing new in the inbox — but GitHub still asks you for 2 reviews. " +
+        "They are already settled here, so they sit in the drawers below.",
+    );
+  });
+
+  it("reads as one review when there is one", () => {
+    expect(hiddenAwaitingNote([row({ status: "skipped" })])).toBe(
+      "Nothing new in the inbox — but GitHub still asks you for 1 review. " +
+        "It is already settled here, so it sits in the drawers below.",
+    );
+  });
+
+  it("does not call an archived row settled — nobody settled it", () => {
+    const closed = row({ pr: { ...row().pr, state: "CLOSED" } });
+    expect(hiddenAwaitingNote([closed])).toContain("already settled or archived here");
+  });
+});
+
+describe("stillAwaitingLabel", () => {
+  const a = row({ id: "acme/web#1", key: "a", status: "reviewed" });
+  const b = row({ id: "acme/web#2", key: "b", status: "skipped" });
+
+  it("counts only the rows in this drawer that GitHub still wants", () => {
+    expect(stillAwaitingLabel([a, b], [a])).toBe(" · 1 still awaiting you");
+    expect(stillAwaitingLabel([a, b], [a, b])).toBe(" · 2 still awaiting you");
+  });
+
+  it("leaves a drawer of finished work reading as it always did", () => {
+    expect(stillAwaitingLabel([a, b], [])).toBe("");
   });
 });
 
