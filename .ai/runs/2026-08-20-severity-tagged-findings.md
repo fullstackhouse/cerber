@@ -73,8 +73,8 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 
 ### Phase 2: Prompts
 
-- [ ] 2.1 Review prompt: severity table, grade-as-if-true, verdict-follows-worst rule
-- [ ] 2.2 Chat prompt: revision severity and renderReview tags
+- [x] 2.1 Review prompt: severity table, grade-as-if-true, verdict-follows-worst rule — 417fb46
+- [x] 2.2 Chat prompt: revision severity and renderReview tags — 417fb46
 
 ### Phase 3: Send and autosend
 
