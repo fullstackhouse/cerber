@@ -80,6 +80,6 @@ Adds `isDraft` to the artifact schema, removes the filter, and keeps the flag ho
 
 ### Phase 3: Tests and validation
 
-- [ ] 3.1 Server tests for POST /api/reviews
-- [ ] 3.2 Tests for the draft discovery and refresh paths
-- [ ] 3.3 Full validation gate
+- [x] 3.1 Server tests for POST /api/reviews — 7c5dfe2
+- [x] 3.2 Tests for the draft discovery and refresh paths — 7c5dfe2
+- [x] 3.3 Full validation gate — 7c5dfe2
