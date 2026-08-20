@@ -86,8 +86,8 @@ cockpit names any awaiting PR its own filters are hiding.
 
 ### Phase 1: The daemon publishes what it found
 
-- [ ] 1.1 DaemonStatus.awaiting published from the last successful discovery
-- [ ] 1.2 Tests for publish, poll-off clear, and failed-poll retention
+- [x] 1.1 DaemonStatus.awaiting published from the last successful discovery — 6fd22dd
+- [x] 1.2 Tests for publish, poll-off clear, and failed-poll retention — 6fd22dd
 
 ### Phase 2: The cockpit stops contradicting itself
 
