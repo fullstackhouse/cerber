@@ -157,7 +157,11 @@ function LineComposer({
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") onClose();
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text) onAdd(text);
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text) {
+            // Or the browser types the newline into the box on the way out.
+            e.preventDefault();
+            onAdd(text);
+          }
         }}
       />
       <div className="line-composer-actions">
@@ -274,7 +278,11 @@ function DiffBlock({
     }
     setSlots(placed);
 
+    // A review that was sent while the composer was open has no more comments
+    // to take. Dropping the slot alone wouldn't do it — the parking effect
+    // would put the composer straight back on the next render.
     if (readOnly) {
+      setPick(null);
       setPickSlot(null);
       return;
     }
@@ -295,7 +303,15 @@ function DiffBlock({
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line-add";
-        button.title = `Say something about ${path}:${target.line}`;
+        const label = `Say something about ${path}:${target.line}`;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        // Out of the tab order on purpose: a chapter's diff has hundreds of
+        // rows, and tabbing through every one of them to reach the page's
+        // next control would be worse than no keyboard path at all. The
+        // chapter's own "add a comment" form is that path, and it takes the
+        // file and line by hand.
+        button.tabIndex = -1;
         button.dataset.path = path;
         button.dataset.line = String(target.line);
         button.dataset.side = target.side;
@@ -324,7 +340,7 @@ function DiffBlock({
   // that opening and closing it doesn't rebuild the whole diff.
   useEffect(() => {
     const root = ref.current;
-    if (!root || !pick) {
+    if (!root || !pick || readOnly) {
       setPickSlot(null);
       return;
     }
@@ -347,7 +363,7 @@ function DiffBlock({
     const inserted = insertRow(row, "line-composer-row");
     setPickSlot(inserted.holder);
     return () => inserted.tr.remove();
-  }, [pick, slots]);
+  }, [pick, slots, readOnly]);
 
   if (!rendered) return <p className="muted">No diff for this chapter.</p>;
   const unplaced = comments.filter((c) => !slots.some((s) => s.id === c.id));

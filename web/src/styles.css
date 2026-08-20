@@ -1434,8 +1434,12 @@ button {
   opacity: 0;
 }
 
-.diff tr:hover .line-add,
-.diff .line-add:focus-visible {
+/* It stays clickable while invisible on purpose. The cell underneath holds
+   two line numbers and nothing else — diff2html already marks them
+   unselectable and gives the cell a pointer cursor — so there is no click
+   here to swallow, and gating on hover instead would make the first click
+   after the pointer arrives depend on a repaint having landed. */
+.diff tr:hover .line-add {
   opacity: 1;
 }
 

@@ -165,6 +165,17 @@ export interface ChatPromptOptions {
 /** Human names for what the user pointed at, so the model can find it. */
 function describeRefs(artifact: Artifact, refs: ChatTurn["refs"]): string {
   if (refs.length === 0) return "";
+  // Quoting a line means walking the whole diff, so each side is walked at
+  // most once per turn — and not at all unless a line ref asks for it.
+  const walked = new Map<"new" | "old", Map<string, Map<number, string>>>();
+  const sideText = (side: "new" | "old") => {
+    const already = walked.get(side);
+    if (already) return already;
+    const text = (side === "old" ? oldSideLineText : newSideLineText)(artifact.diff);
+    walked.set(side, text);
+    return text;
+  };
+
   const lines = refs.map((ref) => {
     if (ref.target === "summary") return "- the summary";
     if (ref.target === "verdict") return "- the verdict";
@@ -172,7 +183,7 @@ function describeRefs(artifact: Artifact, refs: ChatTurn["refs"]): string {
       const ch = artifact.chapters.find((c) => c.id === ref.id);
       return `- the chapter "${ch?.title ?? ref.id}" (chapterId: ${ref.id})`;
     }
-    if (ref.target === "line") return describeLineRef(artifact, ref);
+    if (ref.target === "line") return describeLineRef(ref, sideText);
     const c = artifact.comments.find((x) => x.id === ref.id);
     return c
       ? `- the comment on ${c.path}:${c.line ?? "file"} (commentId: ${c.id})`
@@ -185,11 +196,14 @@ function describeRefs(artifact: Artifact, refs: ChatTurn["refs"]): string {
  * A line of the diff the user clicked, quoted back so the model is looking at
  * the same thing they are — a number alone would make it count rows.
  */
-function describeLineRef(artifact: Artifact, ref: ChatTurn["refs"][number]): string {
+function describeLineRef(
+  ref: ChatTurn["refs"][number],
+  sideText: (side: "new" | "old") => Map<string, Map<number, string>>,
+): string {
   if (ref.path == null || ref.line == null) return "- a line of the diff";
   const removed = ref.side === "old";
   const where = `${ref.path}:${ref.line}${removed ? " (a line this PR removes)" : ""}`;
-  const text = (removed ? oldSideLineText : newSideLineText)(artifact.diff)
+  const text = sideText(removed ? "old" : "new")
     .get(ref.path)
     ?.get(ref.line);
   return text?.trim() ? `- ${where} — \`${text.trim()}\`` : `- ${where}`;
