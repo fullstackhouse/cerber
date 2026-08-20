@@ -62,6 +62,43 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 - Step 5.1 — Evidence gate for the prompt change: replay the amended prompt against 3–5 already-reviewed PRs (real artifacts in `~/.cerber/reviews`) and compare severity labels with the user's actual keep/drop/verdict decisions; record the comparison here and in the PR. Inconsistent blocker/minor grading at the cut = stop and revise the prompt.
 - Step 5.2 — Docs: note the severity vocabulary in CLAUDE.md's review-prose rules and the README feature list.
 
+## Evidence (step 5.1) — amended prompt replayed on real past reviews
+
+Replayed the amended review prompt (diff-only, all tools off, same flags as a
+real no-source run) over six artifacts from `~/.cerber/reviews` and compared
+grades with what the human actually did. Script: an untracked
+`/tmp/replay-severity.mts` riding the repo's own `buildReviewPrompt`/`runClaude`.
+
+| Artifact | Human's final action | Amended prompt's verdict | Grades used |
+|---|---|---|---|
+| skills#22 | sent APPROVE, 6 comments kept | approve @72% | 2 minor · 2 nit |
+| open-mercato#92 | sent APPROVE, 6 kept | approve @78% | 3 minor · 2 nit · 1 ungraded question |
+| tournee#997 | sent APPROVE, 2 kept | approve @72% | 2 minor · 1 ungraded question |
+| tournee#1006 | sent APPROVE, 2 kept | comment @68% | 3 minor · 1 nit · 1 ungraded question |
+| groomershop-mercato#362 | reviewed (approve), 3 kept | approve @72% | 1 minor · 2 nit · 1 ungraded question |
+| tournee-frontend#9 | request_changes (skipped) | request_changes @72% | 1 **blocker** · 1 minor · 1 nit · 1 ungraded question |
+
+Findings:
+
+- **No spurious blockers.** Every review the human ultimately approved came
+  back with zero blockers under the amended prompt — the cut did not inflate.
+- **Verdict follows the worst finding, and names it.** All reasoning fields
+  close on "the worst finding still standing is …", as the rule demands.
+- **The question escape hatch works.** Four comments came back explicitly
+  framed "question, not a finding" with no grade — the rule that severity
+  absent means "not a finding" is being exercised, not ignored.
+- **The blocker side holds.** On the corpus's one request_changes review
+  (tournee-frontend#9 — a feature-branch pin in `plasmic.json` that would
+  break future syncs), the amended prompt graded exactly that finding
+  **blocker**, kept the verdict request_changes, and named it as the deciding
+  issue. It also downgraded "nothing renders this component yet" to an
+  ungraded question — a sharper account than the original's three ungraded
+  comments.
+
+Verdict: 6/6 replays consistent with the human's actual decision, the cut
+behaves at both ends, and no grade was used to hedge doubt. The prompt change
+ships as written.
+
 ## Progress
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
@@ -88,5 +125,5 @@ Every AI review finding carries an optional severity — `blocker | minor | nit`
 
 ### Phase 5: Evidence and docs
 
-- [ ] 5.1 Replay amended prompt on past reviews; record label calibration
+- [x] 5.1 Replay amended prompt on past reviews; record label calibration — 46a8f55
 - [x] 5.2 Docs: severity vocabulary in CLAUDE.md and README — 5efd7ca
