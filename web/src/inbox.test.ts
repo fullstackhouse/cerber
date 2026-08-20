@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell, walkable } from "./inbox";
+import {
+  ageLabel,
+  hiddenAwaiting,
+  hiddenAwaitingNote,
+  isArchived,
+  replyOf,
+  replyTag,
+  sortReviews,
+  stillAwaitingLabel,
+  strip,
+  tabOf,
+  verdictCell,
+  walkable,
+} from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
@@ -26,6 +39,9 @@ const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
   ...over,
 });
 
+/** Awaiting entries for ids we don't care about the reply state of. */
+const at = (...ids: string[]) => ids.map((id) => ({ id, reply: "none" as const }));
+
 const daemon = (over: Partial<Extract<DaemonStatus, { enabled: true }>> = {}): DaemonStatus => ({
   enabled: true,
   polling: false,
@@ -39,6 +55,7 @@ const daemon = (over: Partial<Extract<DaemonStatus, { enabled: true }>> = {}): D
   lastPollAt: null,
   nextPollAt: null,
   lastSummary: null,
+  awaiting: [],
   lastPollError: null,
   autoSend: "shadow",
   autoSendThreshold: 85,
@@ -82,6 +99,120 @@ describe("walkable", () => {
     expect(walkable(list).map((r) => r.key)).toEqual(["a", "b"]);
     const settled = [{ ...list[0]!, status: "reviewed" }, list[1]!];
     expect(walkable(settled).map((r) => r.key)).toEqual(["b"]);
+  });
+});
+
+describe("hiddenAwaiting", () => {
+  // The reported case: the strip counted two, the queue showed none.
+  const settledPair = [
+    row({ id: "fsh/groomershop-mercato#375", key: "a", status: "reviewed" }),
+    row({ id: "fsh/open-mercato#98", key: "b", status: "skipped" }),
+  ];
+
+  it("finds the awaiting PRs the queue filed away", () => {
+    const hidden = hiddenAwaiting(
+      settledPair,
+      daemon({ awaiting: at("fsh/groomershop-mercato#375", "fsh/open-mercato#98") }),
+    );
+    expect(hidden.map((r) => r.key)).toEqual(["a", "b"]);
+    // …and the queue itself is genuinely empty, which is what made them vanish.
+    expect(walkable(settledPair)).toEqual([]);
+  });
+
+  it("stays quiet about the ones the queue is already showing", () => {
+    const list = [row({ id: "acme/web#1", key: "shown", status: "ready" })];
+    expect(hiddenAwaiting(list, daemon({ awaiting: at("acme/web#1") }))).toEqual([]);
+  });
+
+  it("surfaces one GitHub still wants even while others fill the queue", () => {
+    const list = [...settledPair, row({ id: "acme/web#9", key: "live", status: "ready" })];
+    const hidden = hiddenAwaiting(list, daemon({ awaiting: at("fsh/open-mercato#98", "acme/web#9") }));
+    expect(hidden.map((r) => r.key)).toEqual(["b"]);
+  });
+
+  it("surfaces an awaiting PR cerber has archived on stale state", () => {
+    const closed = row({ id: "acme/web#4", key: "c", pr: { ...row().pr, state: "CLOSED" } });
+    expect(hiddenAwaiting([closed], daemon({ awaiting: at("acme/web#4") })).map((r) => r.key)).toEqual(["c"]);
+  });
+
+  it("claims nothing when there is no poll to claim it", () => {
+    expect(hiddenAwaiting(settledPair, daemon({ awaiting: [] }))).toEqual([]);
+    expect(hiddenAwaiting(settledPair, null)).toEqual([]);
+    expect(hiddenAwaiting(settledPair, { enabled: false })).toEqual([]);
+  });
+});
+
+describe("hiddenAwaitingNote", () => {
+  it("reports the open request, rather than telling you what you owe", () => {
+    expect(hiddenAwaitingNote([row({ status: "reviewed" }), row({ status: "skipped" })])).toBe(
+      "Nothing new in the inbox — but GitHub still has 2 review requests open on you. " +
+        "You settled them here without submitting a review, so they sit in the drawers below, tagged with whose move it is.",
+    );
+  });
+
+  it("reads as one request when there is one", () => {
+    expect(hiddenAwaitingNote([row({ status: "skipped" })])).toBe(
+      "Nothing new in the inbox — but GitHub still has 1 review request open on you. " +
+        "You settled it here without submitting a review, so it sits in the drawers below, tagged with whose move it is.",
+    );
+  });
+
+  it("never contradicts the decision the row already shows", () => {
+    // "still awaiting you" beside a `skipped` badge read as two opposite claims
+    // about the same row. The note states GitHub's side and leaves the decision be.
+    const note = hiddenAwaitingNote([row({ status: "skipped" })]);
+    expect(note).not.toMatch(/awaits? you|still asks you for/);
+    expect(note).toContain("without submitting a review");
+  });
+
+  it("does not call an archived row settled — nobody settled it", () => {
+    const closed = row({ pr: { ...row().pr, state: "CLOSED" } });
+    expect(hiddenAwaitingNote([closed])).toContain("settled or archived it here");
+  });
+});
+
+describe("replyOf / replyTag", () => {
+  const r = row({ id: "acme/web#1" });
+
+  it("carries whose move it is off the last poll", () => {
+    expect(replyOf(r, daemon({ awaiting: [{ id: "acme/web#1", reply: "them" }] }))).toBe("them");
+  });
+
+  it("claims nothing about a row the poll never mentioned", () => {
+    expect(replyOf(r, daemon({ awaiting: at("acme/web#9") }))).toBe("unknown");
+    expect(replyOf(r, daemon())).toBe("unknown");
+    expect(replyOf(r, null)).toBe("unknown");
+  });
+
+  it("says who is waiting, not what you owe", () => {
+    // The complaint that started this: a tag reading as a demand beside a
+    // `skipped` badge. Every label states a fact about the conversation.
+    expect(replyTag("none").label).toBe("you haven't replied");
+    expect(replyTag("you").label).toBe("waiting on them");
+    expect(replyTag("them").label).toBe("they replied last");
+  });
+
+  it("falls back to the bare fact when the conversation could not be read", () => {
+    // Never guess "you haven't replied" at someone who has — that is the very
+    // mislabel this feature exists to prevent.
+    expect(replyTag("unknown").label).toBe("unanswered on GitHub");
+    expect(replyTag("unknown").title).toContain("could not read the conversation");
+  });
+});
+
+describe("stillAwaitingLabel", () => {
+  const a = row({ id: "acme/web#1", key: "a", status: "reviewed" });
+  const b = row({ id: "acme/web#2", key: "b", status: "skipped" });
+
+  it("counts the open requests in this drawer, without claiming whose move it is", () => {
+    // The rows say whose move it is. A label asserting they are all on you
+    // would contradict a row that reads "waiting on them".
+    expect(stillAwaitingLabel([a, b], [a])).toBe(" · 1 open review request");
+    expect(stillAwaitingLabel([a, b], [a, b])).toBe(" · 2 open review requests");
+  });
+
+  it("leaves a drawer of finished work reading as it always did", () => {
+    expect(stillAwaitingLabel([a, b], [])).toBe("");
   });
 });
 

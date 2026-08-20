@@ -508,6 +508,15 @@ button {
   background: var(--line-3);
 }
 
+/* A drawer row GitHub is still asking you for, whatever you decided here. It
+   is the one thing in a drawer of finished work that isn't finished, so it
+   carries the queue's own attention colour rather than the drawer's grey. */
+.tag-awaiting {
+  flex-shrink: 0;
+  color: var(--amber);
+  background: rgba(160, 106, 0, 0.1);
+}
+
 .col-caret {
   width: 12px;
   flex-shrink: 0;
@@ -642,10 +651,17 @@ button {
 
 .drawer-rows {
   margin: 8px 0 14px;
+}
+
+/* Dealt-with work reads quieter than the queue — dimmed per row rather than on
+   the drawer, so a row can opt back out (hover, or one GitHub still wants).
+   A group opacity on the container would cap its children and neither could. */
+.row-settled {
   opacity: 0.62;
 }
 
-.row-settled:hover {
+.row-settled:hover,
+.row-awaiting {
   opacity: 1;
 }
 

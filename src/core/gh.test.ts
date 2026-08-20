@@ -1,4 +1,112 @@
-import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
+import { classifyReply, currentLogin, resetLoginCache } from "./gh.js";
+
+// gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
+// resolves to the `{ stdout }` shape the real one does, while still recording
+// the calls on the spy itself.
+vi.mock("node:child_process", () => {
+  const execFile = vi.fn();
+  (execFile as unknown as Record<symbol, unknown>)[Symbol.for("nodejs.util.promisify.custom")] = (
+    ...args: unknown[]
+  ) => Promise.resolve(execFile(...(args as [])));
+  return { execFile };
+});
+const exec = execFile as unknown as Mock;
+
+describe("currentLogin", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetLoginCache();
+  });
+
+  it("asks gh once and reuses the answer", async () => {
+    exec.mockResolvedValue({ stdout: "jtomaszewski\n" });
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries after a failure instead of failing forever", async () => {
+    // A cached rejection would leave every later poll reporting "unknown"
+    // until the process restarts — gh being briefly offline or mid-re-auth
+    // must not permanently disable whose-move detection.
+    exec
+      .mockRejectedValueOnce(Object.assign(new Error("boom"), { stderr: "gh: not authenticated" }))
+      .mockResolvedValue({ stdout: "jtomaszewski\n" });
+    await expect(currentLogin()).rejects.toThrow("not authenticated");
+    expect(await currentLogin()).toBe("jtomaszewski");
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("classifyReply", () => {
+  const c = (author: string, at: string) => ({ author, at, bot: false });
+  const bot = (author: string, at: string) => ({ author, at, bot: true });
+
+  it("says nobody has heard from you when you never spoke", () => {
+    expect(classifyReply([], "me")).toBe("none");
+    expect(classifyReply([c("them", "2026-08-19T10:00:00Z")], "me")).toBe("none");
+  });
+
+  it("leaves the move with them while yours is the last word", () => {
+    expect(
+      classifyReply([c("them", "2026-08-19T10:00:00Z"), c("me", "2026-08-19T11:00:00Z")], "me"),
+    ).toBe("you");
+  });
+
+  it("hands the move back when someone answers after you", () => {
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), c("them", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("them");
+  });
+
+  it("weighs your LAST word, not your first", () => {
+    // Argue, get answered, argue again: the move is theirs, not yours.
+    expect(
+      classifyReply(
+        [
+          c("me", "2026-08-19T10:00:00Z"),
+          c("them", "2026-08-19T11:00:00Z"),
+          c("me", "2026-08-19T12:00:00Z"),
+        ],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("does not treat a simultaneous comment as an answer to yours", () => {
+    const t = "2026-08-19T10:00:00Z";
+    expect(classifyReply([c("me", t), c("them", t)], "me")).toBe("you");
+  });
+
+  it("does not let a bot hand the move back to you", () => {
+    // A repo whose CI comments on every push would otherwise read
+    // "they replied last" on every PR, and the tag would mean nothing.
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), bot("github-actions[bot]", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("spots a bot by its name when GitHub does not type it as one", () => {
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), c("notion-workspace[bot]", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("never counts a bot as you having spoken", () => {
+    expect(classifyReply([bot("me", "2026-08-19T10:00:00Z")], "me")).toBe("none");
+  });
+});
 import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
 
 describe("parsePrRef", () => {

@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
-import { SETTLED, Tab, TABS, ageLabel, isArchived, sortReviews, strip, tabOf, verdictCell } from "./inbox";
-import { DaemonStatus, ReviewListItem } from "./types";
+import {
+  SETTLED,
+  Tab,
+  TABS,
+  ageLabel,
+  hiddenAwaiting,
+  hiddenAwaitingNote,
+  isArchived,
+  isHiddenAwaiting,
+  replyOf,
+  replyTag,
+  sortReviews,
+  stillAwaitingLabel,
+  strip,
+  tabOf,
+  verdictCell,
+} from "./inbox";
+import { DaemonStatus, Reply, ReviewListItem } from "./types";
 
 const openReview = (key: string) => {
   window.location.hash = `#/r/${encodeURIComponent(key)}`;
@@ -124,9 +140,26 @@ function Row({
 }
 
 /** A row in one of the drawers: still openable, but out of the day's way. */
-function SettledRow({ r, verdict, tag }: { r: ReviewListItem; verdict: string; tag?: string }) {
+function SettledRow({
+  r,
+  verdict,
+  tag,
+  awaiting,
+}: {
+  r: ReviewListItem;
+  verdict: string;
+  tag?: string;
+  /** Whose move it is on GitHub, when GitHub still asks you for this one. */
+  awaiting?: Reply | null;
+}) {
+  const request = awaiting ? replyTag(awaiting) : null;
   return (
-    <div className="row row-settled" onClick={() => openReview(r.key)} role="button" tabIndex={-1}>
+    <div
+      className={`row row-settled${request ? " row-awaiting" : ""}`}
+      onClick={() => openReview(r.key)}
+      role="button"
+      tabIndex={-1}
+    >
       <span className="col-caret" />
       <span className="col-slug" title={`${r.pr.owner}/${r.pr.repo}#${r.pr.number}`}>
         {r.pr.repo}#{r.pr.number}
@@ -137,6 +170,11 @@ function SettledRow({ r, verdict, tag }: { r: ReviewListItem; verdict: string; t
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
+      {request && (
+        <span className="tag tag-awaiting" title={request.title}>
+          {request.label}
+        </span>
+      )}
       {tag && <span className="tag tag-done">{tag}</span>}
       <span className="col-comments">{r.commentCount || ""}</span>
       <span className="col-size">{r.pr.changedFiles > 0 ? `${r.pr.changedFiles}f` : "—"}</span>
@@ -218,6 +256,9 @@ export function Queue() {
     [open],
   );
   const sent = useMemo(() => sortReviews(open.filter((r) => r.status === "sent")), [open]);
+  // What GitHub still wants from you that none of the above is showing. The
+  // strip has always counted these; until now nothing could point at them.
+  const hidden = useMemo(() => hiddenAwaiting(all, daemon), [all, daemon]);
   const rows = useMemo(
     () => (tab === "all" ? live : live.filter((r) => tabOf(r) === tab)),
     [live, tab],
@@ -298,10 +339,31 @@ export function Queue() {
         <div className="wrap">
           <div className="empty">
             {daemon?.enabled ? (
-              <p>
-                Inbox empty — nothing awaits your review.
-                {daemon.lastPollError ? " (Discovery is offline; check gh auth.)" : ""}
-              </p>
+              hidden.length > 0 ? (
+                // Never "nothing awaits your review" over the top of a poll that
+                // just counted some: say how many, and open the drawer they are in.
+                <>
+                  <p>{hiddenAwaitingNote(hidden)}</p>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      // Only the drawers that actually hold one — opening the
+                      // rest would bury what you asked to see.
+                      if (settled.some((r) => isHiddenAwaiting(r, hidden))) setShowSettled(true);
+                      if (sent.some((r) => isHiddenAwaiting(r, hidden))) setShowSent(true);
+                      if (archived.some((r) => isHiddenAwaiting(r, hidden))) setShowArchived(true);
+                    }}
+                  >
+                    <Icon name="arrowRight" />
+                    show {hidden.length === 1 ? "it" : `all ${hidden.length}`}
+                  </button>
+                </>
+              ) : (
+                <p>
+                  Inbox empty — nothing awaits your review.
+                  {daemon.lastPollError ? " (Discovery is offline; check gh auth.)" : ""}
+                </p>
+              )
             ) : (
               <>
                 <p>No reviews yet.</p>
@@ -429,10 +491,16 @@ export function Queue() {
             <Drawer
               open={showSettled}
               onToggle={() => setShowSettled(!showSettled)}
-              label={`settled — ${settled.length} you marked reviewed or skipped`}
+              label={`settled — ${settled.length} you marked reviewed or skipped${stillAwaitingLabel(settled, hidden)}`}
             >
               {settled.map((r) => (
-                <SettledRow key={r.key} r={r} verdict={verdictCell(r).label} tag={r.status} />
+                <SettledRow
+                  key={r.key}
+                  r={r}
+                  verdict={verdictCell(r).label}
+                  tag={r.status}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
+                />
               ))}
             </Drawer>
           )}
@@ -440,13 +508,14 @@ export function Queue() {
             <Drawer
               open={showSent}
               onToggle={() => setShowSent(!showSent)}
-              label={`sent — ${sent.length} review${sent.length === 1 ? "" : "s"} on GitHub`}
+              label={`sent — ${sent.length} review${sent.length === 1 ? "" : "s"} on GitHub${stillAwaitingLabel(sent, hidden)}`}
             >
               {sent.map((r) => (
                 <SettledRow
                   key={r.key}
                   r={r}
                   verdict={verdictCell(r).label}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
                 />
               ))}
             </Drawer>
@@ -455,10 +524,15 @@ export function Queue() {
             <Drawer
               open={showArchived}
               onToggle={() => setShowArchived(!showArchived)}
-              label={`archived — ${archived.length} merged/closed PR${archived.length === 1 ? "" : "s"}`}
+              label={`archived — ${archived.length} merged/closed PR${archived.length === 1 ? "" : "s"}${stillAwaitingLabel(archived, hidden)}`}
             >
               {archived.map((r) => (
-                <SettledRow key={r.key} r={r} verdict={r.pr.state?.toLowerCase() ?? ""} />
+                <SettledRow
+                  key={r.key}
+                  r={r}
+                  verdict={r.pr.state?.toLowerCase() ?? ""}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
+                />
               ))}
             </Drawer>
           )}

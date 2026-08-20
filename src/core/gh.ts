@@ -148,6 +148,84 @@ export function mapSearchResults(
     });
 }
 
+/**
+ * Whose move it is on a PR GitHub still holds a review request for.
+ *
+ * A review of any kind — even a bare `COMMENTED` one — clears the request, so
+ * a PR that is still awaiting you has had no review from you at all. The only
+ * place your engagement can hide is the conversation, which is exactly what
+ * this reads. `unknown` means the read failed: it claims nothing rather than
+ * reporting silence we could not confirm.
+ */
+export type Reply = "none" | "you" | "them" | "unknown";
+
+export interface Comment {
+  author: string;
+  at: string;
+  /** CI, changelog and integration bots talk on PRs; none of it is an answer. */
+  bot: boolean;
+}
+
+/** GitHub types bot accounts, and names them `something[bot]` besides. */
+export const isBot = (c: { author: string; bot: boolean }) =>
+  c.bot || c.author.endsWith("[bot]");
+
+/** The PR's conversation comments, oldest first. Not the inline review ones —
+ *  those come attached to a review, which would have cleared the request. */
+export async function fetchConversation(ref: PrRef): Promise<Comment[]> {
+  const out = await gh([
+    "api",
+    "--paginate",
+    `repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`,
+    "--jq",
+    '.[] | {author: .user.login, at: .created_at, bot: (.user.type == "Bot")}',
+  ]);
+  // --jq streams one object per line rather than a JSON array.
+  return out
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as Comment);
+}
+
+/**
+ * Whose move it is, from the conversation: you have not spoken at all, you
+ * spoke last (so it is on them), or a person answered after you (back to you).
+ *
+ * Bots are ignored outright. A repo whose CI posts on every push would
+ * otherwise report "they replied last" on everything, which is the fastest way
+ * to make a signal worthless.
+ */
+export function classifyReply(comments: Comment[], login: string): Reply {
+  const human = comments.filter((c) => !isBot(c));
+  const mine = human.filter((c) => c.author === login);
+  if (mine.length === 0) return "none";
+  const lastMine = mine[mine.length - 1]!.at;
+  // A comment of your own posted at the same instant can't be someone else's
+  // answer to it, so only strictly-later comments hand the move back.
+  return human.some((c) => c.author !== login && c.at > lastMine) ? "them" : "you";
+}
+
+/** The login `@me` resolves to. Asked once — it cannot change mid-process. */
+let cachedLogin: Promise<string> | null = null;
+export function currentLogin(): Promise<string> {
+  cachedLogin ??= gh(["api", "user", "--jq", ".login"]).then(
+    (out) => out.trim(),
+    (err: unknown) => {
+      // A login we could not fetch is not an answer worth keeping. gh may be
+      // offline or mid-re-auth; caching the rejection would leave every later
+      // poll reporting "unknown" until the process restarts.
+      cachedLogin = null;
+      throw err;
+    },
+  );
+  return cachedLogin;
+}
+
+/** Test seam: forget the cached login so the next call asks again. */
+export function resetLoginCache(): void {
+  cachedLogin = null;
+}
+
 export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",

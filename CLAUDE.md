@@ -55,7 +55,15 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
   `daemon.autoReview` is off, archives merged/closed PRs. Config's `daemon`
-  block is re-read every poll, so cockpit toggles apply without a restart
+  block is re-read every poll, so cockpit toggles apply without a restart.
+  Each poll also publishes what it found (`status.awaiting`): the queue filters
+  on what you settled locally, which stops matching what GitHub asks you for the
+  moment you skip a PR, so the cockpit needs the list to name the awaiting PRs
+  its own filters are hiding rather than claim there are none. Each entry also
+  carries whose move it is, read from the PR conversation (`classifyReply`) —
+  an open request only means you never pressed GitHub's review button, not that
+  anyone is blocked on you. Bots are excluded, and a read that fails reports
+  `unknown` rather than guessing silence at someone who did reply
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and

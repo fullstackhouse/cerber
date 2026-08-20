@@ -41,6 +41,24 @@ for reviews you sent, one for the ones you marked reviewed or skipped, one for
 merged and closed PRs — and PRs in archived repos are never picked up at all,
 since the repo is read-only and a review could never be sent.
 
+Settling a review is your decision, not GitHub's: skip a PR, or mark one
+reviewed without sending, and GitHub still holds its review request open,
+because nothing cerber does here reaches it. Those rows stay marked where they
+sit, counted on the drawer they went into, and named in place of the empty
+inbox — cerber never tells you nothing awaits you while its own poll says
+otherwise. It is a report, not a nag: what you decided here stands, and the
+mark clears itself the moment GitHub hears from you.
+
+An open request doesn't mean the ball is yours, though. You may have argued the
+whole thing out in the PR conversation and never pressed GitHub's review
+button, which leaves the request open with nothing blocked on you. So cerber
+reads the conversation and says whose move it is: `you haven't replied` (they
+are waiting), `waiting on them` (you had the last word), or `they replied last`
+(it is back with you). Bots don't count as an answer, or a chatty CI would put
+every PR back on you. If the conversation can't be read it says `unanswered on
+GitHub` and claims nothing further — guessing "you never replied" at someone
+who did is the one mistake worth designing against.
+
 The cockpit is a background tab most of the day, so it tells you when the queue
 grows: a desktop notification naming the PR that arrived — click it to open the
 review — folded into one popup when several land at once. It stays quiet while

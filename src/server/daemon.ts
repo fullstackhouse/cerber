@@ -1,7 +1,16 @@
 import { Artifact, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
 import { loadConfig } from "../core/config.js";
-import { DiscoveredPr, fetchPrInfo, searchAwaitingMe, submitReview } from "../core/gh.js";
+import {
+  DiscoveredPr,
+  Reply,
+  classifyReply,
+  currentLogin,
+  fetchConversation,
+  fetchPrInfo,
+  searchAwaitingMe,
+  submitReview,
+} from "../core/gh.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   appendAutoSendLog,
@@ -40,6 +49,17 @@ export interface DaemonOptions {
   autoSendThreshold: number;
 }
 
+/**
+ * A PR awaiting your review, and whose move it is on it. The request alone
+ * doesn't say: you may have argued the whole thing out in the conversation
+ * without ever pressing GitHub's review button, which leaves the request open
+ * and the ball in the author's court.
+ */
+export interface AwaitingPr {
+  id: string;
+  reply: Reply;
+}
+
 export interface DaemonStatus {
   enabled: true;
   polling: boolean;
@@ -55,6 +75,14 @@ export interface DaemonStatus {
   lastPollAt: string | null;
   nextPollAt: string | null;
   lastSummary: string | null;
+  /**
+   * The PRs GitHub still holds a review request from you on, from the last poll
+   * that reached it. The cockpit filters its queue on what you have dealt with
+   * locally, which stops matching this the moment you skip a PR or mark one
+   * reviewed without sending — so it needs this list to say what it is hiding.
+   * Empty while polling is off: discovery you turned off makes no claim.
+   */
+  awaiting: AwaitingPr[];
   /** Set while GitHub discovery is failing (gh unauthed, offline) — the queue still works. */
   lastPollError: string | null;
   autoSend: "shadow" | "on";
@@ -143,6 +171,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     lastPollAt: null,
     nextPollAt: new Date(Date.now()).toISOString(),
     lastSummary: null,
+    awaiting: [],
     lastPollError: null,
     autoSend: opts.autoSend,
     autoSendThreshold: opts.autoSendThreshold,
@@ -232,6 +261,33 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     return { discovered };
   }
 
+  /**
+   * Whose move it is on each awaiting PR, one conversation read apiece.
+   *
+   * GitHub's `commenter:` search qualifier would answer this in a single call,
+   * but it demonstrably disagrees with the REST API — it misses PRs whose only
+   * comment is the newest thing on them — and a tag that says "you never
+   * replied" to someone who did is the exact bug this whole change fixes. So
+   * the conversation is read per PR, bounded by the review concurrency. A read
+   * that fails yields `unknown`, which claims nothing.
+   */
+  async function classifyAll(refs: DiscoveredPr[]): Promise<AwaitingPr[]> {
+    let login: string;
+    try {
+      login = await currentLogin();
+    } catch {
+      // Without knowing who you are, no comment can be attributed to you.
+      return refs.map((ref) => ({ id: artifactId(ref), reply: "unknown" as const }));
+    }
+    return pool(refs, opts.parallel, async (ref) => {
+      try {
+        return { id: artifactId(ref), reply: classifyReply(await fetchConversation(ref), login) };
+      } catch {
+        return { id: artifactId(ref), reply: "unknown" as const };
+      }
+    });
+  }
+
   async function reviewAll(refs: DiscoveredPr[]): Promise<{ reviewed: number; skipped: number; failed: number }> {
     let reviewed = 0;
     let skipped = 0;
@@ -283,14 +339,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
 
       if (!knobs.poll) {
-        // Deliberately off is not an outage — don't leave a stale error up.
+        // Deliberately off is not an outage — don't leave a stale error up, or
+        // a list of PRs we are no longer checking are still awaiting you.
         status.lastPollError = null;
+        status.awaiting = [];
         status.lastSummary = "polling off (settings) — the queue only shows what you review by hand";
         return;
       }
 
       const refs = await discover();
       status.lastPollError = null;
+      // The same refs behind lastSummary's count, so the number the strip shows
+      // and the rows the cockpit can name always come from one answer.
+      // A failed poll leaves the last good list up; lastPollError says so.
+      status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
 
       if (autoReview) {
