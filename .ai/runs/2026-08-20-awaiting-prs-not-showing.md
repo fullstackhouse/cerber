@@ -96,6 +96,10 @@ PR: #15
 - [x] 2.1 hiddenAwaiting + hiddenAwaitingNote in inbox.ts, with tests — efe8a54
 - [x] 2.2 Truthful empty state, drawer tags and counts, tag style — efe8a54
 
+### Phase 2b: Post-review
+
+- [x] Post-review fix: README + CLAUDE.md now say a settled review can still be one GitHub asks you for — 39f1bc5
+
 ### Phase 3: Gate
 
 - [x] 3.1 Full validation gate green — `pnpm typecheck && pnpm test && pnpm build`, 288 tests in 24 files
