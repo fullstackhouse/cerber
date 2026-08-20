@@ -263,6 +263,13 @@ export function Queue() {
   const tab = shownTab(picked, buckets);
   const rows = buckets[tab];
 
+  // Once the fallback has moved you, the inbox is the tab you are on. Leaving
+  // the old choice in state would let a later poll snap you back to it the
+  // moment it refills — a table swapping under you with no click behind it.
+  useEffect(() => {
+    if (tab !== picked) setTab(tab);
+  }, [tab, picked]);
+
   // Keep the cursor on a row that still exists in the current filter.
   const selected = rows.find((r) => r.key === cursor) ?? rows[0] ?? null;
 
@@ -360,7 +367,7 @@ export function Queue() {
               what you have already dealt with on the right. */}
           <div className="tabs">
             {INBOX_TABS.map(tabButton)}
-            {filed.length > 0 && <span className="tab-split" aria-hidden />}
+            {filed.length > 0 && <span className="tab-split" aria-hidden="true" />}
             {filed.map(tabButton)}
             <span className="grow" />
             <PullBox />
