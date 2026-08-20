@@ -916,6 +916,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const verdictEl = useRef<HTMLDivElement | null>(null);
+  const summaryEl = useRef<HTMLDivElement | null>(null);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
@@ -1274,9 +1275,18 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
       <div className="wrap review-body">
         <aside className="rail">
+          {/* The summary is what the page opens with, so the rail opens with it
+              too — a way back to the top of the story after a long walkthrough. */}
+          <button
+            className="rail-item"
+            onClick={() => summaryEl.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            <span className="grow">summary</span>
+          </button>
+
           {chapters.length > 0 && (
             <>
-              <div className="lab">walkthrough</div>
+              <div className="lab rail-lab">walkthrough</div>
               {chapters.map((ch, i) => (
                 <div key={ch.id} className="rail-group">
                   <button
@@ -1354,7 +1364,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
           {error && <div className="error">{error}</div>}
           {artifact.run?.error && <div className="error">Run failed: {artifact.run.error}</div>}
 
-          <div className="card">
+          <div className="card card-summary" ref={summaryEl}>
             <div className="card-body">
               <div className="lab">summary</div>
               <Markdown className="prose lead" text={artifact.summary || "(no summary)"} />

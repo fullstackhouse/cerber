@@ -911,6 +911,7 @@ button {
 /* Jumping to a chapter or a comment must not park it under the sticky head. */
 .chapter,
 .comment,
+.card-summary,
 .verdict-bar {
   scroll-margin-top: calc(var(--top-h, 0px) + 12px);
 }
