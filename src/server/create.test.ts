@@ -4,8 +4,10 @@ import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, SCHEMA_VERSION, PrInfo } from "../core/artifact.js";
 import { fetchPrInfo } from "../core/gh.js";
+import { beginReview, endReview } from "../runner/inflight.js";
+import { saveArtifact } from "../core/state.js";
 import { reviewPr } from "../runner/review.js";
-import { isPureStub } from "./daemon.js";
+import { isPureStub, stubArtifact } from "./daemon.js";
 import { buildApp } from "./index.js";
 
 // The review itself shells out to `claude` for minutes, and fetchPrInfo shells
@@ -116,6 +118,43 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
     // Still once: the second paste opened the existing review, it did not
     // start a competing run against the same artifact file.
     expect(run).toHaveBeenCalledOnce();
+  });
+
+  // The queue can already hold a PR without holding a review of it: with
+  // auto-review off, discovery leaves bare `awaiting` stubs. Pasting such a PR
+  // is the user asking for the review that does not exist yet, so handing the
+  // stub back would answer 200 while quietly dropping the actual request.
+  it("starts the review when the queue holds only an un-reviewed stub", async () => {
+    await saveArtifact(
+      stubArtifact({
+        owner: "acme",
+        repo: "widgets",
+        number: 42,
+        title: "Add a thing",
+        url: URL,
+        updatedAt: "2026-08-20T00:00:00Z",
+        isDraft: false,
+        author: "someone",
+      }),
+    );
+
+    const res = await post({ input: URL });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as Artifact;
+    expect(body.status).toBe("running");
+    expect(isPureStub(body)).toBe(false);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to start a second run while one is already in flight", async () => {
+    beginReview("acme/widgets#42");
+    try {
+      const res = await post({ input: URL });
+      expect(res.status).toBe(409);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      endReview("acme/widgets#42");
+    }
   });
 
   it("reports a reference it cannot parse without starting anything", async () => {

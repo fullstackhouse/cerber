@@ -6,7 +6,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { DaemonHandle } from "./daemon.js";
+import { DaemonHandle, isPureStub } from "./daemon.js";
 import {
   Artifact,
   ArtifactStatusSchema,
@@ -226,10 +226,24 @@ export async function buildApp(
       return c.json({ error: message }, 400);
     }
 
-    // Already here? Hand back what we have rather than starting a second review
-    // of the same PR. Whatever state it is in, the cockpit can open it.
+    // Two tabs, or a retried request, can both get here before either has saved
+    // anything. Letting both through would start a second run whose inflight
+    // claim throws, and whose failure handler would then mark the *first* run's
+    // artifact failed underneath it.
+    if (isReviewRunning(artifactId(ref))) {
+      return c.json({ error: "a review of this PR is already running" }, 409);
+    }
+
+    // Already here? Hand back what we have rather than reviewing it twice — but
+    // only if there is something to hand back. A pure stub is the daemon saying
+    // "GitHub is asking you for this", not a review; pasting its URL is the user
+    // asking for the review that does not exist yet, so that falls through and
+    // runs. Handing the stub over instead would answer 200 while silently
+    // dropping what was actually requested.
     const existing = await loadArtifact(artifactId(ref));
-    if (existing) return c.json({ ...existing, key: artifactKey(existing.id) }, 200);
+    if (existing && !isPureStub(existing)) {
+      return c.json({ ...existing, key: artifactKey(existing.id) }, 200);
+    }
 
     // Validated in-request, on purpose. The run below is detached, so a typo'd
     // URL, a private repo or a logged-out `gh` would otherwise fail with no

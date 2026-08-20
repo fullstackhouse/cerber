@@ -227,7 +227,12 @@ function PullBox({ autoFocus }: { autoFocus?: boolean }) {
         value={input}
         autoFocus={autoFocus}
         disabled={busy}
-        onChange={(e) => setInput(e.target.value)}
+        // Clearing on edit, not on submit: an error left standing while the
+        // user retypes describes a value that is no longer in the box.
+        onChange={(e) => {
+          setInput(e.target.value);
+          if (error) setError(null);
+        }}
         placeholder="Paste a PR URL or owner/repo#123"
         aria-label="Review any PR by URL"
       />
