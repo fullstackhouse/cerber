@@ -1,5 +1,8 @@
 # cerber 🐕
 
+[![npm](https://img.shields.io/npm/v/%40fullstackhouse%2Fcerber)](https://www.npmjs.com/package/@fullstackhouse/cerber)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
 **AI code-review cockpit.** Claude reviews your pull requests into local artifacts —
 a summary, a chaptered walkthrough of the changes, draft inline comments, and a
 verdict with a confidence score. You go through it in a local web cockpit.
@@ -9,6 +12,11 @@ write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
 reviewing is 100% local and read-only.
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
+
+![The queue: three drafted reviews, each with a verdict and confidence in its row; under the cursor, a strip quotes the selected review's own reasoning so it can be judged without opening it.](docs/queue.png)
+
+*Every screenshot in this README is cerber reviewing cerber's own pull
+requests.*
 
 ## Quick start
 
@@ -36,18 +44,23 @@ Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
 same two switches in the cockpit's Settings, which persist in
 `~/.cerber/config.json` and apply on the next poll. The queue only lists what
-still wants you: anything you have settled drops into a drawer under it — one
-for reviews you sent, one for the ones you marked reviewed or skipped, one for
-merged and closed PRs — and PRs in archived repos are never picked up at all,
-since the repo is read-only and a review could never be sent.
+still wants you: anything you have settled moves to the filed tabs right of
+the thin rule in the filter row — reviews you sent, ones you marked reviewed
+or skipped, merged and closed PRs — each tab appearing only while it holds
+something. PRs in archived repos are never picked up at all, since the repo
+is read-only and a review could never be sent.
+
+### Settled means you settled it
 
 Settling a review is your decision, not GitHub's: skip a PR, or mark one
 reviewed without sending, and GitHub still holds its review request open,
 because nothing cerber does here reaches it. Those rows stay marked where they
-sit, counted on the drawer they went into, and named in place of the empty
+sit, counted on the tab they went into, and named in place of the empty
 inbox — cerber never tells you nothing awaits you while its own poll says
 otherwise. It is a report, not a nag: what you decided here stands, and the
 mark clears itself the moment GitHub hears from you.
+
+### Whose move is it
 
 An open request doesn't mean the ball is yours, though. You may have argued the
 whole thing out in the PR conversation and never pressed GitHub's review
@@ -58,6 +71,8 @@ are waiting), `waiting on them` (you had the last word), or `they replied last`
 every PR back on you. If the conversation can't be read it says `unanswered on
 GitHub` and claims nothing further — guessing "you never replied" at someone
 who did is the one mistake worth designing against.
+
+### It taps you on the shoulder
 
 The cockpit is a background tab most of the day, so it tells you when the queue
 grows: a desktop notification naming the PR that arrived — click it to open the
@@ -86,8 +101,15 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
 - **Run metadata** — model, whether it read the source or only the diff, and
   the token spend as an API-rate equivalent
 
+![A review opened in the cockpit: the verdict pill by the PR title, a walkthrough rail listing chapters and their comments on the left, and a summary written in sections — problem first, then the fix, then details.](docs/walkthrough.png)
+
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
-diffs. Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
+diffs. Draft comments sit inline in the diff, anchored to the line they're
+about, each waiting for you to keep, rewrite, or drop it:
+
+![A chapter of the walkthrough: the diff with a draft comment card anchored under the line it discusses, explaining the finding in plain words.](docs/comment.png)
+
+Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
 The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
 and the strip under the table explains whatever it lands on — the verdict's own
@@ -249,6 +271,14 @@ The reviewer revises the draft as it answers: there is no accept step, because
 you already asked for the change. What it changed shows up in the transcript
 (*"✎ rewrote the summary"*, *"✎ dropped the comment on line 250"*).
 
+![Talking to the reviewer: pushed back on a nit, it re-checks the code, corrects the push-back's own claim, drops the comment anyway — and the revision is noted right in the transcript.](docs/chat.png)
+
+That conversation is real: pushed back on a nit, the reviewer re-checked the
+code, corrected the push-back's own claim about the rename's size — and still
+dropped the comment, because a nit hanging off a PR with two real findings
+just dilutes them. The rail counts *2 keeping · 1 dropped*, and nothing about
+the exchange went anywhere near GitHub.
+
 - **It is the same reviewer.** A turn resumes the Claude session the review ran
   in, so it still holds everything it read. Asking "did you actually check
   that?" gets an answer from the run that did or didn't — not from a fresh
@@ -283,24 +313,13 @@ the summary, comments and verdict alone, and is still one deliberate click. A
 review that has already been sent can't be argued with: that artifact is the
 record of what GitHub has.
 
-## Status / roadmap
+## Status
 
-Early, but all six planned phases have shipped.
-
-1. ✅ `cerber review <pr>` + artifact schema + cockpit (read-only)
-2. ✅ Comment editing in the cockpit (edit/approve/drop/add), verdict override,
-   gated **Send** (one deliberate click; posts the review via your `gh` — the
-   only GitHub write in the codebase) + `cerber export` to markdown
-3. ✅ `--awaiting-me` discovery, parallel runs (`--parallel`, default 3),
-   freshness skip (same head SHA → no re-run; `--force` overrides), queue stats
-4. ✅ Inbox mode (now the default): `cerber serve` polls for PRs awaiting your
-   review and reviews them automatically; token auth for non-localhost binds
-5. ✅ Confidence calibration (`cerber stats`), shadow-mode auto-send (default
-   in daemon: logs what would be sent), opt-in `--auto-send` (approve-only,
-   `--auto-send-threshold`, default 90%)
-6. ✅ Reviews keep up with the PR: opening one re-anchors its comments onto new
-   commits, flags the ones whose code is gone, and offers a re-review that
-   keeps everything you wrote
+Early, but whole: everything described above has shipped — reviewing,
+editing and the gated Send, inbox discovery with parallel runs, confidence
+calibration (`cerber stats`), shadow-mode and opt-in auto-send, re-anchoring
+onto new commits, source-backed and trusted runs, and the reviewer chat.
+`cerber export` writes a review out as markdown if you want it elsewhere.
 
 ## Running on a VPS
 
