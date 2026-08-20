@@ -222,6 +222,10 @@ function PullBox({ autoFocus }: { autoFocus?: boolean }) {
 
   return (
     <form className="pull" onSubmit={submit}>
+      {/* At rest the strip should say "you can add one", not "fill in this
+          field" — the plus carries that, so the input needs no border until
+          it's actually being used. */}
+      <Icon name="plus" />
       <input
         className="pull-input"
         value={input}
@@ -233,12 +237,16 @@ function PullBox({ autoFocus }: { autoFocus?: boolean }) {
           setInput(e.target.value);
           if (error) setError(null);
         }}
-        placeholder="Paste a PR URL or owner/repo#123"
+        placeholder="paste a PR URL to review it"
         aria-label="Review any PR by URL"
       />
-      <button className="btn" type="submit" disabled={busy || !input.trim()}>
-        {busy ? "starting…" : "review"}
-      </button>
+      {/* Nothing to submit, nothing to show. The button appears with the first
+          keystroke, so at rest this is one quiet line rather than a form. */}
+      {input.trim() && (
+        <button className="btn btn-small" type="submit" disabled={busy}>
+          {busy ? "starting…" : "review"}
+        </button>
+      )}
       {error && <span className="pull-error">{error}</span>}
     </form>
   );

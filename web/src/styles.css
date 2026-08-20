@@ -524,32 +524,68 @@ button {
   align-items: center;
   gap: 6px;
   position: relative;
+  color: var(--muted);
 }
 
+/* Only in the tab strip, where the cost readout sits immediately to its right —
+   without the gap the placeholder and the figure read as one run-on sentence. */
+.tabs .pull {
+  margin-right: 16px;
+}
+
+/* The empty state centres its text, but a flex row does not centre itself. */
+.empty .pull {
+  justify-content: center;
+  margin-top: 10px;
+}
+
+/* The whole control lights up together on hover, so the plus and the words
+   read as one target rather than an icon sitting next to some text. */
+.pull:hover,
+.pull:focus-within {
+  color: var(--fg-3);
+}
+
+/* Quiet at rest: no box, no fill — it reads as one more item in the strip
+   rather than a form dropped into it. The line under it only appears on focus,
+   which is also when it widens enough to hold a full PR URL. */
 .pull-input {
-  width: 300px;
+  width: 200px;
   max-width: 100%;
   font: inherit;
   font-size: 12px;
-  padding: 3px 8px;
+  padding: 2px 0;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  transition: width 120ms ease, border-color 120ms ease;
+}
+
+.pull-input:hover::placeholder {
+  color: var(--fg);
 }
 
 .pull-input:focus {
   outline: none;
-  border-color: var(--accent);
+  width: 320px;
+  border-bottom-color: var(--accent);
 }
 
 .pull-input::placeholder {
   color: var(--muted);
+  transition: color 120ms ease;
 }
 
 /* Floated clear of the flow: a wrong paste should explain itself without
    reflowing the tab strip it sits in, and it lands over the table head, so it
    carries its own surface rather than colliding with the column labels. */
+/* Sized to sit inside a strip of 11px labels without setting the row height. */
+.btn-small {
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
 .pull-error {
   position: absolute;
   top: 100%;
