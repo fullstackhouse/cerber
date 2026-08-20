@@ -1,4 +1,73 @@
 import { describe, expect, it } from "vitest";
+import { classifyReply } from "./gh.js";
+
+describe("classifyReply", () => {
+  const c = (author: string, at: string) => ({ author, at, bot: false });
+  const bot = (author: string, at: string) => ({ author, at, bot: true });
+
+  it("says nobody has heard from you when you never spoke", () => {
+    expect(classifyReply([], "me")).toBe("none");
+    expect(classifyReply([c("them", "2026-08-19T10:00:00Z")], "me")).toBe("none");
+  });
+
+  it("leaves the move with them while yours is the last word", () => {
+    expect(
+      classifyReply([c("them", "2026-08-19T10:00:00Z"), c("me", "2026-08-19T11:00:00Z")], "me"),
+    ).toBe("you");
+  });
+
+  it("hands the move back when someone answers after you", () => {
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), c("them", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("them");
+  });
+
+  it("weighs your LAST word, not your first", () => {
+    // Argue, get answered, argue again: the move is theirs, not yours.
+    expect(
+      classifyReply(
+        [
+          c("me", "2026-08-19T10:00:00Z"),
+          c("them", "2026-08-19T11:00:00Z"),
+          c("me", "2026-08-19T12:00:00Z"),
+        ],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("does not treat a simultaneous comment as an answer to yours", () => {
+    const t = "2026-08-19T10:00:00Z";
+    expect(classifyReply([c("me", t), c("them", t)], "me")).toBe("you");
+  });
+
+  it("does not let a bot hand the move back to you", () => {
+    // A repo whose CI comments on every push would otherwise read
+    // "they replied last" on every PR, and the tag would mean nothing.
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), bot("github-actions[bot]", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("spots a bot by its name when GitHub does not type it as one", () => {
+    expect(
+      classifyReply(
+        [c("me", "2026-08-19T10:00:00Z"), c("notion-workspace[bot]", "2026-08-19T11:00:00Z")],
+        "me",
+      ),
+    ).toBe("you");
+  });
+
+  it("never counts a bot as you having spoken", () => {
+    expect(classifyReply([bot("me", "2026-08-19T10:00:00Z")], "me")).toBe("none");
+  });
+});
 import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
 
 describe("parsePrRef", () => {

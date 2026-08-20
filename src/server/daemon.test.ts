@@ -4,14 +4,17 @@ import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactSchema } from "../core/artifact.js";
 import { loadConfig } from "../core/config.js";
-import { mapSearchResults, searchAwaitingMe } from "../core/gh.js";
+import { currentLogin, fetchConversation, mapSearchResults, searchAwaitingMe } from "../core/gh.js";
 import { isPureStub, startDaemon, stubArtifact } from "./daemon.js";
 
 // The loop's own bookkeeping is what's under test — not gh, and not the runner.
+// classifyReply stays real: it is pure, and its own tests live in core/gh.test.ts.
 vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
   searchAwaitingMe: vi.fn(),
   fetchPrInfo: vi.fn(),
+  fetchConversation: vi.fn(),
+  currentLogin: vi.fn(),
 }));
 vi.mock("../core/config.js", async (orig) => ({
   ...(await orig<typeof import("../core/config.js")>()),
@@ -20,6 +23,8 @@ vi.mock("../core/config.js", async (orig) => ({
 
 const search = searchAwaitingMe as Mock;
 const config = loadConfig as Mock;
+const conversation = fetchConversation as Mock;
+const login = currentLogin as Mock;
 
 process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
 
@@ -54,6 +59,8 @@ describe("the awaiting list the daemon publishes", () => {
     // the next test's queue reconciliation.
     process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
     config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
   });
 
   /** Run the daemon until it has finished `polls` polls, then stop it. */
@@ -73,9 +80,44 @@ describe("the awaiting list the daemon publishes", () => {
       { ...DISCOVERED, owner: "acme", repo: "gadgets", number: 3 },
     ]);
     const status = await pollTimes(1);
-    expect(status.awaiting).toEqual(["acme/widgets#7", "acme/gadgets#3"]);
+    expect(status.awaiting.map((a) => a.id)).toEqual(["acme/widgets#7", "acme/gadgets#3"]);
     // The same refs the summary counts — one answer, two readouts.
     expect(status.lastSummary).toContain("2 awaiting");
+  });
+
+  it("reads each conversation for whose move it is", async () => {
+    search.mockResolvedValue([
+      { ...DISCOVERED, owner: "acme", repo: "widgets", number: 7 },
+      { ...DISCOVERED, owner: "acme", repo: "gadgets", number: 3 },
+    ]);
+    // #7: you deferred and nobody answered. #3: they came back at you.
+    conversation.mockImplementation(async (ref: { number: number }) =>
+      ref.number === 7
+        ? [{ author: "me", at: "2026-08-19T11:00:00Z", bot: false }]
+        : [
+            { author: "me", at: "2026-08-19T10:00:00Z", bot: false },
+            { author: "them", at: "2026-08-19T12:00:00Z", bot: false },
+          ],
+    );
+    const status = await pollTimes(1);
+    expect(status.awaiting).toEqual([
+      { id: "acme/widgets#7", reply: "you" },
+      { id: "acme/gadgets#3", reply: "them" },
+    ]);
+  });
+
+  it("says unknown rather than guessing silence it could not confirm", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    conversation.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown" }]);
+  });
+
+  it("attributes nothing when it cannot tell who you are", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown" }]);
+    // The conversation is not worth reading if no comment can be attributed.
+    expect(conversation).not.toHaveBeenCalled();
   });
 
   it("claims nothing while polling is off", async () => {
@@ -93,7 +135,7 @@ describe("the awaiting list the daemon publishes", () => {
   it("keeps the last good list when a poll cannot reach GitHub", async () => {
     search.mockResolvedValueOnce([DISCOVERED]).mockRejectedValue(new Error("gh: not authenticated"));
     const status = await pollTimes(2);
-    expect(status.awaiting).toEqual(["acme/widgets#7"]);
+    expect(status.awaiting.map((a) => a.id)).toEqual(["acme/widgets#7"]);
     expect(status.lastPollError).toContain("not authenticated");
   });
 });

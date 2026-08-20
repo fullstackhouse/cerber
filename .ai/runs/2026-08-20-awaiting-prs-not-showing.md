@@ -96,6 +96,12 @@ PR: #15
 - [x] 2.1 hiddenAwaiting + hiddenAwaitingNote in inbox.ts, with tests — efe8a54
 - [x] 2.2 Truthful empty state, drawer tags and counts, tag style — efe8a54
 
+### Phase 4: Tell whose move it is
+
+- [x] 4.1 Read each awaiting PR's conversation and classify whose move it is
+- [x] 4.2 The daemon publishes the classification per awaiting PR
+- [x] 4.3 The tag says whose move it is, and degrades to today's wording when unknown
+
 ### Phase 2b: Post-review
 
 - [x] Post-review fix: README + CLAUDE.md now say a settled review can still be one GitHub asks you for — 39f1bc5

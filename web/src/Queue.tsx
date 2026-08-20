@@ -10,13 +10,15 @@ import {
   hiddenAwaitingNote,
   isArchived,
   isHiddenAwaiting,
+  replyOf,
+  replyTag,
   sortReviews,
   stillAwaitingLabel,
   strip,
   tabOf,
   verdictCell,
 } from "./inbox";
-import { DaemonStatus, ReviewListItem } from "./types";
+import { DaemonStatus, Reply, ReviewListItem } from "./types";
 
 const openReview = (key: string) => {
   window.location.hash = `#/r/${encodeURIComponent(key)}`;
@@ -147,12 +149,13 @@ function SettledRow({
   r: ReviewListItem;
   verdict: string;
   tag?: string;
-  /** GitHub is still asking you for this one, whatever you decided here. */
-  awaiting?: boolean;
+  /** Whose move it is on GitHub, when GitHub still asks you for this one. */
+  awaiting?: Reply | null;
 }) {
+  const request = awaiting ? replyTag(awaiting) : null;
   return (
     <div
-      className={`row row-settled${awaiting ? " row-awaiting" : ""}`}
+      className={`row row-settled${request ? " row-awaiting" : ""}`}
       onClick={() => openReview(r.key)}
       role="button"
       tabIndex={-1}
@@ -167,12 +170,9 @@ function SettledRow({
       <span className="col-title" title={r.pr.title}>
         {r.pr.title}
       </span>
-      {awaiting && (
-        <span
-          className="tag tag-awaiting"
-          title="You have never submitted a review on GitHub for this PR, so it still lists you as a requested reviewer. What you decided here stands — cerber just can't clear a request it never wrote to."
-        >
-          unanswered on GitHub
+      {request && (
+        <span className="tag tag-awaiting" title={request.title}>
+          {request.label}
         </span>
       )}
       {tag && <span className="tag tag-done">{tag}</span>}
@@ -499,7 +499,7 @@ export function Queue() {
                   r={r}
                   verdict={verdictCell(r).label}
                   tag={r.status}
-                  awaiting={isHiddenAwaiting(r, hidden)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
                 />
               ))}
             </Drawer>
@@ -515,7 +515,7 @@ export function Queue() {
                   key={r.key}
                   r={r}
                   verdict={verdictCell(r).label}
-                  awaiting={isHiddenAwaiting(r, hidden)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
                 />
               ))}
             </Drawer>
@@ -531,7 +531,7 @@ export function Queue() {
                   key={r.key}
                   r={r}
                   verdict={r.pr.state?.toLowerCase() ?? ""}
-                  awaiting={isHiddenAwaiting(r, hidden)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
                 />
               ))}
             </Drawer>

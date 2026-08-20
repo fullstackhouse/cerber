@@ -5,7 +5,7 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
-import { DaemonStatus, ReviewListItem } from "./types";
+import { DaemonStatus, Reply, ReviewListItem } from "./types";
 
 export type Tab = "all" | "awaiting" | "drafted" | "sent";
 
@@ -67,13 +67,50 @@ export function walkable(list: ReviewListItem[]): ReviewListItem[] {
 export function hiddenAwaiting(list: ReviewListItem[], daemon: DaemonStatus | null): ReviewListItem[] {
   if (!daemon?.enabled || daemon.awaiting.length === 0) return [];
   const shown = new Set(walkable(list).map((r) => r.id));
-  const awaiting = new Set(daemon.awaiting);
+  const awaiting = new Set(daemon.awaiting.map((a) => a.id));
   return sortReviews(list.filter((r) => awaiting.has(r.id) && !shown.has(r.id)));
 }
 
-/** True when GitHub has no answer from you on this row, but the queue filed it away. */
+/** True when GitHub has no review from you on this row, but the queue filed it away. */
 export const isHiddenAwaiting = (r: ReviewListItem, hidden: ReviewListItem[]) =>
   hidden.some((h) => h.id === r.id);
+
+/** Whose move it is on this row, as the last poll left it. */
+export function replyOf(r: ReviewListItem, daemon: DaemonStatus | null): Reply {
+  if (!daemon?.enabled) return "unknown";
+  return daemon.awaiting.find((a) => a.id === r.id)?.reply ?? "unknown";
+}
+
+/**
+ * The tag on a row GitHub still holds a request for. The request alone only
+ * says you never pressed GitHub's review button; the conversation says whether
+ * that leaves anyone waiting, which is the part you decide on. When the
+ * conversation could not be read, it falls back to the fact we do have.
+ */
+const REPLY_TAG: Record<Reply, { label: string; title: string }> = {
+  none: {
+    label: "you haven't replied",
+    title:
+      "GitHub still lists you as a requested reviewer and you have said nothing on the PR — no review, no comment. Whoever opened it is waiting on you.",
+  },
+  you: {
+    label: "waiting on them",
+    title:
+      "You had the last word in the conversation but never submitted a review, so GitHub still lists you as a requested reviewer. Nothing is blocked on you until they answer.",
+  },
+  them: {
+    label: "they replied last",
+    title:
+      "You commented and someone has answered since, so the conversation is back with you — and GitHub still lists you as a requested reviewer, because a comment is not a review.",
+  },
+  unknown: {
+    label: "unanswered on GitHub",
+    title:
+      "You have never submitted a review on GitHub for this PR, so it still lists you as a requested reviewer. Cerber could not read the conversation, so it can't say whether you replied there.",
+  },
+};
+
+export const replyTag = (reply: Reply) => REPLY_TAG[reply];
 
 /**
  * What to say instead of "nothing awaits your review" when something does.
@@ -91,19 +128,21 @@ export function hiddenAwaitingNote(hidden: ReviewListItem[]): string {
   const how = hidden.some(isArchived) ? "settled or archived" : "settled";
   return (
     `Nothing new in the inbox — but GitHub still has ${requests} open on you. ` +
-    `You ${how} ${n === 1 ? "it" : "them"} here without answering GitHub, ` +
-    `so ${n === 1 ? "it sits" : "they sit"} in the drawers below.`
+    `You ${how} ${n === 1 ? "it" : "them"} here without submitting a review, ` +
+    `so ${n === 1 ? "it sits" : "they sit"} in the drawers below, tagged with whose move it is.`
   );
 }
 
 /**
- * What a drawer's label adds when GitHub never heard about some of what it
- * holds: " · 2 unanswered on GitHub". Empty when it heard about all of them, so
- * a drawer of finished work reads exactly as it did before.
+ * What a drawer's label adds when GitHub still holds requests for some of what
+ * it holds: " · 2 open review requests". Deliberately neutral about whose move
+ * it is — the rows say that, and a label claiming they are all on you would
+ * contradict a row reading "waiting on them". Empty when there are none, so a
+ * drawer of finished work reads exactly as it did before.
  */
 export function stillAwaitingLabel(rows: ReviewListItem[], hidden: ReviewListItem[]): string {
   const n = rows.filter((r) => isHiddenAwaiting(r, hidden)).length;
-  return n === 0 ? "" : ` · ${n} unanswered on GitHub`;
+  return n === 0 ? "" : ` · ${n} open review request${n === 1 ? "" : "s"}`;
 }
 
 /** "now", "40s", "12m", "2h", "5d" — the queue's `upd` column. */

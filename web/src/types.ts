@@ -152,6 +152,19 @@ export interface RefreshResult {
   artifact: Artifact;
 }
 
+/**
+ * Whose move it is on a PR GitHub still asks you for. A review of any kind
+ * clears the request, so one that is still open means you never pressed
+ * GitHub's review button — but you may well have said your piece in the
+ * conversation. `unknown` means the conversation could not be read.
+ */
+export type Reply = "none" | "you" | "them" | "unknown";
+
+export interface AwaitingPr {
+  id: string;
+  reply: Reply;
+}
+
 export type DaemonStatus =
   | { enabled: false }
   | {
@@ -170,11 +183,12 @@ export type DaemonStatus =
       nextPollAt: string | null;
       lastSummary: string | null;
       /**
-       * Artifact ids GitHub still wants a review from you on, as of the last
-       * poll that reached it. The queue filters on what you settled locally, so
-       * this is what tells it which awaiting PRs its own filters are hiding.
+       * The PRs GitHub still holds a review request from you on, as of the last
+       * poll that reached it, and whose move it is on each. The queue filters on
+       * what you settled locally, so this is what tells it which awaiting PRs
+       * its own filters are hiding.
        */
-      awaiting: string[];
+      awaiting: AwaitingPr[];
       /** GitHub discovery is failing (gh unauthed, offline); local queue still works. */
       lastPollError: string | null;
       autoSend: "shadow" | "on";
