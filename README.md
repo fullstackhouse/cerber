@@ -41,6 +41,14 @@ for reviews you sent, one for the ones you marked reviewed or skipped, one for
 merged and closed PRs — and PRs in archived repos are never picked up at all,
 since the repo is read-only and a review could never be sent.
 
+Settling a review is your decision, not GitHub's: skip a PR, or mark one
+reviewed without sending, and GitHub still lists you as a requested reviewer,
+because nothing cerber does here reaches it. So a row in a drawer can still be
+one you owe. Those are marked `still awaiting you` where they sit, counted on
+the drawer they went into, and named in place of the empty inbox — cerber never
+tells you nothing awaits you while its own poll says otherwise. It does not
+un-settle them: what you decided stands, you just get to see the rest.
+
 The cockpit is a background tab most of the day, so it tells you when the queue
 grows: a desktop notification naming the PR that arrived — click it to open the
 review — folded into one popup when several land at once. It stays quiet while
