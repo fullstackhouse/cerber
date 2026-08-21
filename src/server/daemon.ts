@@ -13,6 +13,7 @@ import {
   searchAwaitingMe,
   submitReview,
 } from "../core/gh.js";
+import { notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   appendAutoSendLog,
@@ -43,6 +44,12 @@ export interface DaemonOptions {
    */
   autoReview: boolean;
   /**
+   * Tap this machine's notification centre when a PR lands in the queue. This
+   * is the per-run cap (--no-notify); the config's daemon.notify is consulted
+   * live on every poll, so the cockpit toggle needs no restart.
+   */
+  notify: boolean;
+  /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
    * the user opted in explicitly via --auto-send.
@@ -69,6 +76,12 @@ export interface DaemonStatus {
   intervalMs: number;
   /** False when the config's daemon.poll toggle idles the loop. */
   pollEnabled: boolean;
+  /**
+   * Whether this machine gets a notification of its own when a PR lands. The
+   * cockpit reads it to know whether its own bell would be a second popup
+   * about one PR — see `web/src/notify.ts`.
+   */
+  notify: boolean;
   autoReview: boolean;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
@@ -213,6 +226,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     repos: opts.repos,
     intervalMs: opts.intervalMs,
     pollEnabled: true,
+    // Claims nothing until a poll has read the config, so the cockpit's bell
+    // keeps its own counsel for the few seconds that takes.
+    notify: false,
     autoReview: opts.autoReview,
     trustedRuns: false,
     polls: 0,
@@ -252,8 +268,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * request went away. Freshness decisions always come from local artifacts —
    * search results lag GitHub by minutes and never override them.
    */
-  async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: number }> {
-    let discovered = 0;
+  async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: DiscoveredPr[] }> {
+    const discovered: DiscoveredPr[] = [];
     for (const ref of refs) {
       const existing = await loadArtifact(artifactId(ref));
       if (existing) {
@@ -270,7 +286,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         continue;
       }
       await saveArtifact(stubArtifact(ref));
-      discovered++;
+      discovered.push(ref);
     }
 
     // Asked once per pass, and only if a row actually reaches the check that
@@ -360,6 +376,41 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     return { discovered };
   }
 
+  /** Said once, not every poll: a machine with no notifier will never grow one. */
+  let notifierMissing = false;
+
+  /**
+   * What the last attempt to tap this machine actually did, or null before one
+   * has been made.
+   *
+   * `status.notify` is a promise to the cockpit — it stands its own bell down
+   * on the strength of it — so it has to mean "this machine gets told", not
+   * "this machine was asked to tell". A box with no `notify-send` would
+   * otherwise go on claiming the job while the browser politely declined it,
+   * and one PR would be announced by nobody at all. Untried counts as working:
+   * the alternative is both bells ringing everywhere until the first PR lands.
+   */
+  let notifierWorks: boolean | null = null;
+
+  /**
+   * Tap this machine when a PR lands in the queue.
+   *
+   * An artifact is the ledger this rides on: a PR is announced on the poll that
+   * first writes a stub for it, so a restart re-announces nothing, and a PR
+   * that arrived while `serve` was down is still news the next time it runs.
+   * The cockpit's bell announces the same arrival, off the same stub — which is
+   * why it stands down when this is on and both are on one machine.
+   */
+  async function announce(arrivals: DiscoveredPr[]): Promise<void> {
+    const n = notice(arrivals);
+    if (!n) return;
+    notifierWorks = await notify(n);
+    if (notifierWorks) return;
+    if (notifierMissing) return;
+    notifierMissing = true;
+    log("no desktop notifier here — arrivals will only show in the cockpit");
+  }
+
   /**
    * Whose move it is on each awaiting PR, one conversation read apiece.
    *
@@ -434,6 +485,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const knobs = config.daemon;
       const autoReview = opts.autoReview && knobs.autoReview;
       status.pollEnabled = knobs.poll;
+      // What the cockpit's bell defers to: a loop that isn't polling announces
+      // nothing, whatever the notify toggle says.
+      const notifyOn = opts.notify && knobs.notify;
+      // Only true while all three hold, and the third is only knowable by
+      // having tried: a notifier that isn't there is not a bell the cockpit
+      // should be standing down for.
+      const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
+      status.notify = announcing();
       status.autoReview = autoReview;
       // Recomputed too, so a trust rule added mid-run shows up in the strip.
       status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
@@ -454,6 +513,16 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
+      // Before the reviews, not after: the arrival is the news, and drafting it
+      // takes minutes. This is the same moment the cockpit's bell would ring.
+      if (notifyOn && discovered.length > 0) {
+        await announce(discovered);
+        // Recomputed on the spot rather than left to the next poll: that is
+        // minutes away, and the cockpit would spend them deferring to a tap
+        // that never came. Recomputed rather than only cleared, so a machine
+        // whose notifier comes back takes the job back with it.
+        status.notify = announcing();
+      }
 
       if (autoReview) {
         const { reviewed, skipped, failed } = await reviewAll(refs);
@@ -461,7 +530,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           `${refs.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
           `${failed > 0 ? `, ${failed} failed` : ""}`;
       } else {
-        status.lastSummary = `${refs.length} awaiting${discovered > 0 ? `, ${discovered} new` : ""} (auto-review off)`;
+        status.lastSummary = `${refs.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""} (auto-review off)`;
       }
       log(status.lastSummary);
     } catch (err: unknown) {

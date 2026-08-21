@@ -52,6 +52,7 @@ const daemon = (over: Partial<Extract<DaemonStatus, { enabled: true }>> = {}): D
   repos: ["acme/web"],
   intervalMs: 300_000,
   pollEnabled: true,
+  notify: false,
   autoReview: true,
   trustedRuns: false,
   polls: 3,

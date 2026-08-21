@@ -22,7 +22,7 @@ const NOTIFY_LABEL: Record<NotifyState, string> = {
   on: "tell me when a PR lands in the queue",
 };
 
-export function Settings() {
+export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
@@ -80,26 +80,54 @@ export function Settings() {
 
       <h1>Notifications</h1>
       <p>
-        The cockpit spends its day as a background tab, so it tells you when a PR lands in the
-        queue: one desktop notification per poll. A single arrival names the PR and opens that
-        review when you click it; several landing at once fold into one notification that opens
-        the queue. Nothing is announced while you're looking straight at the cockpit, and a PR
-        this browser has already seen never arrives twice.
+        When a PR lands in the queue, cerber says so: one desktop notification per poll. A single
+        arrival names the PR; several landing at once fold into one notification. A PR that has
+        already been announced never arrives twice.
+      </p>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={config.daemon.notify}
+          disabled={busy || !config.daemon.poll}
+          onChange={(e) => apply(updateDaemonConfig({ notify: e.target.checked }))}
+        />{" "}
+        tell this machine when a PR lands (no cockpit tab required)
+      </label>
+      <p className="muted">
+        This is the one that works while you're somewhere else: it rides the poll that finds the
+        PR, so it needs nothing open but <code>serve</code> itself. It hands the notification to
+        whatever this machine already has — Notification Centre on macOS,{" "}
+        <code>notify-send</code> on Linux — and stays quiet where there is neither. It cannot open
+        a review on click; the browser's can.
       </p>
       <label className="inbox-toggle">
         <input
           type="checkbox"
           checked={notify === "on"}
-          disabled={notify === "unsupported" || notify === "blocked"}
+          disabled={
+            notify === "unsupported" || notify === "blocked" || daemonAnnounces
+          }
           onChange={toggleNotify}
         />{" "}
-        {NOTIFY_LABEL[notify]}
+        {daemonAnnounces ? "let this browser announce them instead" : NOTIFY_LABEL[notify]}
       </label>
       <p className="muted">
-        This one is per-browser, not per-machine: the permission belongs to this browser, so the
-        switch lives here rather than in <code>{config.path}</code>. Granting it is the browser's
-        prompt, not cerber's — a browser that has blocked cerber has to be un-blocked from the
-        padlock next to the address bar.
+        {daemonAnnounces ? (
+          <>
+            Standing down while the machine's own notification is on — two popups for one PR is
+            one too many. Untick the machine one above and this browser takes over: it names the
+            PR and <strong>opens that review when you click it</strong>, but only while a cockpit
+            tab is open and this browser has granted the permission.
+          </>
+        ) : (
+          <>
+            Per-browser, not per-machine: the permission belongs to this browser, so the switch
+            lives here rather than in <code>{config.path}</code>. Granting it is the browser's
+            prompt, not cerber's — a browser that has blocked cerber has to be un-blocked from the
+            padlock next to the address bar. Nothing is announced while you're looking straight at
+            the cockpit.
+          </>
+        )}
       </p>
 
       <h1>Trusted PRs</h1>
