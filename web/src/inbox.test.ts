@@ -369,11 +369,11 @@ describe("verdictCell", () => {
     expect(verdictCell(row({ status: "failed" }))).toEqual({ label: "run failed", tone: "failed" });
   });
 
-  it("shows the verdict with its confidence", () => {
-    expect(verdictCell(row())).toEqual({ label: "approve 91", tone: "approve" });
+  it("shows the verdict and how sure the review is of itself", () => {
+    expect(verdictCell(row())).toEqual({ label: "approve 91%", tone: "approve" });
     expect(
       verdictCell(row({ verdict: { recommendation: "request_changes", confidence: 82, reasoning: "" } })),
-    ).toEqual({ label: "request changes 82", tone: "changes" });
+    ).toEqual({ label: "request changes 82%", tone: "changes" });
   });
 
   it("shows what a sent review actually posted", () => {
@@ -397,6 +397,17 @@ describe("strip", () => {
   it("names off-diff comments, which post in the body rather than inline", () => {
     const s = strip(row({ commentCount: 6, driftedCount: 1 }), daemon());
     expect(s.meta).toContain("6 comments drafted, 1 off-diff");
+  });
+
+  it("names the blocker count the verdict rests on, where the cell has no room", () => {
+    expect(strip(row({ commentCount: 4, gradedCount: 4 }), daemon()).meta).toContain(
+      "4 comments drafted, no blockers",
+    );
+    expect(
+      strip(row({ commentCount: 4, gradedCount: 4, blockerCount: 2 }), daemon()).meta,
+    ).toContain("4 comments drafted, 2 blockers");
+    // Drafted before severities existed: the findings make no claim.
+    expect(strip(row({ commentCount: 4 }), daemon()).meta).toContain("4 comments drafted");
   });
 
   it("says where an approve sits against the auto-send bar", () => {

@@ -7,6 +7,7 @@ import {
   rowLine,
   severitySummary,
   splitComments,
+  verdictBasis,
   verdictMismatch,
 } from "./review";
 import { Artifact, ReviewComment, Verdict } from "./types";
@@ -130,6 +131,28 @@ describe("severitySummary", () => {
 
   it("says nothing about an ungraded review", () => {
     expect(severitySummary(artifact([comment()]))).toBe("");
+  });
+});
+
+describe("verdictBasis", () => {
+  it("names the live blocker count the verdict rests on", () => {
+    expect(verdictBasis(artifact([comment({ severity: "minor" }), comment({ id: "n", severity: "nit" })]))).toBe(
+      "no blockers",
+    );
+    expect(verdictBasis(artifact([comment({ severity: "blocker" })]))).toBe("1 blocker");
+    expect(
+      verdictBasis(
+        artifact([comment({ id: "a", severity: "blocker" }), comment({ id: "b", severity: "blocker" })]),
+      ),
+    ).toBe("2 blockers");
+  });
+
+  it("ignores dropped blockers", () => {
+    expect(verdictBasis(artifact([comment({ severity: "blocker", status: "dropped" })]))).toBe("no blockers");
+  });
+
+  it("says nothing about a review that graded nothing", () => {
+    expect(verdictBasis(artifact([comment()]))).toBeNull();
   });
 });
 

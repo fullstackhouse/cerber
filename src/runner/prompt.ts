@@ -44,9 +44,13 @@ export function buildReviewPrompt(
     ? "\n[... diff truncated — the rest of the change is in the checkout, read it there ...]"
     : "\n[... diff truncated ...]";
   const diffBody = truncated ? diff.slice(0, MAX_DIFF_CHARS) + cut : diff;
+  // Confidence is about the review, not about the merge. The verdict already
+  // answers "should this ship" and now follows mechanically from the blockers,
+  // so the only thing left for a number to say is how much to trust the
+  // findings it was derived from.
   const confidenceRule = opts.source
-    ? `- "confidence" reflects how sure you are the recommendation is right. You can read the full source, so read it before hedging — only stay unsure about what the code genuinely cannot settle (intent, product decisions, runtime behaviour).`
-    : `- "confidence" reflects how sure you are the recommendation is right given what you can see. You only see the diff, not the full codebase — factor that in.`;
+    ? `- "confidence" is how sure you are that THIS REVIEW is right — that each finding is real, each grade is the right one, and nothing worth blocking got past you. It is not how good an idea merging is: the verdict says that, and it follows from the blockers. A thorough read that found nothing is high confidence with an "approve"; a skim of an unfamiliar codebase is low confidence whatever the verdict. You can read the full source, so read it before hedging — only stay unsure about what the code genuinely cannot settle (intent, product decisions, runtime behaviour).`
+    : `- "confidence" is how sure you are that THIS REVIEW is right — that each finding is real, each grade is the right one, and nothing worth blocking got past you. It is not how good an idea merging is: the verdict says that, and it follows from the blockers. You only see the diff, not the full codebase, so anything you could not check holds this number down whatever the verdict.`;
 
   const prompt = `You are an expert senior code reviewer. Review the following GitHub pull request.
 
@@ -115,8 +119,10 @@ Rules:
   - "minor" — should be fixed, but the author's call; you would approve and not chase it.
   - "nit" — taste: naming, wording, formatting.
   - null — not a finding at all: a question, a note, praise.
-- Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "confidence", nowhere else.
-- The verdict must follow from the worst finding still standing: any blocker → "request_changes"; none → "approve" (or "comment" when you genuinely take no position). Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
+- Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "reasoning" — say what you could not settle and what would settle it — and in its "confidence", nowhere else.
+- Once you have graded a single finding, the verdict follows from the worst one still standing and there is nothing in between: any blocker → "request_changes"; none → "approve". Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
+- "Taking no position" is not a verdict. If something would stop you approving — a regression, a risk you can't rule out, a call you think the team should make first — that is a blocker: grade it and request changes. If it would not, approve and say what you'd still watch. Withholding approval over an ungraded finding is the same hedge as softening a grade, one field over.
+- "comment" is for the one review the rule above does not cover: the review that graded nothing at all, because it found nothing to grade and only has questions. A review holding even one graded finding never uses it.
 ${confidenceRule}
 - Never invent files or lines not present in the diff.
 

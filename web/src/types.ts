@@ -26,6 +26,10 @@ export interface ReviewListItem {
   commentCount: number;
   /** Of those, the ones whose code is gone — they post in the body, not inline. */
   driftedCount?: number;
+  /** Live blockers — the only grade that stands between the PR and approval. */
+  blockerCount?: number;
+  /** How many comments carry a grade at all; 0 means the review makes no claim. */
+  gradedCount?: number;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;
@@ -35,6 +39,13 @@ export interface ReviewListItem {
 
 export interface Verdict {
   recommendation: "approve" | "comment" | "request_changes";
+  /**
+   * 0-100. How sure the AI is that its own review is right — the findings real,
+   * the grades correct, nothing worth blocking missed. Not a claim about
+   * whether the PR should merge: the verdict says that, and it follows from the
+   * blockers. It is the dial the auto-send threshold turns, and is otherwise
+   * shown beside the findings it is about.
+   */
   confidence: number;
   reasoning: string;
 }

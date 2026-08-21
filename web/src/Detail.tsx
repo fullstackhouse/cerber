@@ -33,6 +33,7 @@ import {
   rowLine,
   severitySummary,
   splitComments,
+  verdictBasis,
   verdictMismatch,
 } from "./review";
 import {
@@ -1421,6 +1422,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // The findings changed under the verdict (a blocker dropped, a grade edited).
   // Never auto-rewritten: the hint hands it to the chat, one click, on request.
   const mismatch = verdictMismatch(artifact);
+  // The chip carries both halves: the blocker count the verdict rests on, and
+  // how sure the review is of the findings behind it. The "why" card below is
+  // where each is spelled out.
+  const basis = verdictBasis(artifact);
   const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
   const retrue = () =>
     apply(
@@ -1532,7 +1537,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               {artifact.verdict &&
                 (readOnly ? (
                   <span className={`chip tone-${tone}`}>
-                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                    {artifact.verdict.recommendation.replace("_", " ")}
+                    {basis && ` · ${basis}`} · {artifact.verdict.confidence}%
                   </span>
                 ) : (
                   // The verdict is decided next to send, at the foot of the page.
@@ -1542,7 +1548,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                     title="change it, or send — both are at the foot of the page"
                     onClick={() => jump(verdictEl, sendEl)}
                   >
-                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                    {artifact.verdict.recommendation.replace("_", " ")}
+                    {basis && ` · ${basis}`} · {artifact.verdict.confidence}%
                     <Icon name="down" size={12} />
                   </button>
                 ))}
@@ -1717,11 +1724,20 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             <div className={`card card-why tone-border-${tone}`} ref={whyEl}>
               <div className="card-body">
                 <div className="lab">why</div>
-                {severitySummary(artifact) && (
-                  <div className="sev-counts" title="Live findings by grade. Only blockers block.">
-                    {severitySummary(artifact)}
-                  </div>
-                )}
+                {/* The findings this verdict follows from, then how sure the
+                    review is of itself — two different claims, so each carries
+                    its own explanation. */}
+                <div className="sev-counts">
+                  {severitySummary(artifact) && (
+                    <span title="Live findings by grade. Only blockers block.">
+                      {severitySummary(artifact)}
+                    </span>
+                  )}
+                  {severitySummary(artifact) && <span className="crumb-sep">·</span>}
+                  <span title="How sure the review is that its own findings and grades are right — not how good an idea merging is. That is the verdict, and it follows from the blockers.">
+                    {artifact.verdict.confidence}% sure of the findings
+                  </span>
+                </div>
                 <Markdown className="prose lead" text={artifact.verdict.reasoning} />
                 {!readOnly && (
                   <button className="btn btn-sm" onClick={() => discuss({ target: "verdict", id: null })}>

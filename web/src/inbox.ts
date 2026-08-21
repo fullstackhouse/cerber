@@ -278,8 +278,12 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
   if (r.status === "failed") return { label: "run failed", tone: "failed" };
   if (r.sent) return { label: `sent · ${EVENT_LABEL[r.sent.event] ?? r.sent.event}`, tone: "sent" };
   if (!r.verdict) return { label: "—", tone: "none" };
+  // This column is one of the narrowest on the row, and spelling the blocker
+  // count out here truncated it to "approve · no bloc…". The count moves to the
+  // strip below, which has room; the cell keeps the verdict and how sure the
+  // review is of itself.
   return {
-    label: `${r.verdict.recommendation.replace("_", " ")} ${r.verdict.confidence}`,
+    label: `${r.verdict.recommendation.replace("_", " ")} ${r.verdict.confidence}%`,
     tone: RECOMMENDATION_TONE[r.verdict.recommendation] ?? "none",
   };
 }
@@ -292,8 +296,15 @@ export function readMode(run: { withSource?: boolean | null; trusted?: boolean |
 
 function commentsPart(r: ReviewListItem): string {
   if (r.commentCount === 0) return "no comments drafted";
-  const drafted = `${r.commentCount} comment${r.commentCount === 1 ? "" : "s"} drafted`;
-  return r.driftedCount ? `${drafted}, ${r.driftedCount} off-diff` : drafted;
+  const parts = [`${r.commentCount} comment${r.commentCount === 1 ? "" : "s"} drafted`];
+  if (r.driftedCount) parts.push(`${r.driftedCount} off-diff`);
+  // Only blockers block, so of all the grades this is the one the strip names.
+  if (r.gradedCount) {
+    parts.push(
+      r.blockerCount ? `${r.blockerCount} blocker${r.blockerCount === 1 ? "" : "s"}` : "no blockers",
+    );
+  }
+  return parts.join(", ");
 }
 
 /**

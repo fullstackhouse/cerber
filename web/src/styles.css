@@ -690,9 +690,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Last column: the answer the row arrived at, against the right edge. */
+/* Last column: the answer the row arrived at, against the right edge. Wide
+   enough for the longest label the cell can hold — "request changes 100%",
+   20 monospace characters — since an ellipsis here eats the number. */
 .col-verdict {
-  width: 136px;
+  width: 152px;
   flex-shrink: 0;
   text-align: right;
   font-weight: 500;
@@ -2123,9 +2125,14 @@ button {
   background: rgba(160, 106, 0, 0.1);
 }
 
-/* "🚨 1 blocker · 🎨 2 nits" beside the verdict's reasoning. The grade of a
-   single finding is not a chip — it opens the comment's own text. */
+/* "🚨 1 blocker · 🎨 2 nits · 72% sure of the findings" beside the verdict's
+   reasoning. The grade of a single finding is not a chip — it opens the
+   comment's own text. */
 .sev-counts {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;

@@ -89,6 +89,22 @@ export function severitySummary(artifact: Artifact): string {
 }
 
 /**
+ * What the verdict rests on — "no blockers", "2 blockers" — or null for a
+ * review that graded nothing. Only blockers block, so the blocker count is the
+ * one fact behind an approve or a request-changes. It stands where a
+ * self-reported confidence percentage used to: that number said how sure the
+ * AI felt, which is not something a reader can check, while this is.
+ */
+export function verdictBasis(artifact: Artifact): string | null {
+  const graded = artifact.comments.some((c) => c.severity != null);
+  if (!graded) return null;
+  const n = artifact.comments.filter(
+    (c) => c.status !== "dropped" && c.severity === "blocker",
+  ).length;
+  return n === 0 ? "no blockers" : `${n} blocker${n === 1 ? "" : "s"}`;
+}
+
+/**
  * The verdict no longer follows from the findings, in one plain sentence —
  * or null while they agree. Only blockers block, so the two ways to disagree
  * are an approve past a live blocker and a request-changes with none left.
