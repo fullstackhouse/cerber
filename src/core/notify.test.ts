@@ -1,5 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { Arrival, appleScriptLiteral, notice, notifyCommand } from "./notify.js";
+import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  Arrival,
+  NOTIFY_TIMEOUT_MS,
+  appleScriptLiteral,
+  notice,
+  notify,
+  notifyCommand,
+} from "./notify.js";
+
+// Callback-shaped on purpose: notify.ts promisifies execFile at import, so the
+// mock has to be the thing promisify can wrap.
+vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+const { execFile } = await import("node:child_process");
+const execFileMock = execFile as unknown as Mock;
+
+beforeEach(() => {
+  execFileMock.mockReset();
+});
 
 const pr = (number: number, over: Partial<Arrival> = {}): Arrival => ({
   repo: "widgets",
@@ -91,5 +108,28 @@ describe("the command that taps the machine", () => {
 
   it("stays quiet on a platform with nothing to tap", () => {
     expect(notifyCommand(n, "win32")).toBeNull();
+  });
+});
+
+// The daemon awaits this call and won't start a poll while one is running, so
+// "the notifier failed" and "the notifier never answered" have to end the same
+// way. A wedged Notification Centre must cost one notification, not discovery.
+describe("a notifier that misbehaves", () => {
+  it("gives the notifier a deadline rather than waiting forever", async () => {
+    execFileMock.mockImplementation((_file, _args, _opts, cb) => cb(null, "", ""));
+    await notify({ title: "widgets#7 awaits your review", body: "feat: add sprockets — mira" });
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(execFileMock.mock.calls[0]![2]).toMatchObject({ timeout: NOTIFY_TIMEOUT_MS });
+    expect(NOTIFY_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
+  });
+
+  it("answers false when it is killed on that deadline, rather than throwing", async () => {
+    // What execFile hands back on a timeout: the child is signalled and the
+    // call rejects, which must read as an ordinary "not shown".
+    const killed = Object.assign(new Error("spawn ETIMEDOUT"), { killed: true, signal: "SIGTERM" });
+    execFileMock.mockImplementation((_file, _args, _opts, cb) => cb(killed, "", ""));
+    await expect(
+      notify({ title: "widgets#7 awaits your review", body: "feat: add sprockets — mira" }),
+    ).resolves.toBe(false);
   });
 });

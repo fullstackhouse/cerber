@@ -16,6 +16,18 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * How long a notifier gets before the poll stops waiting for it.
+ *
+ * A notification is instant or it is broken, and the thing on the other end of
+ * this is somebody else's daemon: a wedged Notification Centre or a DBus that
+ * never answers would otherwise hang `execFile` forever. The poll awaits this
+ * call, and the daemon refuses to start a poll while one is running — so an
+ * unbounded wait here doesn't cost one notification, it stops cerber
+ * discovering PRs at all. Timing out is caught like any other failure.
+ */
+export const NOTIFY_TIMEOUT_MS = 5_000;
+
 /** One PR that has just landed in the queue. */
 export interface Arrival {
   repo: string;
@@ -96,15 +108,17 @@ export function notifyCommand(
 
 /**
  * Show it, and say whether it was shown. False is an ordinary answer here —
- * an unsupported platform, no `notify-send` installed, a headless box — and the
- * caller reports it once rather than every poll. Never throws: a notification
- * is the least important thing a poll does.
+ * an unsupported platform, no `notify-send` installed, a headless box, a
+ * notifier that took too long — and the caller reports it once rather than
+ * every poll. Never throws and never hangs: a notification is the least
+ * important thing a poll does, so it is also the last thing allowed to stop
+ * one.
  */
 export async function notify(n: Notice): Promise<boolean> {
   const cmd = notifyCommand(n);
   if (!cmd) return false;
   try {
-    await execFileAsync(cmd.file, cmd.args);
+    await execFileAsync(cmd.file, cmd.args, { timeout: NOTIFY_TIMEOUT_MS });
     return true;
   } catch {
     return false;
