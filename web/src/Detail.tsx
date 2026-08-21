@@ -1722,11 +1722,20 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             <div className={`card card-why tone-border-${tone}`} ref={whyEl}>
               <div className="card-body">
                 <div className="lab">why</div>
-                {severitySummary(artifact) && (
-                  <div className="sev-counts" title="Live findings by grade. Only blockers block.">
-                    {severitySummary(artifact)}
-                  </div>
-                )}
+                {/* The findings this verdict follows from, then how sure the
+                    review is of itself — two different claims, so each carries
+                    its own explanation. */}
+                <div className="sev-counts">
+                  {severitySummary(artifact) && (
+                    <span title="Live findings by grade. Only blockers block.">
+                      {severitySummary(artifact)}
+                    </span>
+                  )}
+                  {severitySummary(artifact) && <span className="crumb-sep">·</span>}
+                  <span title="How sure the review is that its own findings and grades are right — not how good an idea merging is. That is the verdict, and it follows from the blockers.">
+                    {artifact.verdict.confidence}% sure of the findings
+                  </span>
+                </div>
                 <Markdown className="prose lead" text={artifact.verdict.reasoning} />
                 {!readOnly && (
                   <button className="btn btn-sm" onClick={() => discuss({ target: "verdict", id: null })}>

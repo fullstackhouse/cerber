@@ -39,6 +39,13 @@ export interface ReviewListItem {
 
 export interface Verdict {
   recommendation: "approve" | "comment" | "request_changes";
+  /**
+   * 0-100. How sure the AI is that its own review is right — the findings real,
+   * the grades correct, nothing worth blocking missed. Not a claim about
+   * whether the PR should merge: the verdict says that, and it follows from the
+   * blockers. It is the dial the auto-send threshold turns, and is otherwise
+   * shown beside the findings it is about.
+   */
   confidence: number;
   reasoning: string;
 }

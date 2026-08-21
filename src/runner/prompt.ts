@@ -44,9 +44,13 @@ export function buildReviewPrompt(
     ? "\n[... diff truncated — the rest of the change is in the checkout, read it there ...]"
     : "\n[... diff truncated ...]";
   const diffBody = truncated ? diff.slice(0, MAX_DIFF_CHARS) + cut : diff;
+  // Confidence is about the review, not about the merge. The verdict already
+  // answers "should this ship" and now follows mechanically from the blockers,
+  // so the only thing left for a number to say is how much to trust the
+  // findings it was derived from.
   const confidenceRule = opts.source
-    ? `- "confidence" reflects how sure you are the recommendation is right. You can read the full source, so read it before hedging — only stay unsure about what the code genuinely cannot settle (intent, product decisions, runtime behaviour).`
-    : `- "confidence" reflects how sure you are the recommendation is right given what you can see. You only see the diff, not the full codebase — factor that in.`;
+    ? `- "confidence" is how sure you are that THIS REVIEW is right — that each finding is real, each grade is the right one, and nothing worth blocking got past you. It is not how good an idea merging is: the verdict says that, and it follows from the blockers. A thorough read that found nothing is high confidence with an "approve"; a skim of an unfamiliar codebase is low confidence whatever the verdict. You can read the full source, so read it before hedging — only stay unsure about what the code genuinely cannot settle (intent, product decisions, runtime behaviour).`
+    : `- "confidence" is how sure you are that THIS REVIEW is right — that each finding is real, each grade is the right one, and nothing worth blocking got past you. It is not how good an idea merging is: the verdict says that, and it follows from the blockers. You only see the diff, not the full codebase, so anything you could not check holds this number down whatever the verdict.`;
 
   const prompt = `You are an expert senior code reviewer. Review the following GitHub pull request.
 

@@ -401,7 +401,7 @@ program
     "--auto-send",
     "ACTUALLY auto-send APPROVE verdicts at/above --auto-send-threshold (default: shadow mode, which only logs what would be sent)",
   )
-  .option("--auto-send-threshold <pct>", "confidence needed to auto-send", "90")
+  .option("--auto-send-threshold <pct>", "how sure the review must be of itself to auto-send", "90")
   .option("--insecure", "allow binding a non-localhost host without a token (NOT recommended)")
   .action(
     async (opts: {
