@@ -7,12 +7,13 @@ import { loadConfig } from "../core/config.js";
 import {
   currentLogin,
   fetchConversation,
+  fetchOwnReview,
   fetchPrInfo,
   mapSearchResults,
   searchAwaitingMe,
 } from "../core/gh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
-import { isPureStub, startDaemon, stubArtifact } from "./daemon.js";
+import { filedByOwnReview, isPureStub, startDaemon, stubArtifact } from "./daemon.js";
 
 // The loop's own bookkeeping is what's under test — not gh, and not the runner.
 // classifyReply stays real: it is pure, and its own tests live in core/gh.test.ts.
@@ -21,6 +22,7 @@ vi.mock("../core/gh.js", async (orig) => ({
   searchAwaitingMe: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchConversation: vi.fn(),
+  fetchOwnReview: vi.fn(),
   currentLogin: vi.fn(),
 }));
 vi.mock("../core/config.js", async (orig) => ({
@@ -32,6 +34,7 @@ const search = searchAwaitingMe as Mock;
 const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
+const ownReview = fetchOwnReview as Mock;
 const login = currentLogin as Mock;
 
 process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
@@ -69,6 +72,7 @@ describe("the awaiting list the daemon publishes", () => {
     config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
     login.mockResolvedValue("me");
     conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
   });
 
   /** Run the daemon until it has finished `polls` polls, then stop it. */
@@ -195,6 +199,7 @@ describe("stubArtifact", () => {
           withSource: false,
           trusted: false,
           sessionId: null,
+          trigger: null,
         },
       }),
     ).toBe(false);
@@ -257,6 +262,7 @@ describe("draft PRs in the inbox", () => {
     config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
     login.mockResolvedValue("me");
     conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
   });
 
   async function pollOnce() {
@@ -308,6 +314,7 @@ describe("draft PRs in the inbox", () => {
         withSource: true,
         trusted: false,
         sessionId: null,
+        trigger: null,
       },
     });
 
@@ -325,5 +332,179 @@ describe("draft PRs in the inbox", () => {
     // Still here — the periodic refresh corrects the flag, it does not archive
     // a PR that is merely absent from the search.
     expect(after?.pr.state).toBe("OPEN");
+  });
+});
+
+/**
+ * A review you submit through GitHub itself never reaches the queue, so the
+ * draft cerber wrote for the same PR went on sitting in the inbox as work
+ * still waiting on you — days after you had answered the author. The poll
+ * closes that gap the only way it can: by asking GitHub whether you already
+ * reviewed the PR it has stopped requesting from you.
+ */
+describe("a draft you already answered on GitHub", () => {
+  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: false,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  const RUN = {
+    model: "claude",
+    startedAt: "2026-08-20T15:03:00Z",
+    finishedAt: "2026-08-20T15:08:00Z",
+    costUsd: 4.9,
+    error: null,
+    withSource: true,
+    trusted: true,
+    sessionId: null,
+    trigger: "daemon" as const,
+  };
+
+  const YOUR_REVIEW = {
+    at: "2026-08-20T14:55:00Z",
+    state: "CHANGES_REQUESTED" as const,
+    url: "https://github.com/acme/widgets/pull/7#pullrequestreview-1",
+  };
+
+  /** A finished draft nobody has settled — the row that used to get stuck. */
+  const draft = (over: Record<string, unknown> = {}) => ({
+    ...stubArtifact(DISCOVERED),
+    status: "ready" as const,
+    run: RUN,
+    ...over,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-filed-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
+    prInfo.mockResolvedValue({ ...stubArtifact(DISCOVERED).pr, state: "OPEN", isDraft: false });
+  });
+
+  async function pollOnce() {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      handle.stop();
+    }
+    return loadArtifact("acme/widgets#7");
+  }
+
+  it("files the draft once GitHub stops asking and shows a review of yours", async () => {
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+    ownReview.mockResolvedValue(YOUR_REVIEW);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("reviewed");
+    expect(after?.filed?.review.at).toBe(YOUR_REVIEW.at);
+    // Filed, not sent, not thrown away: the draft is still there to send.
+    expect(after?.sent).toBeNull();
+    expect(after?.pr.state).toBe("OPEN");
+  });
+
+  it("leaves it in the inbox while GitHub is still asking you", async () => {
+    await saveArtifact(draft());
+    // Re-requested after your review: the request is the whole point, so the
+    // artifact never reaches the check at all.
+    search.mockResolvedValue([DISCOVERED]);
+    ownReview.mockResolvedValue(YOUR_REVIEW);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+    expect(ownReview).not.toHaveBeenCalled();
+  });
+
+  it("leaves it alone when you have never reviewed the PR yourself", async () => {
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("keeps a second opinion you asked for after reviewing", async () => {
+    // You reviewed on GitHub, then pulled the PR back in for a fresh draft.
+    // Filing that away would answer a question you had just posed.
+    await saveArtifact(
+      draft({ run: { ...RUN, trigger: "user" as const, startedAt: "2026-08-21T09:00:00Z" } }),
+    );
+    search.mockResolvedValue([]);
+    ownReview.mockResolvedValue(YOUR_REVIEW);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("never files a review that was already sent", async () => {
+    await saveArtifact(
+      draft({
+        status: "sent" as const,
+        sent: { at: "2026-08-20T16:00:00Z", event: "COMMENT" as const, url: null, auto: false },
+      }),
+    );
+    search.mockResolvedValue([]);
+    ownReview.mockResolvedValue(YOUR_REVIEW);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("sent");
+    expect(after?.filed).toBeNull();
+  });
+});
+
+describe("filedByOwnReview", () => {
+  const artifact = { ...stubArtifact(DISCOVERED), status: "ready" as const };
+  const review = { at: "2026-08-20T14:55:00Z", state: "COMMENTED" as const, url: null };
+
+  it("needs a review of yours to file anything", () => {
+    expect(filedByOwnReview(artifact, null)).toBe(false);
+    expect(filedByOwnReview(artifact, review)).toBe(true);
+  });
+
+  // ISO-8601 does not compare as text across precisions: `startedAt` carries
+  // milliseconds, GitHub's `submitted_at` does not, and "…:00.500Z" sorts
+  // before "…:00Z". Compared as strings, a run that began half a second after
+  // the review reads as older, and the draft it protects gets filed away.
+  it("keeps a second opinion that started milliseconds after your review", () => {
+    // Same second on both sides — the only place the precision mismatch shows.
+    const sameSecond = { ...review, at: "2026-08-20T14:55:26Z" };
+    const run = {
+      model: null,
+      startedAt: "2026-08-20T14:55:26.500Z",
+      finishedAt: null,
+      costUsd: null,
+      error: null,
+      withSource: false,
+      trusted: false,
+      sessionId: null,
+      trigger: "user" as const,
+    };
+    expect(filedByOwnReview({ ...artifact, run }, sameSecond)).toBe(false);
+    // And the same run started a second *before* it still files: the guard is
+    // about order, not about having a trigger at all.
+    expect(
+      filedByOwnReview(
+        { ...artifact, run: { ...run, startedAt: "2026-08-20T14:55:25.500Z" } },
+        sameSecond,
+      ),
+    ).toBe(true);
+  });
+
+  it("only files a finished draft", () => {
+    expect(filedByOwnReview({ ...artifact, status: "running" }, review)).toBe(false);
+    expect(filedByOwnReview({ ...artifact, status: "awaiting" }, review)).toBe(false);
+    expect(filedByOwnReview({ ...artifact, status: "skipped" }, review)).toBe(false);
   });
 });

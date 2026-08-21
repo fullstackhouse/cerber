@@ -147,6 +147,9 @@ export function shownTab(picked: Tab, buckets: Record<Tab, ReviewListItem[]>): T
  */
 export function rowTag(r: ReviewListItem): string | null {
   if (isArchived(r)) return r.pr.state?.toLowerCase() ?? null;
+  // Filed by cerber, not by you: "reviewed" here would read as a click you
+  // never made, on the one row whose whole point is that you did it elsewhere.
+  if (r.filed) return "reviewed on GitHub";
   if (r.status === "reviewed" || r.status === "skipped") return r.status;
   return null;
 }
@@ -223,9 +226,31 @@ export function sentTag(sent: NonNullable<ReviewListItem["sent"]>): { label: str
   };
 }
 
+/**
+ * The same, for a review you submitted on GitHub rather than through cerber.
+ *
+ * A filed row can come back here — the author pushes and asks you again, and
+ * GitHub lists a fresh request against a PR you have provably reviewed. The
+ * conversation read cannot see that review either, so without this the row
+ * would be tagged "you haven't replied" at someone who did.
+ */
+export function filedTag(filed: NonNullable<ReviewListItem["filed"]>): {
+  label: string;
+  title: string;
+} {
+  const when = new Date(filed.review.at).toLocaleDateString();
+  return {
+    label: "you reviewed this on GitHub",
+    title:
+      `You submitted a review on GitHub on ${when}, outside cerber, so this draft was filed. ` +
+      `GitHub lists a review request for you again — most likely the author has asked for another ` +
+      `look since. Re-review it to draft against the current head.`,
+  };
+}
+
 /** The open-requests tag for a row: what cerber sent, or whose move the poll says it is. */
 export const requestTag = (r: ReviewListItem, reply: Reply) =>
-  r.sent ? sentTag(r.sent) : replyTag(reply);
+  r.sent ? sentTag(r.sent) : r.filed ? filedTag(r.filed) : replyTag(reply);
 
 /**
  * What to say instead of "nothing awaits your review" when something does.
@@ -346,7 +371,9 @@ export function strip(
 
   const meta = [readMode(r)];
   // What you did with it, when that isn't "nothing yet".
-  if (r.status === "reviewed") meta.unshift("you marked this reviewed");
+  if (r.filed) {
+    meta.unshift(`you reviewed this on GitHub on ${new Date(r.filed.review.at).toLocaleDateString()}`);
+  } else if (r.status === "reviewed") meta.unshift("you marked this reviewed");
   if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
   meta.push(commentsPart(r));
@@ -357,6 +384,14 @@ export function strip(
         ? `auto-send candidate at ${r.verdict.confidence}%`
         : `below the ${daemon.autoSendThreshold}% auto-send bar`,
     );
+  }
+  if (r.filed) {
+    return {
+      reasoning:
+        "GitHub stopped asking you for a review and already had one of yours, so this draft was " +
+        "filed rather than left in the inbox. It was never sent — open it to read or send it.",
+      meta,
+    };
   }
   return { reasoning: r.verdict?.reasoning ?? "This review has a draft but no verdict.", meta };
 }

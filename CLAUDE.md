@@ -84,7 +84,10 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 - `src/server/` — Hono API + static cockpit serving, plus the inbox loop
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
-  `daemon.autoReview` is off, archives merged/closed PRs. Config's `daemon`
+  `daemon.autoReview` is off, archives merged/closed PRs, and files a draft
+  under settled once GitHub has stopped requesting you *and* holds a review of
+  your own (`fetchOwnReview` — the one thing the conversation read can't see;
+  `run.trigger` spares a draft you asked for after that review). Config's `daemon`
   block is re-read every poll, so cockpit toggles apply without a restart.
   Each poll also publishes what it found (`status.awaiting`): the queue filters
   on what you settled locally, which stops matching what GitHub asks you for the

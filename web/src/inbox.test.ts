@@ -323,6 +323,39 @@ describe("rowTag", () => {
   });
 });
 
+describe("a draft cerber filed because you reviewed on GitHub", () => {
+  const filed = (over: Partial<ReviewListItem> = {}) =>
+    row({
+      status: "reviewed",
+      filed: {
+        at: "2026-08-21T07:00:00.000Z",
+        review: { at: "2026-08-20T14:55:00.000Z", state: "CHANGES_REQUESTED", url: null },
+      },
+      ...over,
+    });
+
+  it("does not put a click you never made in the tag", () => {
+    expect(rowTag(filed())).toBe("reviewed on GitHub");
+    expect(rowTag(row({ status: "reviewed" }))).toBe("reviewed");
+  });
+
+  it("says why the row is filed, not what the verdict thought", () => {
+    const s = strip(filed(), daemon());
+    expect(s.reasoning).toContain("GitHub stopped asking you");
+    expect(s.reasoning).toContain("never sent");
+    expect(s.meta[0]).toContain("you reviewed this on GitHub");
+    expect(s.meta.join(" ")).not.toContain("you marked this reviewed");
+  });
+
+  it("never says you haven't replied when GitHub asks again", () => {
+    // The author pushed and re-requested: the row is back under open requests,
+    // and the conversation read still cannot see the review you submitted.
+    const tag = requestTag(filed(), "none");
+    expect(tag.label).toBe("you reviewed this on GitHub");
+    expect(tag.title).toContain("outside cerber");
+  });
+});
+
 describe("sortReviews", () => {
   it("puts what wants you most on top, newest first inside a band", () => {
     const list = [

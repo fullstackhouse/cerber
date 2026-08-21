@@ -41,6 +41,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    filed: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -67,6 +68,7 @@ describe("reconcileRunning", () => {
           withSource: true,
           trusted: false,
           sessionId: null,
+          trigger: null,
         },
       }),
     );

@@ -1133,10 +1133,28 @@ function FreshnessBanner({
       </div>
     );
   }
-  if (!closed && !movedHere) return null;
+  const filed = artifact.filed;
+  if (!closed && !movedHere && !filed) return null;
 
   return (
     <div className="freshness">
+      {filed && (
+        <div>
+          <strong>
+            You reviewed this PR on GitHub on {new Date(filed.review.at).toLocaleDateString()}.
+          </strong>{" "}
+          So cerber filed this draft under settled, GitHub having stopped asking you for a review
+          and shown one of your own{" "}
+          {filed.review.url ? (
+            <a href={filed.review.url} target="_blank" rel="noreferrer">
+              already on the PR
+            </a>
+          ) : (
+            "already on the PR"
+          )}
+          . Nothing here was changed or sent — the draft is still yours to send.
+        </div>
+      )}
       {closed && (
         <div>
           <strong>This PR is {state === "MERGED" ? "merged" : "closed"}.</strong> A review can still

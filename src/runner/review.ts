@@ -35,6 +35,8 @@ export interface ReviewOptions {
    * commands in the checkout, false keeps it read-only.
    */
   trust?: boolean;
+  /** Who asked. The inbox poll passes "daemon"; every other caller is a person. */
+  trigger?: "daemon" | "user";
 }
 
 /** All an untrusted reviewer needs from a checkout — everything else stays off. */
@@ -173,9 +175,11 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       withSource: source !== null,
       trusted: trusted && source !== null,
       sessionId: null,
+      trigger: opts.trigger ?? "user",
     },
     sent: null,
     refresh: null,
+    filed: null,
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the
     // chat prompt replays the transcript, which is what makes it survive the
@@ -236,6 +240,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         // Only worth keeping when there is a checkout to resume into: a session
         // whose working directory was empty has nothing a chat turn could read.
         sessionId: source ? review.sessionId : null,
+        trigger: artifact.run!.trigger,
       },
     };
 

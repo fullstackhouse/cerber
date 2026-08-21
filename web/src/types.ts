@@ -35,6 +35,14 @@ export interface ReviewListItem {
   trusted?: boolean | null;
   runError?: string | null;
   sent?: Artifact["sent"];
+  /** Set when cerber filed this draft away itself — never on one you settled. */
+  filed?: Filed | null;
+}
+
+/** Why cerber filed a draft away: a review of your own that GitHub already had. */
+export interface Filed {
+  at: string;
+  review: { at: string; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"; url: string | null };
 }
 
 export interface Verdict {
@@ -148,6 +156,8 @@ export interface Artifact {
     moved: number;
     drifted: number;
   } | null;
+  /** Set when cerber filed this draft away itself, and on the strength of what. */
+  filed?: Filed | null;
   /** The conversation about this review. Never sent to GitHub. */
   chat?: ChatTurn[];
   /** A turn being answered right now, or the one that failed. */

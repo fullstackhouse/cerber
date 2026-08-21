@@ -103,6 +103,14 @@ export const RunInfoSchema = z.object({
    * reviewer answering a question still holds everything it read.
    */
   sessionId: z.string().nullable().default(null),
+  /**
+   * Who asked for this run: the inbox poll, or a person — the cockpit's review
+   * button, a pasted URL, `cerber review`. Null on runs recorded before this
+   * was kept. It is what tells a draft the queue produced on its own from one
+   * you deliberately asked for, which is the difference between a row that can
+   * be filed away automatically and one that must not be.
+   */
+  trigger: z.enum(["daemon", "user"]).nullable().default(null),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 
@@ -114,6 +122,25 @@ export const SentInfoSchema = z.object({
   auto: z.boolean().default(false),
 });
 export type SentInfo = z.infer<typeof SentInfoSchema>;
+
+/**
+ * Why a draft was filed away without ever being sent.
+ *
+ * The only cause today is the one the queue could not see before: you reviewed
+ * the PR through GitHub itself, so cerber's draft is a second opinion on a
+ * conversation you already had. It is a record, not a decision to defend — the
+ * review is untouched, still openable and still sendable.
+ */
+export const FiledInfoSchema = z.object({
+  at: z.string(),
+  /** The review of yours GitHub had, which is what settled this one. */
+  review: z.object({
+    at: z.string(),
+    state: z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]),
+    url: z.string().nullable().default(null),
+  }),
+});
+export type FiledInfo = z.infer<typeof FiledInfoSchema>;
 
 /** Result of pulling a review forward onto a newer head commit. */
 export const RefreshInfoSchema = z.object({
@@ -259,6 +286,8 @@ export const ArtifactSchema = z.object({
   run: RunInfoSchema.nullable().default(null),
   /** Set once the review was sent to GitHub (explicitly, or via opt-in auto-send). */
   sent: SentInfoSchema.nullable().default(null),
+  /** Set when cerber filed this draft away itself, and why. Never on a sent one. */
+  filed: FiledInfoSchema.nullable().default(null),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),

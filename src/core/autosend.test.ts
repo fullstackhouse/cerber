@@ -35,6 +35,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    filed: null,
     calibration: null,
   chat: [],
   preChat: null,

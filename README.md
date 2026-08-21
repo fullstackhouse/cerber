@@ -60,6 +60,20 @@ inbox — cerber never tells you nothing awaits you while its own poll says
 otherwise. It is a report, not a nag: what you decided here stands, and the
 mark clears itself the moment GitHub hears from you.
 
+### Except when you reviewed it on GitHub
+
+There is one thing you never have to settle by hand. Review a PR the ordinary
+way — GitHub's own review button, cerber not involved — and the review request
+clears, but nothing here hears about it: the draft cerber wrote for that PR
+goes on sitting in the inbox as work still waiting on you, days after the PR
+went back to its author. So the poll asks the other question too. When GitHub
+has stopped requesting your review *and* already holds one of yours, the draft
+is filed under settled, tagged `reviewed on GitHub` with the date it was
+submitted. Nothing else happens to it — it was never sent, and it is still
+yours to open, re-review or send. The one draft this leaves alone is one you
+asked for *after* that review: a second opinion you went and requested is not
+a row the queue forgot to close.
+
 ### Whose move is it
 
 An open request doesn't mean the ball is yours, though. You may have argued the

@@ -213,6 +213,62 @@ export function classifyReply(comments: Comment[], login: string): Reply {
   return human.some((c) => c.author !== login && c.at > lastMine) ? "them" : "you";
 }
 
+/**
+ * A review you submitted on the PR yourself, as GitHub has it.
+ *
+ * `classifyReply` deliberately reads the conversation and not this, because a
+ * submitted review leaves nothing in the issue comments — but the queue also
+ * needs the opposite question answered: did you already have your say on this
+ * PR through GitHub's own review button, outside cerber entirely?
+ */
+export interface OwnReview {
+  at: string;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+  url: string | null;
+}
+
+export interface RawReview {
+  author: string;
+  /** Null on a PENDING review — one you started and never submitted. */
+  at: string | null;
+  state: string;
+  url: string | null;
+}
+
+/**
+ * The last review of your own that still stands, or null.
+ *
+ * PENDING is a draft on GitHub's side and has no `submitted_at`, so it is not
+ * a review anyone has seen. DISMISSED is one a maintainer explicitly struck
+ * off; taking it as "you have had your say" would file work away on the
+ * strength of a review GitHub no longer counts.
+ */
+const STANDS = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]);
+
+export function latestOwnReview(rows: RawReview[], login: string): OwnReview | null {
+  const mine = rows.filter((r) => r.author === login && r.at != null && STANDS.has(r.state));
+  if (mine.length === 0) return null;
+  const last = mine.reduce((a, b) => (b.at! > a.at! ? b : a));
+  return { at: last.at!, state: last.state as OwnReview["state"], url: last.url };
+}
+
+/** Ask GitHub whether you have reviewed this PR yourself. */
+export async function fetchOwnReview(ref: PrRef, login: string): Promise<OwnReview | null> {
+  const out = await gh([
+    "api",
+    "--paginate",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`,
+    "--jq",
+    ".[] | {author: .user.login, at: .submitted_at, state: .state, url: .html_url}",
+  ]);
+  // --jq streams one object per line rather than a JSON array.
+  const rows = out
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as RawReview);
+  return latestOwnReview(rows, login);
+}
+
 /** The login `@me` resolves to. Asked once — it cannot change mid-process. */
 let cachedLogin: Promise<string> | null = null;
 export function currentLogin(): Promise<string> {

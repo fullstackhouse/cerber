@@ -203,6 +203,8 @@ export async function buildApp(
         trusted: a.run?.trusted ?? null,
         runError: a.run?.error ?? null,
         sent: a.sent ? { at: a.sent.at, event: a.sent.event, url: a.sent.url, auto: a.sent.auto ?? false } : null,
+        // Why a settled row is settled, when cerber settled it rather than you.
+        filed: a.filed,
       })),
     );
   });
@@ -292,9 +294,11 @@ export async function buildApp(
         withSource: withSource !== false,
         trusted: false,
         sessionId: null,
+        trigger: "user",
       },
       sent: null,
       refresh: null,
+      filed: null,
       calibration: null,
       chat: [],
       preChat: null,
@@ -478,6 +482,7 @@ export async function buildApp(
         withSource: withSource !== false,
         trusted: false,
         sessionId: null,
+        trigger: "user",
       },
     }));
 
