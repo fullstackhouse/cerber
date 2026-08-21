@@ -380,6 +380,19 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   let notifierMissing = false;
 
   /**
+   * What the last attempt to tap this machine actually did, or null before one
+   * has been made.
+   *
+   * `status.notify` is a promise to the cockpit — it stands its own bell down
+   * on the strength of it — so it has to mean "this machine gets told", not
+   * "this machine was asked to tell". A box with no `notify-send` would
+   * otherwise go on claiming the job while the browser politely declined it,
+   * and one PR would be announced by nobody at all. Untried counts as working:
+   * the alternative is both bells ringing everywhere until the first PR lands.
+   */
+  let notifierWorks: boolean | null = null;
+
+  /**
    * Tap this machine when a PR lands in the queue.
    *
    * An artifact is the ledger this rides on: a PR is announced on the poll that
@@ -391,7 +404,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   async function announce(arrivals: DiscoveredPr[]): Promise<void> {
     const n = notice(arrivals);
     if (!n) return;
-    if (await notify(n)) return;
+    notifierWorks = await notify(n);
+    if (notifierWorks) return;
     if (notifierMissing) return;
     notifierMissing = true;
     log("no desktop notifier here — arrivals will only show in the cockpit");
@@ -474,7 +488,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // What the cockpit's bell defers to: a loop that isn't polling announces
       // nothing, whatever the notify toggle says.
       const notifyOn = opts.notify && knobs.notify;
-      status.notify = knobs.poll && notifyOn;
+      // Only true while all three hold, and the third is only knowable by
+      // having tried: a notifier that isn't there is not a bell the cockpit
+      // should be standing down for.
+      const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
+      status.notify = announcing();
       status.autoReview = autoReview;
       // Recomputed too, so a trust rule added mid-run shows up in the strip.
       status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
@@ -497,7 +515,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const { discovered } = await syncQueue(refs);
       // Before the reviews, not after: the arrival is the news, and drafting it
       // takes minutes. This is the same moment the cockpit's bell would ring.
-      if (notifyOn && discovered.length > 0) await announce(discovered);
+      if (notifyOn && discovered.length > 0) {
+        await announce(discovered);
+        // Recomputed on the spot rather than left to the next poll: that is
+        // minutes away, and the cockpit would spend them deferring to a tap
+        // that never came. Recomputed rather than only cleared, so a machine
+        // whose notifier comes back takes the job back with it.
+        status.notify = announcing();
+      }
 
       if (autoReview) {
         const { reviewed, skipped, failed } = await reviewAll(refs);

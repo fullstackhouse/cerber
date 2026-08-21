@@ -633,6 +633,21 @@ describe("the tap on the machine when a PR lands", () => {
     expect(status.lastPollError).toBeNull();
   });
 
+  // The failure this whole feature is meant to avoid: the daemon claiming the
+  // job, the cockpit standing down for it, and nobody announcing the PR.
+  it("hands the job back when the machine turns out to have no notifier", async () => {
+    notified.mockResolvedValue(false);
+    search.mockResolvedValue([DISCOVERED]);
+    expect((await pollTimes(1)).notify).toBe(false);
+  });
+
+  it("takes it back again once the notifier answers", async () => {
+    notified.mockResolvedValueOnce(false).mockResolvedValue(true);
+    // Two PRs, one per poll, so the second poll has an arrival to try with.
+    search.mockResolvedValueOnce([DISCOVERED]).mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8 }]);
+    expect((await pollTimes(2)).notify).toBe(true);
+  });
+
   // What the cockpit's bell reads to know it would be a second popup.
   it("tells the cockpit whether it is announcing arrivals itself", async () => {
     search.mockResolvedValue([DISCOVERED]);
