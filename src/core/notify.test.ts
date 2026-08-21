@@ -79,11 +79,13 @@ describe("the command that taps the machine", () => {
     });
   });
 
-  it("ends Linux option parsing, so a title starting with a dash is still text", () => {
+  // The PR's title arrives here inside the body — `notice()` writes the summary
+  // itself — so the body is the argument that carries somebody else's text.
+  it("ends Linux option parsing, so a body starting with a dash is still text", () => {
     const dashed = { title: "widgets#7 awaits your review", body: "--help me — mira" };
     const cmd = notifyCommand(dashed, "linux");
     // The marker sits before both, so neither can be read as a flag.
-    expect(cmd?.args.indexOf("--")).toBeLessThan(cmd!.args.indexOf(dashed.title));
+    expect(cmd?.args.indexOf("--")).toBeLessThan(cmd!.args.indexOf(dashed.body));
     expect(cmd?.args).toEqual(["--app-name=cerber", "--", dashed.title, dashed.body]);
   });
 

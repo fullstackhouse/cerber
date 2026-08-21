@@ -40,8 +40,16 @@ const DAEMON_BELL_TITLE =
 function NotifyBell({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [state, toggle] = useNotifyState();
   if (daemonAnnounces) {
+    // Not a button any more, so it needs a role to be announced at all: a
+    // labelled generic span is skipped by screen readers, and the explanation
+    // is the whole point of leaving the bell up.
     return (
-      <span className="topbar-link bell bell-daemon" title={DAEMON_BELL_TITLE} aria-label={DAEMON_BELL_TITLE}>
+      <span
+        className="topbar-link bell bell-daemon"
+        role="img"
+        title={DAEMON_BELL_TITLE}
+        aria-label={DAEMON_BELL_TITLE}
+      >
         <Icon name="bell" size={15} />
       </span>
     );
