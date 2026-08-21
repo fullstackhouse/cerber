@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifyReply, currentLogin, resetLoginCache } from "./gh.js";
+import { classifyReply, currentLogin, latestOwnReview, resetLoginCache } from "./gh.js";
 
 // gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
 // resolves to the `{ stdout }` shape the real one does, while still recording
@@ -108,6 +108,45 @@ describe("classifyReply", () => {
   });
 });
 import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
+
+describe("latestOwnReview", () => {
+  const r = (author: string, at: string | null, state: string) => ({
+    author,
+    at,
+    state,
+    url: "https://github.com/acme/widgets/pull/7#pullrequestreview-1",
+  });
+
+  it("finds nothing when only other people have reviewed", () => {
+    expect(latestOwnReview([r("them", "2026-08-19T10:00:00Z", "APPROVED")], "me")).toBeNull();
+    expect(latestOwnReview([], "me")).toBeNull();
+  });
+
+  it("takes your latest review, whatever kind it was", () => {
+    const found = latestOwnReview(
+      [
+        r("me", "2026-08-19T10:00:00Z", "COMMENTED"),
+        r("them", "2026-08-20T09:00:00Z", "APPROVED"),
+        r("me", "2026-08-20T14:55:00Z", "CHANGES_REQUESTED"),
+      ],
+      "me",
+    );
+    expect(found?.at).toBe("2026-08-20T14:55:00Z");
+    expect(found?.state).toBe("CHANGES_REQUESTED");
+  });
+
+  // A review you started and never submitted is one nobody has seen — GitHub
+  // leaves it PENDING with no submitted_at, and still asks you for a review.
+  it("ignores a pending review of your own", () => {
+    expect(latestOwnReview([r("me", null, "PENDING")], "me")).toBeNull();
+  });
+
+  // Dismissing is a maintainer striking the review off. Counting it would file
+  // work away on the strength of a review GitHub itself no longer honours.
+  it("ignores a review that was dismissed", () => {
+    expect(latestOwnReview([r("me", "2026-08-19T10:00:00Z", "DISMISSED")], "me")).toBeNull();
+  });
+});
 
 describe("parsePrRef", () => {
   it("parses a full PR URL", () => {

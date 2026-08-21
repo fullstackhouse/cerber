@@ -3,10 +3,12 @@ import { evaluateAutoSend } from "../core/autosend.js";
 import { loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
+  OwnReview,
   Reply,
   classifyReply,
   currentLogin,
   fetchConversation,
+  fetchOwnReview,
   fetchPrInfo,
   searchAwaitingMe,
   submitReview,
@@ -133,6 +135,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    filed: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -155,6 +158,29 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
  */
 export function isPureStub(artifact: Artifact): boolean {
   return artifact.status === "awaiting" && artifact.comments.length === 0 && artifact.run === null;
+}
+
+/**
+ * Whether a review of yours on GitHub settles this draft.
+ *
+ * Two facts have to hold. GitHub must have stopped asking you — the caller has
+ * already established that, since this only runs on artifacts absent from the
+ * awaiting search — and you must have submitted a review of your own, which is
+ * the half cerber could not see before: a review clears the request whether it
+ * went through Send or through GitHub's own button, and only the first left a
+ * trace here. Together they mean the PR is back with its author, while the
+ * inbox went on listing the draft as work still waiting on you.
+ *
+ * The trigger test is what keeps this from undoing a deliberate act. A draft
+ * you asked for — pasted the URL in, pressed re-review — after you had already
+ * reviewed the PR is a second opinion you went and requested, so filing it
+ * away would answer a question you had just posed. A draft the poll wrote on
+ * its own carries no such intent: it is exactly the row this is here to close.
+ */
+export function filedByOwnReview(artifact: Artifact, review: OwnReview | null): boolean {
+  if (artifact.status !== "ready" || artifact.sent || !review) return false;
+  const run = artifact.run;
+  return !(run?.trigger === "user" && run.startedAt >= review.at);
 }
 
 /** How many open-PR artifacts to re-check against GitHub per poll, and how often each. */
@@ -237,6 +263,39 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       discovered++;
     }
 
+    // Asked once per pass, and only if a row actually reaches the check that
+    // needs it. Undefined is "not asked yet"; null is "gh could not say", which
+    // attributes nothing to you rather than guessing.
+    let login: string | null | undefined;
+
+    /**
+     * File a draft away once GitHub says you already reviewed the PR yourself.
+     *
+     * The queue lists what you have not dealt with locally, and a review
+     * submitted on github.com never reached it — so a PR you answered days ago
+     * sat in the inbox as if it still wanted you. This is the one read that
+     * closes that gap, on the same 30-minute-per-artifact leash as the state
+     * check it rides along with.
+     */
+    async function fileIfYouReviewedItYourself(artifact: Artifact): Promise<void> {
+      // Only a finished, unsent draft can be filed — checked here too, so a row
+      // that could never qualify costs no GitHub call at all.
+      if (artifact.status !== "ready" || artifact.sent) return;
+      if (login === undefined) login = await currentLogin().catch(() => null);
+      if (login === null) return;
+      const review = await fetchOwnReview(artifact.pr, login);
+      if (!review || !filedByOwnReview(artifact, review)) return;
+      const filed = { at: new Date().toISOString(), review };
+      const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
+        // Re-read from disk: a run or a send may have started in the seconds
+        // this read took, and neither wants filing out from under it.
+        filedByOwnReview(a, review) ? { ...a, status: "reviewed" as const, filed } : a,
+      );
+      if (saved?.filed) {
+        log(`[${artifact.id}] you reviewed this on GitHub on ${review.at.slice(0, 10)} — filed as reviewed`);
+      }
+    }
+
     const awaitingIds = new Set(refs.map((r) => artifactId(r)));
     let refreshed = 0;
     for (const artifact of await listArtifacts()) {
@@ -283,6 +342,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           }));
         }
         if (pr.state !== "OPEN") log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
+        else await fileIfYouReviewedItYourself(artifact);
       } catch {
         // Same: book-keeping can wait for the next poll.
       }
@@ -326,6 +386,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       try {
         const result = await reviewPr(ref, {
           model: opts.model,
+          trigger: "daemon",
           withSource: opts.withSource,
           trust: opts.trust,
           onProgress: (m) => log(`[${label}] ${m}`),
