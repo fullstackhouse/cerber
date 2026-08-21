@@ -14,7 +14,7 @@ import {
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
-import { filedByOwnReview, isPureStub, startDaemon, stubArtifact } from "./daemon.js";
+import { DaemonHandle, filedByOwnReview, isPureStub, startDaemon, stubArtifact } from "./daemon.js";
 
 // The loop's own bookkeeping is what's under test — not gh, and not the runner.
 // classifyReply stays real: it is pure, and its own tests live in core/gh.test.ts.
@@ -58,6 +58,19 @@ const DISCOVERED = {
   author: "someone",
 };
 
+/**
+ * Stop a daemon and wait until it has actually gone quiet.
+ *
+ * `stop()` clears the timer, but a poll already in flight runs to the end — and
+ * CERBER_HOME is rebound in every `beforeEach`, so that straggler would do its
+ * discovering inside the *next* test's home and announce there, against the
+ * next test's spies. Draining here is what gives each test its own world.
+ */
+async function stopAndDrain(handle: DaemonHandle): Promise<void> {
+  handle.stop();
+  await vi.waitFor(() => expect(handle.status().polling).toBe(false));
+}
+
 describe("the awaiting list the daemon publishes", () => {
   const daemonKnobs = {
     poll: true,
@@ -98,7 +111,7 @@ describe("the awaiting list the daemon publishes", () => {
       await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
       return handle.status();
     } finally {
-      handle.stop();
+      await stopAndDrain(handle);
     }
   }
 
@@ -156,7 +169,7 @@ describe("the awaiting list the daemon publishes", () => {
       config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, poll: false } });
       await vi.waitFor(() => expect(handle.status().awaiting).toEqual([]));
     } finally {
-      handle.stop();
+      await stopAndDrain(handle);
     }
   });
 
@@ -295,7 +308,7 @@ describe("draft PRs in the inbox", () => {
       await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
       return handle.status();
     } finally {
-      handle.stop();
+      await stopAndDrain(handle);
     }
   }
 
@@ -426,7 +439,7 @@ describe("a draft you already answered on GitHub", () => {
     try {
       await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
     } finally {
-      handle.stop();
+      await stopAndDrain(handle);
     }
     return loadArtifact("acme/widgets#7");
   }
@@ -577,7 +590,7 @@ describe("the tap on the machine when a PR lands", () => {
       await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
       return handle.status();
     } finally {
-      handle.stop();
+      await stopAndDrain(handle);
     }
   }
 
