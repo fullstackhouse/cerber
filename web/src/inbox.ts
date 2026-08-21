@@ -283,7 +283,7 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
   // strip below, which has room; the cell keeps the verdict and how sure the
   // review is of itself.
   return {
-    label: `${r.verdict.recommendation.replace("_", " ")} ${r.verdict.confidence}`,
+    label: `${r.verdict.recommendation.replace("_", " ")} ${r.verdict.confidence}%`,
     tone: RECOMMENDATION_TONE[r.verdict.recommendation] ?? "none",
   };
 }

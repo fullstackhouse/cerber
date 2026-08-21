@@ -370,10 +370,10 @@ describe("verdictCell", () => {
   });
 
   it("shows the verdict and how sure the review is of itself", () => {
-    expect(verdictCell(row())).toEqual({ label: "approve 91", tone: "approve" });
+    expect(verdictCell(row())).toEqual({ label: "approve 91%", tone: "approve" });
     expect(
       verdictCell(row({ verdict: { recommendation: "request_changes", confidence: 82, reasoning: "" } })),
-    ).toEqual({ label: "request changes 82", tone: "changes" });
+    ).toEqual({ label: "request changes 82%", tone: "changes" });
   });
 
   it("shows what a sent review actually posted", () => {

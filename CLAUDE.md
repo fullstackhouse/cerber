@@ -49,8 +49,9 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   check the verdict against. Confidence is the other half and a different
   claim: how sure the review is of *itself* — findings real, grades right,
   nothing worth blocking missed — never whether the PR should merge, which the
-  verdict already answers. It sits beside the findings it is about, in the
-  queue's narrow verdict cell, and as the auto-send threshold's dial. The grade is rendered from the field, never written into the
+  verdict already answers. It rides along wherever the verdict is shown, and
+  is spelled out ("72% sure of the findings") beside the findings it is about.
+  It is also the auto-send threshold's dial. The grade is rendered from the field, never written into the
   body: one badge (`src/core/severity.ts`) opens the comment's own text in the
   cockpit, on GitHub and in the export, so a comment reads the same in all
   three — and the grade survives GitHub, where a chip would not exist.

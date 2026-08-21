@@ -1422,7 +1422,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // The findings changed under the verdict (a blocker dropped, a grade edited).
   // Never auto-rewritten: the hint hands it to the chat, one click, on request.
   const mismatch = verdictMismatch(artifact);
-  // The chip carries the fact the verdict rests on, not how sure the AI felt.
+  // The chip carries both halves: the blocker count the verdict rests on, and
+  // how sure the review is of the findings behind it. The "why" card below is
+  // where each is spelled out.
   const basis = verdictBasis(artifact);
   const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
   const retrue = () =>
@@ -1536,7 +1538,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 (readOnly ? (
                   <span className={`chip tone-${tone}`}>
                     {artifact.verdict.recommendation.replace("_", " ")}
-                    {basis && ` · ${basis}`}
+                    {basis && ` · ${basis}`} · {artifact.verdict.confidence}%
                   </span>
                 ) : (
                   // The verdict is decided next to send, at the foot of the page.
@@ -1547,7 +1549,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                     onClick={() => jump(verdictEl, sendEl)}
                   >
                     {artifact.verdict.recommendation.replace("_", " ")}
-                    {basis && ` · ${basis}`}
+                    {basis && ` · ${basis}`} · {artifact.verdict.confidence}%
                     <Icon name="down" size={12} />
                   </button>
                 ))}
