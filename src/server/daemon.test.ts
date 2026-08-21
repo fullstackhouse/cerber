@@ -473,6 +473,35 @@ describe("filedByOwnReview", () => {
     expect(filedByOwnReview(artifact, review)).toBe(true);
   });
 
+  // ISO-8601 does not compare as text across precisions: `startedAt` carries
+  // milliseconds, GitHub's `submitted_at` does not, and "…:00.500Z" sorts
+  // before "…:00Z". Compared as strings, a run that began half a second after
+  // the review reads as older, and the draft it protects gets filed away.
+  it("keeps a second opinion that started milliseconds after your review", () => {
+    // Same second on both sides — the only place the precision mismatch shows.
+    const sameSecond = { ...review, at: "2026-08-20T14:55:26Z" };
+    const run = {
+      model: null,
+      startedAt: "2026-08-20T14:55:26.500Z",
+      finishedAt: null,
+      costUsd: null,
+      error: null,
+      withSource: false,
+      trusted: false,
+      sessionId: null,
+      trigger: "user" as const,
+    };
+    expect(filedByOwnReview({ ...artifact, run }, sameSecond)).toBe(false);
+    // And the same run started a second *before* it still files: the guard is
+    // about order, not about having a trigger at all.
+    expect(
+      filedByOwnReview(
+        { ...artifact, run: { ...run, startedAt: "2026-08-20T14:55:25.500Z" } },
+        sameSecond,
+      ),
+    ).toBe(true);
+  });
+
   it("only files a finished draft", () => {
     expect(filedByOwnReview({ ...artifact, status: "running" }, review)).toBe(false);
     expect(filedByOwnReview({ ...artifact, status: "awaiting" }, review)).toBe(false);

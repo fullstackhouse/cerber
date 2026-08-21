@@ -1139,9 +1139,11 @@ function FreshnessBanner({
     <div className="freshness">
       {filed && (
         <div>
-          <strong>You reviewed this PR on GitHub.</strong> Cerber filed this draft under settled on{" "}
-          {new Date(filed.review.at).toLocaleDateString()}, when GitHub stopped asking you for a
-          review and showed one of your own{" "}
+          <strong>
+            You reviewed this PR on GitHub on {new Date(filed.review.at).toLocaleDateString()}.
+          </strong>{" "}
+          So cerber filed this draft under settled, GitHub having stopped asking you for a review
+          and shown one of your own{" "}
           {filed.review.url ? (
             <a href={filed.review.url} target="_blank" rel="noreferrer">
               already on the PR

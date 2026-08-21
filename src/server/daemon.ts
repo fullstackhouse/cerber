@@ -176,11 +176,21 @@ export function isPureStub(artifact: Artifact): boolean {
  * reviewed the PR is a second opinion you went and requested, so filing it
  * away would answer a question you had just posed. A draft the poll wrote on
  * its own carries no such intent: it is exactly the row this is here to close.
+ *
+ * A run recorded before the trigger was kept is treated as the poll's, which is
+ * the deliberate choice: the alternative leaves every draft written before this
+ * shipped stuck in the inbox forever, which is the bug. The cost of being wrong
+ * is one legacy draft filed once — and the re-review that un-files it records a
+ * trigger, so it cannot happen to the same row twice.
  */
 export function filedByOwnReview(artifact: Artifact, review: OwnReview | null): boolean {
   if (artifact.status !== "ready" || artifact.sent || !review) return false;
   const run = artifact.run;
-  return !(run?.trigger === "user" && run.startedAt >= review.at);
+  // Parsed, not compared as text. `startedAt` carries milliseconds and GitHub's
+  // `submitted_at` does not, and "…:00.500Z" sorts *before* "…:00Z" — so a run
+  // that began half a second after your review would read as older than it, and
+  // the second opinion this guard exists to protect would be filed away.
+  return !(run?.trigger === "user" && Date.parse(run.startedAt) >= Date.parse(review.at));
 }
 
 /** How many open-PR artifacts to re-check against GitHub per poll, and how often each. */
