@@ -13,7 +13,18 @@ export function toMarkdown(artifact: Artifact): string {
   lines.push("");
 
   if (verdict) {
-    lines.push(`**Verdict: ${verdict.recommendation.replace("_", " ")}** (confidence ${verdict.confidence}%)`);
+    // Only blockers block, so the count behind the verdict is what a reader
+    // can check — unlike how sure the AI reported feeling.
+    const graded = artifact.comments.some((c) => c.severity != null);
+    const blockers = artifact.comments.filter(
+      (c) => c.status !== "dropped" && c.severity === "blocker",
+    ).length;
+    const basis = !graded
+      ? ""
+      : blockers === 0
+        ? " (no blockers)"
+        : ` (${blockers} blocker${blockers === 1 ? "" : "s"})`;
+    lines.push(`**Verdict: ${verdict.recommendation.replace("_", " ")}**${basis}`);
     lines.push("");
     lines.push(verdict.reasoning);
     lines.push("");

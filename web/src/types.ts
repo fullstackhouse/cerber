@@ -26,6 +26,10 @@ export interface ReviewListItem {
   commentCount: number;
   /** Of those, the ones whose code is gone — they post in the body, not inline. */
   driftedCount?: number;
+  /** Live blockers — the only grade that stands between the PR and approval. */
+  blockerCount?: number;
+  /** How many comments carry a grade at all; 0 means the review makes no claim. */
+  gradedCount?: number;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;

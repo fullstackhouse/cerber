@@ -38,10 +38,16 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 - Findings are graded `blocker | minor | nit`; only a blocker blocks approval,
   and an ungraded comment is not a finding (a question, a note) — never
   "unknown severity". Grades assume the finding is true: doubt lives in the
-  verdict's confidence, never in a softened grade. The verdict must follow
-  from the worst finding still standing. Severity is advisory — no code
-  derives or enforces the verdict from it; the cockpit only points out when
-  they disagree. The grade is rendered from the field, never written into the
+  verdict's reasoning, never in a softened grade. The verdict must follow from
+  the worst finding still standing, with no third option: a blocker →
+  request changes, none → approve. "I take no position" is the same hedge as a
+  softened grade, one field over — if something would stop you approving, that
+  is a blocker, so grade it. Severity is advisory — no code derives or
+  enforces the verdict from it; the cockpit only points out when they
+  disagree — but every surface that shows a verdict names the blocker count
+  beside it ("approve · no blockers"), because that is the fact a reader can
+  check. The AI's own confidence is shown nowhere; it survives only as the
+  dial on the auto-send threshold. The grade is rendered from the field, never written into the
   body: one badge (`src/core/severity.ts`) opens the comment's own text in the
   cockpit, on GitHub and in the export, so a comment reads the same in all
   three — and the grade survives GitHub, where a chip would not exist.

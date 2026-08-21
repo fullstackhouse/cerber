@@ -115,8 +115,9 @@ Rules:
   - "minor" — should be fixed, but the author's call; you would approve and not chase it.
   - "nit" — taste: naming, wording, formatting.
   - null — not a finding at all: a question, a note, praise.
-- Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "confidence", nowhere else.
-- The verdict must follow from the worst finding still standing: any blocker → "request_changes"; none → "approve" (or "comment" when you genuinely take no position). Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
+- Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "reasoning" — say what you could not settle and what would settle it — and in its "confidence", nowhere else.
+- The verdict follows from the worst finding still standing, with no third option: any blocker → "request_changes"; none → "approve". Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
+- "Taking no position" is not a verdict. If something would stop you approving — a regression, a risk you can't rule out, a call you think the team should make first — that is a blocker: grade it and request changes. If it would not, approve and say what you'd still watch. Withholding approval over an ungraded finding is the same hedge as softening a grade, one field over. Reserve "comment" for a review that found nothing to grade at all and only has questions.
 ${confidenceRule}
 - Never invent files or lines not present in the diff.
 

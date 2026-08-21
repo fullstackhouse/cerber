@@ -369,11 +369,24 @@ describe("verdictCell", () => {
     expect(verdictCell(row({ status: "failed" }))).toEqual({ label: "run failed", tone: "failed" });
   });
 
-  it("shows the verdict with its confidence", () => {
-    expect(verdictCell(row())).toEqual({ label: "approve 91", tone: "approve" });
+  it("shows the verdict with the blocker count it rests on", () => {
+    expect(verdictCell(row({ gradedCount: 3 }))).toEqual({
+      label: "approve · no blockers",
+      tone: "approve",
+    });
     expect(
-      verdictCell(row({ verdict: { recommendation: "request_changes", confidence: 82, reasoning: "" } })),
-    ).toEqual({ label: "request changes 82", tone: "changes" });
+      verdictCell(
+        row({
+          verdict: { recommendation: "request_changes", confidence: 82, reasoning: "" },
+          gradedCount: 3,
+          blockerCount: 1,
+        }),
+      ),
+    ).toEqual({ label: "request changes · 1 blocker", tone: "changes" });
+  });
+
+  it("names the verdict alone when the review graded nothing", () => {
+    expect(verdictCell(row())).toEqual({ label: "approve", tone: "approve" });
   });
 
   it("shows what a sent review actually posted", () => {

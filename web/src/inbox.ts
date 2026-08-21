@@ -278,8 +278,14 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
   if (r.status === "failed") return { label: "run failed", tone: "failed" };
   if (r.sent) return { label: `sent · ${EVENT_LABEL[r.sent.event] ?? r.sent.event}`, tone: "sent" };
   if (!r.verdict) return { label: "—", tone: "none" };
+  const rec = r.verdict.recommendation.replace("_", " ");
+  const basis = r.gradedCount
+    ? r.blockerCount
+      ? ` · ${r.blockerCount} blocker${r.blockerCount === 1 ? "" : "s"}`
+      : " · no blockers"
+    : "";
   return {
-    label: `${r.verdict.recommendation.replace("_", " ")} ${r.verdict.confidence}`,
+    label: `${rec}${basis}`,
     tone: RECOMMENDATION_TONE[r.verdict.recommendation] ?? "none",
   };
 }

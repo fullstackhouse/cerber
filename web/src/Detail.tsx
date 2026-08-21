@@ -33,6 +33,7 @@ import {
   rowLine,
   severitySummary,
   splitComments,
+  verdictBasis,
   verdictMismatch,
 } from "./review";
 import {
@@ -1421,6 +1422,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // The findings changed under the verdict (a blocker dropped, a grade edited).
   // Never auto-rewritten: the hint hands it to the chat, one click, on request.
   const mismatch = verdictMismatch(artifact);
+  // The chip carries the fact the verdict rests on, not how sure the AI felt.
+  const basis = verdictBasis(artifact);
   const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
   const retrue = () =>
     apply(
@@ -1532,7 +1535,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               {artifact.verdict &&
                 (readOnly ? (
                   <span className={`chip tone-${tone}`}>
-                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                    {artifact.verdict.recommendation.replace("_", " ")}
+                    {basis && ` · ${basis}`}
                   </span>
                 ) : (
                   // The verdict is decided next to send, at the foot of the page.
@@ -1542,7 +1546,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                     title="change it, or send — both are at the foot of the page"
                     onClick={() => jump(verdictEl, sendEl)}
                   >
-                    {artifact.verdict.recommendation.replace("_", " ")} · {artifact.verdict.confidence}%
+                    {artifact.verdict.recommendation.replace("_", " ")}
+                    {basis && ` · ${basis}`}
                     <Icon name="down" size={12} />
                   </button>
                 ))}
