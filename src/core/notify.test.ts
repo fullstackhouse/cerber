@@ -75,8 +75,16 @@ describe("the command that taps the machine", () => {
   it("hands Linux the title and body as arguments, never a shell", () => {
     expect(notifyCommand(n, "linux")).toEqual({
       file: "notify-send",
-      args: ["--app-name=cerber", n.title, n.body],
+      args: ["--app-name=cerber", "--", n.title, n.body],
     });
+  });
+
+  it("ends Linux option parsing, so a title starting with a dash is still text", () => {
+    const dashed = { title: "widgets#7 awaits your review", body: "--help me — mira" };
+    const cmd = notifyCommand(dashed, "linux");
+    // The marker sits before both, so neither can be read as a flag.
+    expect(cmd?.args.indexOf("--")).toBeLessThan(cmd!.args.indexOf(dashed.title));
+    expect(cmd?.args).toEqual(["--app-name=cerber", "--", dashed.title, dashed.body]);
   });
 
   it("stays quiet on a platform with nothing to tap", () => {

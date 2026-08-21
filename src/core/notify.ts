@@ -83,7 +83,11 @@ export function notifyCommand(
     };
   }
   if (platform === "linux") {
-    return { file: "notify-send", args: ["--app-name=cerber", n.title, n.body] };
+    // `--` first: a PR title is somebody else's text, and notify-send parses
+    // options before positionals — a title beginning with `-` would be read as
+    // a flag and cost the notification. The marker ends option parsing, so the
+    // title and body can only ever be the summary and the body.
+    return { file: "notify-send", args: ["--app-name=cerber", "--", n.title, n.body] };
   }
   return null;
 }
