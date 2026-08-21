@@ -102,7 +102,10 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   `notify.ts` is the arrival bell: it polls the queue from every screen and
   raises a desktop notification for PRs this browser has never seen. Browser
   state, not config — the permission is the browser's, so the switch and the
-  announced-keys record live in localStorage beside it
+  announced-keys record live in localStorage beside it. `favicon.ts` is the
+  quiet half of the same job: a dot on the tab icon while the inbox holds
+  anything, re-derived on every read of the queue (`fetchReviews`) so no screen
+  can leave it stale
 
 ## Conventions
 
