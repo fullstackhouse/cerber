@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- cerber, badged: the same paw as favicon.svg with a dot for an inbox that
+       has something in it. Keep the toes and the pad in step with favicon.svg —
+       an SVG favicon is rendered without external references, so the art cannot
+       be shared between the two files. The paw is stood down a little to make
+       room for the badge rather than cut away under it: at 16px a chewed toe
+       reads as a broken icon, not as a mark. -->
+  <style>
+    .mark { fill: #3d4fd6 }
+    .dot { fill: #c2314a }
+    @media (prefers-color-scheme: dark) {
+      .mark { fill: #8b96ee }
+      .dot { fill: #f07087 }
+    }
+  </style>
+  <!-- The last of the gap is masked out rather than left to chance, so the dot
+       stays a separate shape whatever colour the tab bar behind it is. -->
+  <mask id="gap">
+    <rect width="24" height="24" fill="#fff" />
+    <circle cx="19.5" cy="4.5" r="4.55" fill="#000" />
+  </mask>
+  <!-- Mask outside, transform inside: a mask on the transformed group would be
+       scaled along with it, and the hole would land on the toe it is there to
+       spare. -->
+  <g mask="url(#gap)">
+    <g class="mark" transform="translate(0.5 2.4) scale(0.85)">
+      <circle cx="6.1" cy="8.9" r="2.5" />
+      <circle cx="12" cy="6.7" r="2.7" />
+      <circle cx="17.9" cy="8.9" r="2.5" />
+      <ellipse cx="12" cy="16.6" rx="5.4" ry="4.3" />
+    </g>
+  </g>
+  <circle class="dot" cx="19.5" cy="4.5" r="4" />
+</svg>

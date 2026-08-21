@@ -1,3 +1,4 @@
+import { markFavicon } from "./favicon";
 import {
   Artifact,
   ChatRef,
@@ -27,7 +28,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export const fetchReviews = () => request<ReviewListItem[]>("/api/reviews");
+/**
+ * The queue, and the tab's dot along with it. Three screens poll this list on
+ * their own timers, so re-badging here is the only version of "the tab matches
+ * the last queue the cockpit saw" that cannot go stale on whichever screen
+ * forgot to do it.
+ */
+export const fetchReviews = async () => {
+  const list = await request<ReviewListItem[]>("/api/reviews");
+  markFavicon(list);
+  return list;
+};
 
 export const fetchDaemonStatus = () => request<DaemonStatus>("/api/daemon");
 

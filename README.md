@@ -98,6 +98,11 @@ the record of what has been announced are per-browser, kept in that browser
 rather than in `~/.cerber/config.json` — the permission they gate is the
 browser's, so a second browser starts its own record.
 
+The tab itself says it too, without asking anyone: while the inbox holds
+anything, the favicon wears a red dot, and it goes away when the last review is
+dealt with. No permission, no switch — just the paw with a mark on it, so a
+glance at the tab strip answers "is there anything for me?".
+
 ## What a review looks like
 
 Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
