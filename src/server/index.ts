@@ -192,8 +192,9 @@ export async function buildApp(
         verdict: a.verdict,
         commentCount: a.comments.filter((cm) => cm.status !== "dropped").length,
         driftedCount: a.comments.filter((cm) => cm.status !== "dropped" && cm.drifted).length,
-        // Only blockers block, so the queue's verdict cell names the count the
-        // verdict rests on rather than a confidence the reader can't check.
+        // Only blockers block, so the count the verdict rests on is what the
+        // queue's strip names beside the comment count — the verdict cell
+        // itself is too narrow to spell it out.
         blockerCount: a.comments.filter((cm) => cm.status !== "dropped" && cm.severity === "blocker")
           .length,
         gradedCount: a.comments.filter((cm) => cm.severity != null).length,

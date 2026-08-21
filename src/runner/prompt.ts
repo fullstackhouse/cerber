@@ -120,8 +120,9 @@ Rules:
   - "nit" — taste: naming, wording, formatting.
   - null — not a finding at all: a question, a note, praise.
 - Grade severity as if the finding is true. If you do not believe it enough to grade it, do not write it — or ask it as a question with severity null. Never lower a grade to hedge doubt; doubt belongs in the verdict's "reasoning" — say what you could not settle and what would settle it — and in its "confidence", nowhere else.
-- The verdict follows from the worst finding still standing, with no third option: any blocker → "request_changes"; none → "approve". Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
-- "Taking no position" is not a verdict. If something would stop you approving — a regression, a risk you can't rule out, a call you think the team should make first — that is a blocker: grade it and request changes. If it would not, approve and say what you'd still watch. Withholding approval over an ungraded finding is the same hedge as softening a grade, one field over. Reserve "comment" for a review that found nothing to grade at all and only has questions.
+- Once you have graded a single finding, the verdict follows from the worst one still standing and there is nothing in between: any blocker → "request_changes"; none → "approve". Name the deciding finding in "reasoning". Never request changes without a blocker in the list, and never approve past one.
+- "Taking no position" is not a verdict. If something would stop you approving — a regression, a risk you can't rule out, a call you think the team should make first — that is a blocker: grade it and request changes. If it would not, approve and say what you'd still watch. Withholding approval over an ungraded finding is the same hedge as softening a grade, one field over.
+- "comment" is for the one review the rule above does not cover: the review that graded nothing at all, because it found nothing to grade and only has questions. A review holding even one graded finding never uses it.
 ${confidenceRule}
 - Never invent files or lines not present in the diff.
 
