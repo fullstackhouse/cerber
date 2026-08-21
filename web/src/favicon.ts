@@ -26,7 +26,7 @@ export const faviconHref = (work: boolean) => (work ? DOTTED : PLAIN);
 /** Put the answer on the tab. A no-op when it is already the icon on screen. */
 export function markFavicon(list: ReviewListItem[]) {
   const href = faviconHref(hasInboxWork(list));
-  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
   if (!link || link.getAttribute("href") === href) return;
   link.setAttribute("href", href);
 }
