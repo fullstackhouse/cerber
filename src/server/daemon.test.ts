@@ -12,6 +12,7 @@ import {
   mapSearchResults,
   searchAwaitingMe,
 } from "../core/gh.js";
+import { notify } from "../core/notify.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { filedByOwnReview, isPureStub, startDaemon, stubArtifact } from "./daemon.js";
 
@@ -29,6 +30,12 @@ vi.mock("../core/config.js", async (orig) => ({
   ...(await orig<typeof import("../core/config.js")>()),
   loadConfig: vi.fn(),
 }));
+// The notice itself is pure and tested in core/notify.test.ts; what matters
+// here is which arrivals reach it, and when nothing should.
+vi.mock("../core/notify.js", async (orig) => ({
+  ...(await orig<typeof import("../core/notify.js")>()),
+  notify: vi.fn(),
+}));
 
 const search = searchAwaitingMe as Mock;
 const prInfo = fetchPrInfo as Mock;
@@ -36,6 +43,7 @@ const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
 const ownReview = fetchOwnReview as Mock;
 const login = currentLogin as Mock;
+const notified = notify as Mock;
 
 process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
 
@@ -51,7 +59,14 @@ const DISCOVERED = {
 };
 
 describe("the awaiting list the daemon publishes", () => {
-  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
 
   const options = {
     repos: [],
@@ -60,6 +75,7 @@ describe("the awaiting list the daemon publishes", () => {
     intervalMs: 10,
     parallel: 1,
     autoReview: false,
+    notify: true,
     autoSend: "shadow" as const,
     autoSendThreshold: 90,
   };
@@ -246,12 +262,20 @@ describe("mapSearchResults author", () => {
  * the daemon was making anyway.
  */
 describe("draft PRs in the inbox", () => {
-  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
   const options = {
     repos: [],
     intervalMs: 10,
     parallel: 1,
     autoReview: false,
+    notify: true,
     autoSend: "shadow" as const,
     autoSendThreshold: 90,
   };
@@ -343,12 +367,20 @@ describe("draft PRs in the inbox", () => {
  * reviewed the PR it has stopped requesting from you.
  */
 describe("a draft you already answered on GitHub", () => {
-  const daemonKnobs = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 1, repos: [] };
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
   const options = {
     repos: [],
     intervalMs: 10,
     parallel: 1,
     autoReview: false,
+    notify: true,
     autoSend: "shadow" as const,
     autoSendThreshold: 90,
   };
@@ -506,5 +538,95 @@ describe("filedByOwnReview", () => {
     expect(filedByOwnReview({ ...artifact, status: "running" }, review)).toBe(false);
     expect(filedByOwnReview({ ...artifact, status: "awaiting" }, review)).toBe(false);
     expect(filedByOwnReview({ ...artifact, status: "skipped" }, review)).toBe(false);
+  });
+});
+
+describe("the tap on the machine when a PR lands", () => {
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
+
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: false,
+    notify: true,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
+    notified.mockResolvedValue(true);
+  });
+
+  async function pollTimes(polls: number) {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
+      return handle.status();
+    } finally {
+      handle.stop();
+    }
+  }
+
+  it("announces the PR the poll just discovered", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(1);
+    expect(notified).toHaveBeenCalledWith({
+      title: "widgets#7 awaits your review",
+      body: "feat: add sprockets — someone",
+    });
+  });
+
+  it("folds one poll's arrivals into one interruption", async () => {
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8 }]);
+    await pollTimes(1);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(notified.mock.calls[0]![0].title).toBe("2 PRs await your review");
+  });
+
+  // The artifact is the ledger: a PR that already has one is not news, which is
+  // what stops every poll re-announcing the same queue.
+  it("says nothing about a PR it has already stubbed", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(3);
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet when the machine's own notification is switched off", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, notify: false } });
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(1);
+    expect(notified).not.toHaveBeenCalled();
+  });
+
+  it("costs the poll nothing when the machine has no notifier", async () => {
+    notified.mockResolvedValue(false);
+    search.mockResolvedValue([DISCOVERED]);
+    const status = await pollTimes(2);
+    expect(status.awaiting.map((a) => a.id)).toEqual(["acme/widgets#7"]);
+    expect(status.lastPollError).toBeNull();
+  });
+
+  // What the cockpit's bell reads to know it would be a second popup.
+  it("tells the cockpit whether it is announcing arrivals itself", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    expect((await pollTimes(1)).notify).toBe(true);
+
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, poll: false } });
+    // A loop that isn't polling discovers nothing, so it promises nothing.
+    expect((await pollTimes(1)).notify).toBe(false);
   });
 });

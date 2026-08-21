@@ -208,6 +208,8 @@ export type DaemonStatus =
       intervalMs: number;
       /** False when the config's poll toggle idles the loop. */
       pollEnabled: boolean;
+      /** The daemon taps this machine itself when a PR lands — see notify.ts. */
+      notify: boolean;
       autoReview: boolean;
       /** Unattended reviews may run PR code: auto-review on + trust rules set. */
       trustedRuns: boolean;
@@ -248,6 +250,7 @@ export interface TrustEntry {
 export interface DaemonConfig {
   poll: boolean;
   autoReview: boolean;
+  notify: boolean;
   intervalMinutes: number;
   parallel: number;
   repos: string[];

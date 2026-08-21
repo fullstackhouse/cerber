@@ -19,7 +19,14 @@ describe("config", () => {
     await fs.rm(home, { recursive: true, force: true });
   });
 
-  const DEFAULT_DAEMON = { poll: true, autoReview: true, intervalMinutes: 5, parallel: 3, repos: [] };
+  const DEFAULT_DAEMON = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 3,
+    repos: [],
+  };
 
   it("trusts nobody and runs the full inbox when there is no config at all", async () => {
     expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON });

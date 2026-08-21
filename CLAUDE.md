@@ -97,12 +97,20 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   an open request only means you never pressed GitHub's review button, not that
   anyone is blocked on you. Bots are excluded, and a read that fails reports
   `unknown` rather than guessing silence at someone who did reply
+  Each new PR is announced on this machine as it lands (`core/notify.ts` —
+  `osascript` on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's
+  own bell needs a live, permitted tab, so it is silent exactly when the user is
+  furthest from cerber. The stub artifact is the ledger — a PR is announced on
+  the poll that first writes one for it, so a restart re-announces nothing
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and
   raises a desktop notification for PRs this browser has never seen. Browser
   state, not config — the permission is the browser's, so the switch and the
-  announced-keys record live in localStorage beside it. `favicon.ts` is the
+  announced-keys record live in localStorage beside it. It stands down when the
+  daemon announces arrivals on this same machine (`daemonAnnouncesHere`), so one
+  PR is one popup; a cockpit served from a non-loopback host keeps ringing,
+  since that machine's tap lands where nobody is looking. `favicon.ts` is the
   quiet half of the same job: a dot on the tab icon while the inbox holds
   anything, re-derived on every read of the queue (`fetchReviews`) so no screen
   can leave it stale

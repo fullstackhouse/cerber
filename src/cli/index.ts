@@ -384,6 +384,7 @@ program
   .option("-t, --token <token>", "require this token on every request (env: CERBER_TOKEN)")
   .option("--no-poll", "don't poll GitHub for PRs awaiting your review (also disables auto-review)")
   .option("--no-auto-review", "list awaiting PRs but don't review them until you click review")
+  .option("--no-notify", "don't notify this machine when a PR lands in the queue")
   .option("-d, --daemon", "(deprecated no-op — polling and auto-review are now the default)")
   .option("-i, --interval <minutes>", "poll interval (default: config daemon.intervalMinutes, 5)")
   .option("-R, --repo <owner/repo>", "repo(s) to watch (repeatable; default: config daemon.repos, all)", collect, [])
@@ -410,6 +411,7 @@ program
       token?: string;
       poll: boolean;
       autoReview: boolean;
+      notify: boolean;
       daemon?: boolean;
       interval?: string;
       repo: string[];
@@ -468,6 +470,7 @@ program
             withSource: opts.source,
             trust: opts.trust ? undefined : false,
             autoReview: opts.autoReview,
+            notify: opts.notify,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })

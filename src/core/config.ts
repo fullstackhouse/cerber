@@ -23,6 +23,12 @@ export const DaemonConfigSchema = z.object({
   poll: z.boolean().default(true),
   /** Draft an AI review for whatever lands in the queue. Never sends. */
   autoReview: z.boolean().default(true),
+  /**
+   * Tap this machine's notification centre when a PR lands in the queue. The
+   * cockpit's bell needs a tab open and permitted; this one only needs `serve`
+   * running, which is the point of it.
+   */
+  notify: z.boolean().default(true),
   intervalMinutes: z.number().int().positive().default(5),
   parallel: z.number().int().positive().default(3),
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */

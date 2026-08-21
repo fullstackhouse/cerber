@@ -41,9 +41,9 @@ npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 
 `serve` does the whole loop by default: discover → draft → wait for you.
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
-PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip the
-same two switches in the cockpit's Settings, which persist in
-`~/.cerber/config.json` and apply on the next poll. The queue only lists what
+PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip those
+switches in the cockpit's Settings, which persist in `~/.cerber/config.json`
+and apply on the next poll. The queue only lists what
 still wants you: anything you have settled moves to the filed tabs right of
 the thin rule in the filter row — reviews you sent, ones you marked reviewed
 or skipped, merged and closed PRs — each tab appearing only while it holds
@@ -88,15 +88,28 @@ who did is the one mistake worth designing against.
 
 ### It taps you on the shoulder
 
-The cockpit is a background tab most of the day, so it tells you when the queue
-grows: a desktop notification naming the PR that arrived — click it to open the
-review — folded into one popup when several land at once. It stays quiet while
-you're looking straight at cerber, and no browser announces the same PR twice.
-Only the browser can grant this, and only off a click, so the bell in the top
-bar is one: click it to be asked, click it again to stop. Both the switch and
-the record of what has been announced are per-browser, kept in that browser
-rather than in `~/.cerber/config.json` — the permission they gate is the
-browser's, so a second browser starts its own record.
+When a PR lands in the queue you get a desktop notification naming it, folded
+into one popup when several arrive at once. The tap comes from the poll that
+found the PR, so it reaches you with the cockpit closed, in another Space, or
+after a browser restart — `cerber serve` is the only thing that has to be
+running. It goes to whatever this machine already has (Notification Centre on
+macOS, `notify-send` on Linux) and stays quiet where there is neither. Off with
+`daemon.notify` in `~/.cerber/config.json`, or the checkbox in Settings.
+
+The cockpit has a bell of its own, and it is the better one where it can ring:
+its notification **opens that review when you click it**. But it is a page
+notification — it needs a tab that is open, alive and permitted, which is
+exactly what you don't have on the afternoons this feature is for. So it stands
+down while the machine's own tap is on, rather than making one PR two popups,
+and the bell in the top bar says so. Untick the machine one and this browser
+takes over: click the bell, grant the permission, and click it again to stop.
+The switch and the record of what has been announced are per-browser — the
+permission they gate is the browser's, so a second browser starts its own
+record — and it stays quiet while you're looking straight at cerber.
+
+A cockpit served from somewhere else (`cerber serve -H 0.0.0.0 --token` on a
+VPS) keeps its bell either way: the machine's tap would land on the VPS, where
+nobody is looking.
 
 The tab itself says it too, without asking anyone: while the inbox holds
 anything, the favicon wears a red dot, and it goes away when the last review is

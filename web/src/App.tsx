@@ -23,13 +23,29 @@ const BELL_TITLE: Record<NotifyState, string> = {
   on: "Telling you when a PR lands in the queue. Click to stop.",
 };
 
+const DAEMON_BELL_TITLE =
+  "cerber taps this machine itself when a PR lands — no tab required. The browser's own bell " +
+  "would be a second popup about one PR, so it stands down. Turn the machine one off in " +
+  "Settings to have this browser announce arrivals instead.";
+
 /**
  * The one switch for arrival notifications. Cerber wants them on, but only the
  * browser can grant that and only off a click — so an un-asked bell reads as
  * an offer rather than as "off".
+ *
+ * When `serve` is notifying this machine already the bell stops being a switch
+ * and becomes a statement: there is nothing here to grant, and a bell offering
+ * to start telling you what you are already being told is noise.
  */
-function NotifyBell() {
+function NotifyBell({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [state, toggle] = useNotifyState();
+  if (daemonAnnounces) {
+    return (
+      <span className="topbar-link bell bell-daemon" title={DAEMON_BELL_TITLE} aria-label={DAEMON_BELL_TITLE}>
+        <Icon name="bell" size={15} />
+      </span>
+    );
+  }
   if (state === "unsupported") return null;
   return (
     <button
@@ -48,7 +64,7 @@ export function App() {
   const [route, setRoute] = useState(parseHash());
 
   // Watches the queue from every screen, including a review you have open.
-  useArrivalNotifications();
+  const daemonAnnounces = useArrivalNotifications();
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -90,13 +106,13 @@ export function App() {
               </span>
             </>
           )}
-          <NotifyBell />
+          <NotifyBell daemonAnnounces={daemonAnnounces} />
           <a href="#/settings" className="topbar-link" title="settings" aria-label="settings">
             <Icon name="settings" size={15} />
           </a>
         </div>
       </header>
-      {route.view === "queue" ? <Queue /> : <Settings />}
+      {route.view === "queue" ? <Queue /> : <Settings daemonAnnounces={daemonAnnounces} />}
     </div>
   );
 }
