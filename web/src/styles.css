@@ -690,9 +690,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Last column: the answer the row arrived at, against the right edge. */
+/* Last column: the answer the row arrived at, against the right edge. Wide
+   enough for the longest label the cell can hold — "request changes 100%",
+   20 monospace characters — since an ellipsis here eats the number. */
 .col-verdict {
-  width: 136px;
+  width: 152px;
   flex-shrink: 0;
   text-align: right;
   font-weight: 500;
