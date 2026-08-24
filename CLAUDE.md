@@ -102,8 +102,8 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   carries whose move it is, read from the PR conversation (`classifyReply`) —
   an open request only means you never pressed GitHub's review button, not that
   anyone is blocked on you. Bots are excluded, and a read that fails reports
-  `unknown` rather than guessing silence at someone who did reply
-  Each new PR is announced on this machine as it lands (`core/notify.ts` —
+  `unknown` rather than guessing silence at someone who did reply.
+  Each new PR is also announced on this machine as it lands (`core/notify.ts` —
   `osascript` on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's
   own bell needs a live, permitted tab, so it is silent exactly when the user is
   furthest from cerber. The stub artifact is the ledger — a PR is announced on
