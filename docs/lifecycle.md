@@ -199,7 +199,7 @@ touch are dropped — the new run just regenerated them.
 | Costs | a PR fetch, plus a diff fetch only if the head moved | a full AI run |
 | Changes | `diff`, `pr`, comment line anchors | everything the AI writes |
 | Runs when | **you open a review** (automatic, `web/src/Detail.tsx`) | you press the button |
-| Does nothing on | `sent`, `running`, or head unchanged — a `200` with `changed: false`, not an error | `sent`, or a run already in flight — these *are* errors (`409`) |
+| Does nothing on | a `sent` **record**, `status: running`, or an unchanged head — a `200` with `changed: false`, not an error | a `sent` **record**, or a run already in flight — these *are* errors (`409`) |
 
 The re-review endpoint passes `force: true`, so an unchanged head is no
 obstacle to it — the guard in §4 is what the *poll* and a plain `cerber review`
@@ -225,7 +225,7 @@ Let `open` = artifacts with `pr.state === "OPEN"`, and
 | Tab | Rows | Note |
 | --- | --- | --- |
 | **inbox** | `live` | everything still waiting on you |
-| **awaiting** | `live` where status is `awaiting` or `running` | found, not drafted yet |
+| **awaiting** | `live` where status is `awaiting` or `running` | found but not drafted yet, or a run is in flight right now |
 | **drafted** | `live` where status is anything else | `ready` — **and `failed`** |
 | **open requests** | `hiddenAwaiting` | see below |
 | **settled** | `open` where status is `reviewed` or `skipped` | |
@@ -267,9 +267,11 @@ at worst re-creates a deleted stub next poll.
 
 ### Filing: the three reasons
 
-Only a `ready`, unsent draft can be filed, and only if it wasn't your own later
-request (`filedByYourAct`). Checked in order of how much each says
-(the guards in `src/server/daemon.ts`; the `FiledReason` type itself in
+Only a `ready`, unsent draft can be filed. The first two reasons additionally
+require that the draft wasn't your own later request (`filedByYourAct`); the
+third has a stricter guard of its own (`filedByWithdrawnRequest`, which demands
+`run.trigger === "daemon"`). Checked in order of how much each says (the guards
+in `src/server/daemon.ts`; the `FiledReason` type itself in
 `src/core/artifact.ts`):
 
 1. **`own-review`** — you submitted a review on github.com. Strongest: GitHub
@@ -400,8 +402,9 @@ moves.
 `filed.reason` says which of the three cases. The draft is untouched and still
 sendable.
 
-**"Where did my edited comment go after a re-review?"** — If the run
-succeeded: still there, re-anchored; only untouched AI comments are
-regenerated. If it **failed**, it is gone, and that is
-[#37](https://github.com/fullstackhouse/cerber/issues/37) — see the warning
-in §4.
+**"Where did my edited comment go after a re-review?"** — If it was there when
+the run started and the run succeeded: still there, re-anchored; only untouched
+AI comments are regenerated. If you wrote or changed it *while* the run was
+going, or the run **failed**, it is gone — both are
+[#37](https://github.com/fullstackhouse/cerber/issues/37), and the warning in
+§4 says why.
