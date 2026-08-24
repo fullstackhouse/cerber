@@ -112,11 +112,22 @@ export async function updateArtifactByKey(
  * this it stays wedged forever, with no way to retry it from the cockpit. A
  * `cerber review` running in another terminal is the one false positive; it
  * overwrites the artifact when it finishes anyway.
+ *
+ * `inUse` names the runs this process genuinely owns, and they are left alone.
+ * Callers should still reconcile before starting anything that polls — but
+ * ordering alone is a promise about wiring, and this is the guard that holds
+ * whatever order they are started in: without it, reconciliation racing a
+ * daemon's first tick could stamp "interrupted" over a review that had just
+ * legitimately begun.
  */
-export async function reconcileRunning(): Promise<number> {
+export async function reconcileRunning(
+  opts: { inUse?: (id: string) => boolean } = {},
+): Promise<number> {
+  const inUse = opts.inUse ?? (() => false);
   const artifacts = await listArtifacts();
   let cleared = 0;
   for (const artifact of artifacts) {
+    if (inUse(artifact.id)) continue;
     const stuckRun = artifact.status === "running";
     const stuckChat =
       artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Artifact, Comment } from "./artifact.js";
-import { carryOverComments, refreshArtifact } from "./refresh.js";
+import { mergeRunResult, refreshArtifact } from "./refresh.js";
 
 const DIFF_AT_HEAD1 = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -128,8 +128,17 @@ describe("refreshArtifact", () => {
   });
 });
 
-describe("carryOverComments", () => {
-  const previous = makeArtifact({
+describe("mergeRunResult — folding a finished run onto what is on disk", () => {
+  // The run regenerated its own comments; everything else on the artifact may
+  // have moved under it while it worked, and that is what wins.
+  const fresh = makeArtifact({
+    diff: DIFF_AT_HEAD2,
+    summary: "the new draft",
+    comments: [comment({ id: "ai-new", body: "fresh ai comment" })],
+  });
+  const current = makeArtifact({
+    diff: DIFF_AT_HEAD2,
+    summary: "the draft being replaced",
     comments: [
       comment({ id: "ai-untouched", origin: "ai" }),
       comment({ id: "ai-edited", origin: "ai", editedByUser: true, body: "my rewrite" }),
@@ -137,36 +146,48 @@ describe("carryOverComments", () => {
       comment({ id: "mine-dropped", origin: "user", status: "dropped" }),
     ],
   });
-  const fresh = makeArtifact({
-    diff: DIFF_AT_HEAD2,
-    comments: [comment({ id: "ai-new", body: "fresh ai comment" })],
-  });
 
   it("keeps the human's comments and drops the regenerated AI ones", () => {
-    const { comments, carried } = carryOverComments(previous, fresh);
-    expect(carried).toBe(3);
-    expect(comments.map((c) => c.id)).toEqual(["ai-new", "ai-edited", "mine", "mine-dropped"]);
-    expect(comments.find((c) => c.id === "ai-edited")!.body).toBe("my rewrite");
-    expect(comments.find((c) => c.id === "mine-dropped")!.status).toBe("dropped");
+    const merged = mergeRunResult(fresh, current);
+    expect(merged.comments.map((c) => c.id)).toEqual([
+      "ai-new",
+      "ai-edited",
+      "mine",
+      "mine-dropped",
+    ]);
+    expect(merged.comments.find((c) => c.id === "ai-edited")!.body).toBe("my rewrite");
+    expect(merged.comments.find((c) => c.id === "mine-dropped")!.status).toBe("dropped");
+    expect(merged.summary).toBe("the new draft");
   });
 
-  it("re-anchors what it carries to the new diff", () => {
-    const { comments } = carryOverComments(previous, fresh);
-    expect(comments.find((c) => c.id === "mine")!.line).toBe(12);
-  });
-
-  it("leaves a review with no human input alone", () => {
-    const untouched = makeArtifact({ comments: [comment({ id: "ai-1" })] });
-    const { comments, carried } = carryOverComments(untouched, fresh);
-    expect(carried).toBe(0);
-    expect(comments).toBe(fresh.comments);
-  });
-
-  it("carries a comment's severity across a re-review", () => {
+  it("carries a comment's grade across", () => {
     const graded = makeArtifact({
       comments: [comment({ id: "mine", origin: "user", severity: "blocker" })],
     });
-    const { comments } = carryOverComments(graded, fresh);
-    expect(comments.find((c) => c.id === "mine")!.severity).toBe("blocker");
+    const merged = mergeRunResult(fresh, graded);
+    expect(merged.comments.find((c) => c.id === "mine")!.severity).toBe("blocker");
+  });
+
+  it("leaves a review with no human input to the run alone", () => {
+    const untouched = makeArtifact({ comments: [comment({ id: "ai-1" })] });
+    expect(mergeRunResult(fresh, untouched).comments.map((c) => c.id)).toEqual(["ai-new"]);
+  });
+
+  it("does not undo a send that landed while the run worked", () => {
+    const sent = { at: "2026-08-21T10:02:00.000Z", event: "APPROVE" as const, url: "u", auto: false };
+    const merged = mergeRunResult(fresh, makeArtifact({ status: "sent", sent }));
+    expect(merged.sent).toEqual(sent);
+    expect(merged.status).toBe("sent");
+    expect(merged.summary).toBe("the new draft");
+  });
+
+  it("does not reopen a decision you made while the run worked", () => {
+    for (const status of ["reviewed", "skipped"] as const) {
+      expect(mergeRunResult(fresh, makeArtifact({ status })).status).toBe(status);
+    }
+  });
+
+  it("otherwise takes the run's own status", () => {
+    expect(mergeRunResult(fresh, makeArtifact({ status: "running" })).status).toBe(fresh.status);
   });
 });

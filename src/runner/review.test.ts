@@ -66,6 +66,20 @@ function artifact(status: ArtifactStatus, headSha: string): Artifact {
   };
 }
 
+/** A finished run, for the cases that turn on what it recorded. */
+const runBlock = {
+  model: null,
+  startedAt: "2026-08-21T10:00:00.000Z",
+  finishedAt: "2026-08-21T10:05:00.000Z",
+  costUsd: null,
+  error: null,
+  withSource: false,
+  trusted: false,
+  sessionId: null,
+  trigger: "daemon" as const,
+  reviewedSha: null as string | null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   diff.mockRejectedValue(new Error("a run started when it should not have"));
@@ -109,6 +123,35 @@ describe("what a new push does to a review", () => {
 
   it("skips an untouched draft while the head has not moved", async () => {
     await saveArtifact(artifact("ready", "same-sha"));
+    prInfo.mockResolvedValue(pr("same-sha"));
+
+    const result = await reviewPr(REF);
+    expect(result.skipped).toBe(true);
+    expect(diff).not.toHaveBeenCalled();
+  });
+
+  it("still re-reviews a draft you opened after the push", async () => {
+    // Opening a review refreshes it, which moves `pr.headSha` onto the new head
+    // so the comments stay anchored to current code. Nothing was re-read, and
+    // the guard used to compare against that field — so merely looking at a
+    // draft convinced it the draft was current, and the poll never re-reviewed
+    // that PR again. It compares against the sha the AI actually read instead.
+    await saveArtifact({
+      ...artifact("ready", "new-sha"),
+      run: { ...runBlock, reviewedSha: "old-sha" },
+      refresh: { at: "2026-08-21T11:00:00.000Z", fromSha: "old-sha", toSha: "new-sha", moved: 1, drifted: 0 },
+    });
+    prInfo.mockResolvedValue(pr("new-sha"));
+
+    await expect(reviewPr(REF)).rejects.toThrow("a run started when it should not have");
+    expect(diff).toHaveBeenCalled();
+  });
+
+  it("skips one whose recorded review is of this very head", async () => {
+    await saveArtifact({
+      ...artifact("ready", "same-sha"),
+      run: { ...runBlock, reviewedSha: "same-sha" },
+    });
     prInfo.mockResolvedValue(pr("same-sha"));
 
     const result = await reviewPr(REF);

@@ -111,6 +111,17 @@ export const RunInfoSchema = z.object({
    * be filed away automatically and one that must not be.
    */
   trigger: z.enum(["daemon", "user"]).nullable().default(null),
+  /**
+   * The head commit this run actually read, set when it finishes.
+   *
+   * `pr.headSha` cannot answer that question: a refresh moves it forward to
+   * keep the comments anchored to current code, without anybody re-reading
+   * anything. The freshness guard compares against *this* instead, so merely
+   * opening a draft after a push no longer convinces the poll that the draft
+   * is up to date. Null on runs recorded before this existed, and on one still
+   * in flight — both fall back to the old comparison.
+   */
+  reviewedSha: z.string().nullable().default(null),
 });
 export type RunInfo = z.infer<typeof RunInfoSchema>;
 

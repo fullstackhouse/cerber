@@ -120,23 +120,25 @@ Notes on the edges that surprise people:
 - **A restart turns a leftover `running` into `failed`** and marks a pending
   chat turn errored (`reconcileRunning`, `src/core/state.ts`). Nothing in a
   fresh process is actually running, so anything still marked so would wedge
-  forever. It is not ordered before the first poll, though — `serve` starts the
-  daemon (which polls at once) before it awaits reconciliation, so the two can
-  race over a leftover row. Tracked as
-  [#38](https://github.com/fullstackhouse/cerber/issues/38).
-- **`failed` is retried by the poll** — it is neither settled nor
+  forever. `serve` does it before it starts anything that polls, and
+  reconciliation also skips any run this process actually owns (`inUse`), so a
+  first tick that overlaps it cannot have "interrupted" stamped over a review
+  that has just legitimately begun.
+- **`failed` is retried automatically** — it is neither settled nor
   head-sensitive, so the freshness guard below lets it through every time. Only
-  by the poll, though: `reviewAll` runs solely when auto-review is on and solely
-  over PRs the awaiting search returned, so a failed artifact GitHub has stopped
-  asking about is never retried on its own.
+  by the poll, and only on its terms: `reviewAll` runs solely when auto-review
+  is on and solely over PRs the awaiting search returned, so a failed artifact
+  GitHub has stopped asking about is never picked up *on its own*. You can
+  always start one yourself — both forcing paths take any unsent status.
 - **Nothing *reaches GitHub* except by a deliberate human act — the cockpit's
   Send button or `cerber send` — or by opt-in auto-send.** That is the one hard
-  rule of the product, and it is a rule about GitHub writes rather than about
-  the status field: `PATCH /api/reviews/:key` will set `status` to `sent` on
-  request without submitting anything or writing a `sent` record. The cockpit
-  never asks it to, and nothing is posted either way, but the endpoint is
-  wider than the rule it looks like it enforces —
-  [#39](https://github.com/fullstackhouse/cerber/issues/39).
+  rule of the product. The status field is held to it as well:
+  `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two that
+  are your decision, so nothing but the send path can write `sent`.
+- **Neither will send a draft a run is rewriting.** Both refuse with a `409`
+  while one is in flight — the cockpit on the artifact's status *and* this
+  process's own claim, `cerber send` on the status, which is all another
+  terminal can see.
 
 ---
 
@@ -161,36 +163,30 @@ look (`review.test.ts`). Both need the PR to still be in the awaiting search:
 `reviewAll(refs)` is fed the search results, so a PR you pasted by hand and
 that GitHub isn't asking you about is never auto re-reviewed.
 
-> ⚠ **Opening a review currently suppresses that re-draft.** The guard compares
-> `existing.pr.headSha` against the PR's head, and the refresh that runs when
-> you open a review writes the new head onto the artifact while leaving its
-> status `ready` (`refreshArtifact`). So: the author pushes, you open the draft
-> to look at it, and the poll now reads the row as up to date and never
-> re-reviews it. Only the two forcing paths get past it — the re-review button
-> and `cerber review --force`. The artifact keeps no
-> record of which commit the *AI* actually read — `refresh.toSha` is the
-> closest thing — so the guard has nothing else to compare against.
+**Opening a review does not count as reviewing it.** The comparison is against
+`run.reviewedSha` — the head this artifact's last run actually *read*, written
+when it finished — and not against `pr.headSha`, which the refresh moves
+forward every time you open a draft so its comments stay anchored to current
+code. Those two used to be the same field, so merely looking at a draft after a
+push convinced the guard the draft was current and the poll never re-reviewed
+that PR again. An artifact written before `reviewedSha` existed has none, and
+falls back to the old comparison.
 
-**A re-review that succeeds does not throw away your work.**
-`carryOverComments` (`src/core/refresh.ts`) carries your own comments *and* AI
-comments you edited onto the new diff, re-anchored. AI comments you didn't
-touch are dropped — the new run just regenerated them.
+**A re-review does not throw away your work** — whether it succeeds, fails, or
+finishes after you have changed something. Two halves make that true:
 
-> ⚠ **Two ways it loses them anyway**, both from the same cause — the runner
-> saves its result wholesale instead of merging onto what is on disk, the way
-> a chat turn does (`mergeConcurrentEdits`).
->
-> - **A run that fails throws them away permanently.** It saves a fresh
->   artifact with `comments: []` before calling Claude, so they leave the disk
->   there and live only in the run's memory; `carryOverComments` puts them back
->   on the success path, and the failure handler never reaches it.
-> - **A run that succeeds still overwrites whatever you did while it ran.** The
->   carry-over works from `existing`, read minutes earlier at the start of the
->   run, and the review stays editable throughout — so a comment you add, edit
->   or drop mid-run is written over by the result.
->
-> Both tracked as [#37](https://github.com/fullstackhouse/cerber/issues/37);
-> this warning goes when the fix lands.
+- **Your comments are carried onto the new diff before the run starts**, not
+  after it succeeds (`reanchorComments` in `reviewPr`). They are on disk, and
+  correctly anchored to the diff the cockpit is showing, for every instant the
+  run is in flight — so a failure has nothing to take with it. AI comments are
+  not carried: the run is about to regenerate them.
+- **The result is folded onto what the artifact says now**, not written over it
+  (`mergeRunResult`, `src/core/refresh.ts`). The run owns what it regenerated —
+  summary, chapters, verdict, its own comments — and you own the rest: a
+  comment you edited mid-run keeps your version, one you added is kept, one you
+  deleted stays deleted, and a send or a settle that landed while the run was
+  going stands, with the fresh draft underneath it. This is the same discipline
+  `mergeConcurrentEdits` applies to a chat turn, and for the same reason.
 
 ### Re-review vs refresh — different things
 
@@ -359,8 +355,11 @@ read-only) and auto-send does nothing but log.
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
-CLI flags cap the config, never raise it: `--no-poll`, `--no-auto-review`,
-`--no-source`, `--no-trust`.
+CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,
+`--no-trust`. `--no-source` is the exception: it sets the default a run starts
+from, and the re-review endpoint's `?source=` overrides it either way, so the
+cockpit's button can ask for a source-backed run on a server started without
+one.
 
 **Auto-send** is deliberately narrow (`src/core/autosend.ts`): only `ready`,
 only an `approve` verdict, only with **zero** standing blocker findings, only
@@ -386,14 +385,15 @@ review.
 and auto-review both on and the PR still in the awaiting search. Given that:
 its status was `awaiting` or `failed`, which are retried with no push involved
 at all; or the author pushed and it was `ready` or `sent`, both head-sensitive
-— though a `sent` row also needs someone to have asked you again, and a `ready`
-one you have opened since the push will *not* come back (the §4 warning). Only
+— though a `sent` row also needs someone to have asked you again. Whether you
+have opened the draft since the push makes no difference: the guard compares
+against the head the run *read*, not the one the artifact mentions. Only
 `reviewed` and `skipped` never come back under any of it.
 
 **"Why won't it re-review?"** — Both causes are the freshness guard in §4, so
 they only bind the callers that obey it (the poll, plain `cerber review`):
-status is `reviewed`/`skipped`, or the head SHA is unchanged on a `ready`/`sent`
-row. `cerber review --force` forces past both. The cockpit's re-review button
+status is `reviewed`/`skipped`, or the head the last run *read* is still the
+PR's head on a `ready`/`sent` row. `cerber review --force` forces past both. The cockpit's re-review button
 forces too, but refuses a `sent` artifact outright — that record is not
 rewritten from the UI, though the poll will still re-draft it once the head
 moves.
@@ -402,9 +402,8 @@ moves.
 `filed.reason` says which of the three cases. The draft is untouched and still
 sendable.
 
-**"Where did my edited comment go after a re-review?"** — If it was there when
-the run started and the run succeeded: still there, re-anchored; only untouched
-AI comments are regenerated. If you wrote or changed it *while* the run was
-going, or the run **failed**, it is gone — both are
-[#37](https://github.com/fullstackhouse/cerber/issues/37), and the warning in
-§4 says why.
+**"Where did my edited comment go after a re-review?"** — Still there,
+re-anchored, whichever way the run went: comments you wrote or edited are
+carried across before it starts and folded back on top of its result, so a
+failure keeps them and a mid-run edit wins over the version the run read. Only
+untouched AI comments are regenerated.

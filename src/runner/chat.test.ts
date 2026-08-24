@@ -64,6 +64,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
       trusted: false,
       sessionId: "sess-review",
       trigger: null,
+      reviewedSha: null,
     },
     sent: null,
     refresh: null,
