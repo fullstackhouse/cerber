@@ -28,7 +28,7 @@ Four things write the artifact, and most questions in this document are really
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
 | **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat |
-| **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews), `send`, `export`, `prune` — no edit, mark or chat |
+| **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `prune` only clears checkouts, and there is no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
 are defensive and writers are atomic (tmp+rename, `src/core/state.ts`).
@@ -48,7 +48,7 @@ time.
 | `reviewed` | **you** are done with it — or the poll filed it (see §5) | you, or poll |
 | `skipped` | **you** decided not to review it | you |
 | `sent` | the review reached GitHub | the cockpit's Send, `cerber send`, or auto-send |
-| `failed` | the run errored | runner, or restart reconciliation |
+| `failed` | the run errored | the runner; the cockpit's create/re-review catch handlers, for a failure before the runner owns the artifact; or restart reconciliation |
 
 Two derived groupings drive most behaviour:
 
@@ -66,13 +66,15 @@ about (`isArchived` / `hiddenAwaiting`, `web/src/inbox.ts`).
 
 ## 3. Transitions
 
-Every run goes through `running`; nothing reaches `ready` or `failed` without
-it — so the machine reads most easily as three questions.
+Every *review* run goes through `running`; nothing reaches `ready` or `failed`
+without it — so the machine reads most easily as three questions. (A chat turn
+is the exception: it is an AI run too, but it leaves the status alone and lives
+on `pendingChat` instead, because the review it is about is already finished.)
 
-**What starts a run** — i.e. what enters `running`:
-
-The **re-review button forces**, so it starts a run from any status but `sent`,
-regardless of the head. Everything else obeys the freshness guard in §4:
+**What starts a run** — i.e. what enters `running`. The two forcing paths
+ignore the freshness guard in §4; everything else obeys it. The re-review
+button is refused only on `sent` and on `running`, where the endpoint answers
+`409` because a run is already in flight:
 
 ```
 (nothing)           ──you paste a URL, or `cerber review`──► running
@@ -94,10 +96,14 @@ running ──cerber restarted─► failed   (reconcileRunning)
 **And what happens to a finished draft** — all of these start at `ready`:
 
 ```
-ready ──you mark it──────────────────────────► reviewed | skipped
-ready ──the poll finds GitHub moved past it──► reviewed  (+ `filed`)
-ready ──Send / `cerber send` / auto-send─────► sent
+any unsent row ──you mark it────────────────► reviewed | skipped
+ready ──the poll finds GitHub moved past it─► reviewed  (+ `filed`)
+ready ──Send / `cerber send` / auto-send────► sent
 ```
+
+Settling is the one that is not restricted to a finished draft: the cockpit
+offers skip on `awaiting`, `running` and `failed` rows too, so a PR you have
+decided about needs no draft first.
 
 Notes on the edges that surprise people:
 
@@ -144,14 +150,23 @@ that GitHub isn't asking you about is never auto re-reviewed.
 > you open a review writes the new head onto the artifact while leaving its
 > status `ready` (`refreshArtifact`). So: the author pushes, you open the draft
 > to look at it, and the poll now reads the row as up to date and never
-> re-reviews it. Only the re-review button gets past it. The artifact keeps no
+> re-reviews it. Only the two forcing paths get past it — the re-review button
+> and `cerber review --force`. The artifact keeps no
 > record of which commit the *AI* actually read — `refresh.toSha` is the
 > closest thing — so the guard has nothing else to compare against.
 
-**A re-review does not throw away your work.** `carryOverComments`
-(`src/core/refresh.ts`) carries your own comments *and* AI comments you edited
-onto the new diff, re-anchored. AI comments you didn't touch are dropped — the
-new run just regenerated them.
+**A re-review that succeeds does not throw away your work.**
+`carryOverComments` (`src/core/refresh.ts`) carries your own comments *and* AI
+comments you edited onto the new diff, re-anchored. AI comments you didn't
+touch are dropped — the new run just regenerated them.
+
+> ⚠ **A re-review that *fails* does throw them away** — permanently. The run
+> saves a fresh artifact with `comments: []` before it calls Claude, so your
+> comments leave the disk at that moment and live only in the run's memory;
+> `carryOverComments` puts them back on the success path, and the failure
+> handler never reaches it. Tracked as
+> [#37](https://github.com/fullstackhouse/cerber/issues/37); this warning goes
+> when the fix lands.
 
 ### Re-review vs refresh — different things
 
@@ -230,7 +245,8 @@ at worst re-creates a deleted stub next poll.
 
 Only a `ready`, unsent draft can be filed, and only if it wasn't your own later
 request (`filedByYourAct`). Checked in order of how much each says
-(`src/server/daemon.ts`, `FiledReason`):
+(the guards in `src/server/daemon.ts`; the `FiledReason` type itself in
+`src/core/artifact.ts`):
 
 1. **`own-review`** — you submitted a review on github.com. Strongest: GitHub
    counts it.
@@ -261,8 +277,10 @@ leave something behind:
 
 1. **On start** — `running`, with a `run` block (`startedAt`, `withSource`,
    `trusted`, `trigger`).
-2. **`trigger`** is `daemon` or `user`. It is what lets filing spare a second
-   opinion you deliberately asked for.
+2. **`trigger`** is `daemon` or `user` on anything written since the field
+   existed; it is `null` on older artifacts, and the filing guards treat that
+   legacy case as "no claim". It is what lets filing spare a second opinion you
+   deliberately asked for.
 3. **On success** — `ready`, plus `summary`, `chapters`, `comments`, `verdict`,
    `run.costUsd`, and `run.sessionId` — the Claude session chat turns resume,
    recorded **only for a source-backed run** (`source ? review.sessionId : null`),
@@ -294,10 +312,11 @@ failures included, since there is no response left to hand them to.
 
 ## 7. Settings that change any of this
 
-`~/.cerber/config.json`, zod-validated. The poll re-reads it every tick, but
-only acts on two of its keys: `poll` and `autoReview` are live, so the
-cockpit's toggles apply without a restart. `intervalMinutes`, `parallel` and
-`repos` are captured by `startDaemon` and need one. Absent = defaults, which is a working state,
+`~/.cerber/config.json`, zod-validated, and mostly live. The poll re-reads it
+every tick and acts on `poll` and `autoReview`, so the cockpit's toggles apply
+without a restart; `trust` is re-read by every `reviewPr` call, so a rule you
+add binds the next run. Only `intervalMinutes`, `parallel` and `repos` are
+captured by `startDaemon` and need a restart. Absent = defaults, which is a working state,
 not an open one: polling and auto-review are on, `trust` is empty (every run
 read-only) and auto-send does nothing but log.
 
@@ -308,7 +327,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.intervalMinutes` | `5` | |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
-| `trust` | `[]` | `@login`, `@org/team`, `@org/*` — whose PRs may run commands |
+| `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it: `--no-poll`, `--no-auto-review`,
 `--no-source`, `--no-trust`.
