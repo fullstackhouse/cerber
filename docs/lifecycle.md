@@ -27,7 +27,7 @@ Four things write the artifact, and most questions in this document are really
 | **the poll** | `src/server/daemon.ts` | create stubs, archive, file, delete stubs, start drafts — and, with `--auto-send`, submit and mark `sent` |
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
-| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat |
+| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
 | **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `prune` only clears checkouts, and there is no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
@@ -57,10 +57,12 @@ Two derived groupings drive most behaviour:
 - **`SETTLED_BY_YOU = [reviewed, skipped]`** (`src/runner/review.ts`) — a new
   push must not drag these back.
 
-`archived` is *not* a status. It is `pr.state !== "OPEN"` — merged or closed —
-and it takes a row out of every tab except **open requests**, which is computed
-over *all* artifacts and so can still name an archived one GitHub is asking
-about (`isArchived` / `hiddenAwaiting`, `web/src/inbox.ts`).
+`archived` is *not* a status. It is `pr.state !== "OPEN"` — merged or closed.
+It moves a row out of the live tabs and out of **settled** and **sent**, and
+into **archived**. The one tab it does not exclude a row from is **open
+requests**, which is computed over *all* artifacts and so can still name an
+archived PR GitHub is asking about (`isArchived` / `hiddenAwaiting`,
+`web/src/inbox.ts`).
 
 ---
 
@@ -93,7 +95,8 @@ running ──it errored───────► failed
 running ──cerber restarted─► failed   (reconcileRunning)
 ```
 
-**And what happens to a finished draft** — all of these start at `ready`:
+**And what settles a row.** The last two need a finished draft; the first
+does not:
 
 ```
 any unsent row ──you mark it────────────────► reviewed | skipped
@@ -110,9 +113,13 @@ Notes on the edges that surprise people:
 - **Pasting a URL saves `running`, never `awaiting`.** A pure stub in that
   window is exactly what the poll's reaper deletes, so the run is persisted up
   front (`src/server/index.ts`, `POST /api/reviews`).
-- **A restart turns any `running` into `failed`** and marks a pending chat turn
-  errored (`reconcileRunning`, `src/core/state.ts`). Nothing in a fresh process
-  is actually running, so anything still marked so would wedge forever.
+- **A restart turns a leftover `running` into `failed`** and marks a pending
+  chat turn errored (`reconcileRunning`, `src/core/state.ts`). Nothing in a
+  fresh process is actually running, so anything still marked so would wedge
+  forever. It is not ordered before the first poll, though — `serve` starts the
+  daemon (which polls at once) before it awaits reconciliation, so the two can
+  race over a leftover row. Tracked as
+  [#38](https://github.com/fullstackhouse/cerber/issues/38).
 - **`failed` is retried by the poll** — it is neither settled nor
   head-sensitive, so the freshness guard below lets it through every time. Only
   by the poll, though: `reviewAll` runs solely when auto-review is on and solely
