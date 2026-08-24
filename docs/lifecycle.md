@@ -176,13 +176,21 @@ that GitHub isn't asking you about is never auto re-reviewed.
 comments you edited onto the new diff, re-anchored. AI comments you didn't
 touch are dropped — the new run just regenerated them.
 
-> ⚠ **A re-review that *fails* does throw them away** — permanently. The run
-> saves a fresh artifact with `comments: []` before it calls Claude, so your
-> comments leave the disk at that moment and live only in the run's memory;
-> `carryOverComments` puts them back on the success path, and the failure
-> handler never reaches it. Tracked as
-> [#37](https://github.com/fullstackhouse/cerber/issues/37); this warning goes
-> when the fix lands.
+> ⚠ **Two ways it loses them anyway**, both from the same cause — the runner
+> saves its result wholesale instead of merging onto what is on disk, the way
+> a chat turn does (`mergeConcurrentEdits`).
+>
+> - **A run that fails throws them away permanently.** It saves a fresh
+>   artifact with `comments: []` before calling Claude, so they leave the disk
+>   there and live only in the run's memory; `carryOverComments` puts them back
+>   on the success path, and the failure handler never reaches it.
+> - **A run that succeeds still overwrites whatever you did while it ran.** The
+>   carry-over works from `existing`, read minutes earlier at the start of the
+>   run, and the review stays editable throughout — so a comment you add, edit
+>   or drop mid-run is written over by the result.
+>
+> Both tracked as [#37](https://github.com/fullstackhouse/cerber/issues/37);
+> this warning goes when the fix lands.
 
 ### Re-review vs refresh — different things
 
@@ -372,10 +380,13 @@ freshness guard skipped is not re-judged or re-logged on later polls.
 merged/closed (**archived**), the poll is off, or GitHub isn't requesting your
 review.
 
-**"Why did this PR come back?"** — Either the author pushed and its status was
-`ready` or `sent` (both head-sensitive, so a moved head re-drafts them), or its
-status was `awaiting` or `failed`, which the poll retries with no push involved
-at all. Only `reviewed` and `skipped` never come back on their own.
+**"Why did this PR come back?"** — The poll re-drafted it, which needs polling
+and auto-review both on and the PR still in the awaiting search. Given that:
+its status was `awaiting` or `failed`, which are retried with no push involved
+at all; or the author pushed and it was `ready` or `sent`, both head-sensitive
+— though a `sent` row also needs someone to have asked you again, and a `ready`
+one you have opened since the push will *not* come back (the §4 warning). Only
+`reviewed` and `skipped` never come back under any of it.
 
 **"Why won't it re-review?"** — Both causes are the freshness guard in §4, so
 they only bind the callers that obey it (the poll, plain `cerber review`):
