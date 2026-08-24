@@ -371,6 +371,13 @@ shadow mode for a while: every would-send decision lands in
 verdicts and comments survive your review — enable auto-send when its 90%
 actually means 90%.
 
+## How it works
+
+[**docs/lifecycle.md**](docs/lifecycle.md) is the reference behind everything
+above: the seven statuses and what sets each, which tab a PR lands in and why,
+when the poll files or archives a row on its own, when a re-review happens and
+what it will not overwrite, and what gets written to disk at each step.
+
 ## Development
 
 ```bash

@@ -60,6 +60,11 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 
 ## Architecture
 
+`docs/lifecycle.md` is the reference for the statuses, the queue's visibility
+rules, filing/archiving, and the re-review guards. Keep it true when you change
+any of them — it names the files each rule lives in.
+
+
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
   gh client (shells out to `gh`, no tokens handled), diff utils,
