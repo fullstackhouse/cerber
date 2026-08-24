@@ -9,21 +9,31 @@ import {
   fetchConversation,
   fetchOwnReview,
   fetchPrInfo,
+  fetchReviewRequests,
   mapSearchResults,
   searchAwaitingMe,
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
-import { DaemonHandle, filedByOwnReview, isPureStub, startDaemon, stubArtifact } from "./daemon.js";
+import {
+  DaemonHandle,
+  filedByWithdrawnRequest,
+  filedByYourAct,
+  isPureStub,
+  startDaemon,
+  stubArtifact,
+} from "./daemon.js";
 
 // The loop's own bookkeeping is what's under test — not gh, and not the runner.
-// classifyReply stays real: it is pure, and its own tests live in core/gh.test.ts.
+// classifyReply and lastWordOfYours stay real: they are pure, and their own
+// tests live in core/gh.test.ts.
 vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
   searchAwaitingMe: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchConversation: vi.fn(),
   fetchOwnReview: vi.fn(),
+  fetchReviewRequests: vi.fn(),
   currentLogin: vi.fn(),
 }));
 vi.mock("../core/config.js", async (orig) => ({
@@ -42,6 +52,7 @@ const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
 const ownReview = fetchOwnReview as Mock;
+const requests = fetchReviewRequests as Mock;
 const login = currentLogin as Mock;
 const notified = notify as Mock;
 
@@ -431,7 +442,15 @@ describe("a draft you already answered on GitHub", () => {
     login.mockResolvedValue("me");
     conversation.mockResolvedValue([]);
     ownReview.mockResolvedValue(null);
+    requests.mockResolvedValue({ users: [], teams: [] });
     prInfo.mockResolvedValue({ ...stubArtifact(DISCOVERED).pr, state: "OPEN", isDraft: false });
+  });
+
+  const said = (author: string, at: string) => ({
+    author,
+    at,
+    bot: false,
+    url: `https://github.com/acme/widgets/pull/7#issuecomment-${at}`,
   });
 
   async function pollOnce() {
@@ -451,7 +470,8 @@ describe("a draft you already answered on GitHub", () => {
 
     const after = await pollOnce();
     expect(after?.status).toBe("reviewed");
-    expect(after?.filed?.review.at).toBe(YOUR_REVIEW.at);
+    expect(after?.filed?.reason).toBe("own-review");
+    expect(after?.filed?.review?.at).toBe(YOUR_REVIEW.at);
     // Filed, not sent, not thrown away: the draft is still there to send.
     expect(after?.sent).toBeNull();
     expect(after?.pr.state).toBe("OPEN");
@@ -470,13 +490,113 @@ describe("a draft you already answered on GitHub", () => {
     expect(ownReview).not.toHaveBeenCalled();
   });
 
-  it("leaves it alone when you have never reviewed the PR yourself", async () => {
+  it("files a draft nobody is asking for any more", async () => {
+    // Never reviewed, never commented, and the request has gone: the row is a
+    // draft the poll wrote for a question that no longer exists.
     await saveArtifact(draft());
     search.mockResolvedValue([]);
 
     const after = await pollOnce();
+    expect(after?.status).toBe("reviewed");
+    expect(after?.filed?.reason).toBe("request-withdrawn");
+    expect(after?.sent).toBeNull();
+  });
+
+  it("confirms against the PR before believing the request is gone", async () => {
+    // The awaiting search runs off an index that lags, and here its silence is
+    // the entire case for filing — so the PR itself gets the last word.
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+    requests.mockResolvedValue({ users: ["me"], teams: [] });
+
+    const after = await pollOnce();
     expect(after?.status).toBe("ready");
     expect(after?.filed).toBeNull();
+  });
+
+  it("will not rule you out of a team's review request", async () => {
+    // A team request names the team, never its members. It cannot say the
+    // request is not yours, so it is not allowed to say it is gone.
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+    requests.mockResolvedValue({ users: [], teams: ["acme/backend"] });
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("never files a draft you pulled in yourself as unrequested", async () => {
+    // A pasted PR was never in the awaiting search, so its absence there says
+    // nothing at all — and a run too old to record a trigger can't be told from
+    // one, so it gets the same answer.
+    for (const trigger of ["user", null] as const) {
+      await saveArtifact(draft({ run: { ...RUN, trigger } }));
+      search.mockResolvedValue([]);
+
+      const after = await pollOnce();
+      expect(after?.status).toBe("ready");
+      expect(after?.filed).toBeNull();
+    }
+  });
+
+  it("files the draft when you answered on the PR and nobody answered back", async () => {
+    // A comment is not a review as far as GitHub is concerned, so the request
+    // it leaves standing says nothing about whether anyone is waiting on you.
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+    conversation.mockResolvedValue([
+      said("someone", "2026-08-20T09:00:00Z"),
+      said("me", "2026-08-20T14:00:00Z"),
+    ]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("reviewed");
+    expect(after?.filed?.reason).toBe("own-reply");
+    expect(after?.filed?.reply?.at).toBe("2026-08-20T14:00:00Z");
+    expect(after?.filed?.reply?.url).toContain("issuecomment");
+  });
+
+  it("leaves the row alone when someone answered your comment", async () => {
+    // That reply is addressed to you, on a PR whose draft is sitting right here.
+    await saveArtifact(draft());
+    search.mockResolvedValue([]);
+    conversation.mockResolvedValue([
+      said("me", "2026-08-20T09:00:00Z"),
+      said("someone", "2026-08-20T14:00:00Z"),
+    ]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("keeps a second opinion you asked for after commenting", async () => {
+    await saveArtifact(
+      draft({ run: { ...RUN, trigger: "user" as const, startedAt: "2026-08-21T09:00:00Z" } }),
+    );
+    search.mockResolvedValue([]);
+    conversation.mockResolvedValue([said("me", "2026-08-20T14:00:00Z")]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("does not go looking for another reason once it has found your review", async () => {
+    // You reviewed on GitHub, then asked for a fresh draft. The guard spares it
+    // — and nothing downstream may file it on the strength of the same comment.
+    await saveArtifact(
+      draft({ run: { ...RUN, trigger: "user" as const, startedAt: "2026-08-21T09:00:00Z" } }),
+    );
+    search.mockResolvedValue([]);
+    ownReview.mockResolvedValue(YOUR_REVIEW);
+    conversation.mockResolvedValue([said("me", "2026-08-20T14:00:00Z")]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+    expect(conversation).not.toHaveBeenCalled();
   });
 
   it("keeps a second opinion you asked for after reviewing", async () => {
@@ -509,13 +629,13 @@ describe("a draft you already answered on GitHub", () => {
   });
 });
 
-describe("filedByOwnReview", () => {
+describe("filedByYourAct", () => {
   const artifact = { ...stubArtifact(DISCOVERED), status: "ready" as const };
   const review = { at: "2026-08-20T14:55:00Z", state: "COMMENTED" as const, url: null };
 
-  it("needs a review of yours to file anything", () => {
-    expect(filedByOwnReview(artifact, null)).toBe(false);
-    expect(filedByOwnReview(artifact, review)).toBe(true);
+  it("needs something you did to file anything", () => {
+    expect(filedByYourAct(artifact, null)).toBe(false);
+    expect(filedByYourAct(artifact, review.at)).toBe(true);
   });
 
   // ISO-8601 does not compare as text across precisions: `startedAt` carries
@@ -536,21 +656,57 @@ describe("filedByOwnReview", () => {
       sessionId: null,
       trigger: "user" as const,
     };
-    expect(filedByOwnReview({ ...artifact, run }, sameSecond)).toBe(false);
+    expect(filedByYourAct({ ...artifact, run }, sameSecond.at)).toBe(false);
     // And the same run started a second *before* it still files: the guard is
     // about order, not about having a trigger at all.
     expect(
-      filedByOwnReview(
+      filedByYourAct(
         { ...artifact, run: { ...run, startedAt: "2026-08-20T14:55:25.500Z" } },
-        sameSecond,
+        sameSecond.at,
       ),
     ).toBe(true);
   });
 
   it("only files a finished draft", () => {
-    expect(filedByOwnReview({ ...artifact, status: "running" }, review)).toBe(false);
-    expect(filedByOwnReview({ ...artifact, status: "awaiting" }, review)).toBe(false);
-    expect(filedByOwnReview({ ...artifact, status: "skipped" }, review)).toBe(false);
+    expect(filedByYourAct({ ...artifact, status: "running" }, review.at)).toBe(false);
+    expect(filedByYourAct({ ...artifact, status: "awaiting" }, review.at)).toBe(false);
+    expect(filedByYourAct({ ...artifact, status: "skipped" }, review.at)).toBe(false);
+  });
+});
+
+describe("filedByWithdrawnRequest", () => {
+  const artifact = { ...stubArtifact(DISCOVERED), status: "ready" as const };
+  const run = {
+    model: null,
+    startedAt: "2026-08-20T14:55:00Z",
+    finishedAt: null,
+    costUsd: null,
+    error: null,
+    withSource: false,
+    trusted: false,
+    sessionId: null,
+    trigger: "daemon" as const,
+  };
+
+  it("only files what the poll wrote on its own", () => {
+    expect(filedByWithdrawnRequest({ ...artifact, run })).toBe(true);
+    expect(filedByWithdrawnRequest({ ...artifact, run: { ...run, trigger: "user" } })).toBe(false);
+    // No corroborating act of yours here, so an unrecorded trigger means no —
+    // the opposite of the own-review guard, which has a second fact to lean on.
+    expect(filedByWithdrawnRequest({ ...artifact, run: { ...run, trigger: null } })).toBe(false);
+    expect(filedByWithdrawnRequest({ ...artifact, run: null })).toBe(false);
+  });
+
+  it("only files a finished, unsent draft", () => {
+    expect(filedByWithdrawnRequest({ ...artifact, run, status: "running" })).toBe(false);
+    expect(filedByWithdrawnRequest({ ...artifact, run, status: "reviewed" })).toBe(false);
+    expect(
+      filedByWithdrawnRequest({
+        ...artifact,
+        run,
+        sent: { at: "2026-08-20T16:00:00Z", event: "COMMENT", url: null, auto: false },
+      }),
+    ).toBe(false);
   });
 });
 

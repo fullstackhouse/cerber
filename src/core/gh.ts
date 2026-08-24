@@ -172,6 +172,7 @@ export interface Comment {
   at: string;
   /** CI, changelog and integration bots talk on PRs; none of it is an answer. */
   bot: boolean;
+  url: string | null;
 }
 
 /** GitHub types bot accounts, and names them `something[bot]` besides. */
@@ -186,7 +187,7 @@ export async function fetchConversation(ref: PrRef): Promise<Comment[]> {
     "--paginate",
     `repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`,
     "--jq",
-    '.[] | {author: .user.login, at: .created_at, bot: (.user.type == "Bot")}',
+    '.[] | {author: .user.login, at: .created_at, bot: (.user.type == "Bot"), url: .html_url}',
   ]);
   // --jq streams one object per line rather than a JSON array.
   return out
@@ -211,6 +212,21 @@ export function classifyReply(comments: Comment[], login: string): Reply {
   // A comment of your own posted at the same instant can't be someone else's
   // answer to it, so only strictly-later comments hand the move back.
   return human.some((c) => c.author !== login && c.at > lastMine) ? "them" : "you";
+}
+
+/**
+ * The comment that gave you the last word, or null if it isn't yours.
+ *
+ * Answers "you have said your piece and nobody has answered since" with the
+ * comment that says it, so a draft filed on the strength of it can point at
+ * the thing on GitHub it was filed for. Routed through `classifyReply` rather
+ * than re-deriving the rule, so the tag on a row and the reason it was filed
+ * can never disagree about who spoke last.
+ */
+export function lastWordOfYours(comments: Comment[], login: string): Comment | null {
+  if (classifyReply(comments, login) !== "you") return null;
+  const mine = comments.filter((c) => !isBot(c) && c.author === login);
+  return mine[mine.length - 1] ?? null;
 }
 
 /**
@@ -288,6 +304,56 @@ export function currentLogin(): Promise<string> {
 /** Test seam: forget the cached login so the next call asks again. */
 export function resetLoginCache(): void {
   cachedLogin = null;
+}
+
+/**
+ * Who GitHub currently has a review request open on, straight from the PR.
+ *
+ * The awaiting search answers the same question far more cheaply, but it
+ * answers it from an index that lags, and absence from an index is not a fact.
+ * That is fine where a second fact corroborates it — you demonstrably reviewed
+ * the PR, you demonstrably had the last word — and not fine where the absence
+ * IS the whole case, which is what this read is for.
+ */
+export interface ReviewRequests {
+  users: string[];
+  /** Team slugs. A team request means "someone on this team", never a name. */
+  teams: string[];
+}
+
+export async function fetchReviewRequests(ref: PrRef): Promise<ReviewRequests> {
+  const out = await gh([
+    "pr",
+    "view",
+    String(ref.number),
+    "--repo",
+    `${ref.owner}/${ref.repo}`,
+    "--json",
+    "reviewRequests",
+  ]);
+  const raw = JSON.parse(out) as {
+    reviewRequests?: { __typename?: string; login?: string; slug?: string; name?: string }[];
+  };
+  const users: string[] = [];
+  const teams: string[] = [];
+  for (const r of raw.reviewRequests ?? []) {
+    if (r.login) users.push(r.login);
+    else if (r.slug ?? r.name) teams.push((r.slug ?? r.name)!);
+  }
+  return { users, teams };
+}
+
+/**
+ * Whether GitHub might still be asking *you*, specifically.
+ *
+ * A team request names the team and not its members, so it can never rule you
+ * out — and a membership lookup to settle it would be a third call to answer a
+ * question whose only use is deciding not to act. Treating any team request as
+ * possibly-you costs one draft left in the inbox; the other way round files
+ * away a review someone is waiting on.
+ */
+export function stillRequested(requests: ReviewRequests, login: string): boolean {
+  return requests.teams.length > 0 || requests.users.includes(login);
 }
 
 export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {

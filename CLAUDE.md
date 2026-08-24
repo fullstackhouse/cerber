@@ -85,9 +85,15 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
   `daemon.autoReview` is off, archives merged/closed PRs, and files a draft
-  under settled once GitHub has stopped requesting you *and* holds a review of
-  your own (`fetchOwnReview` — the one thing the conversation read can't see;
-  `run.trigger` spares a draft you asked for after that review). Config's `daemon`
+  under settled once GitHub has moved past it without cerber's help. Three
+  reasons, most-telling first (`filed.reason`): you submitted a review there
+  (`fetchOwnReview`), you commented and nobody has answered since
+  (`lastWordOfYours`), or nobody is asking any more. Someone answering your
+  comment deliberately files nothing — that reply is addressed to you.
+  `run.trigger` spares a draft you asked for after having spoken; the
+  withdrawal reason is stricter still (poll-written drafts only, and it
+  confirms against the PR with `fetchReviewRequests` before acting, because
+  there its only evidence is a search index's silence). Config's `daemon`
   block is re-read every poll, so cockpit toggles apply without a restart.
   Each poll also publishes what it found (`status.awaiting`): the queue filters
   on what you settled locally, which stops matching what GitHub asks you for the
@@ -133,7 +139,11 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
   working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
 - Don't let a re-review discard human work: comments the user wrote or edited
-  are carried across (`carryOverComments`), never regenerated away. A chat turn
+  are carried across (`carryOverComments`), never regenerated away. Nor is the
+  decision to be done with a PR: `reviewed` and `skipped` survive a new push
+  (`SETTLED_BY_YOU` in `review.ts`), because a row dragged back into the inbox
+  every time the author pushes is cerber overruling you. Only `ready` and
+  `sent` track the head; the way back in is the re-review button, which forces. A chat turn
   is the second way to lose it — it refuses to rewrite the user's own comments,
   and its result is folded onto the current artifact (`mergeConcurrentEdits`)
   rather than overwriting whatever they edited while the turn ran

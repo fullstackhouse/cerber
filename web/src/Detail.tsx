@@ -1108,6 +1108,63 @@ function SendPanel({
   );
 }
 
+/**
+ * Why this draft is sitting under settled without you having clicked anything.
+ *
+ * Leads with the fact on GitHub, then what cerber did about it — and closes by
+ * saying the draft is untouched every time, because "filed" is the word most
+ * likely to be read as "thrown away".
+ */
+function FiledNote({ filed }: { filed: NonNullable<Artifact["filed"]> }) {
+  const link = filed.review?.url ?? filed.reply?.url ?? null;
+  const on = (at: string) => new Date(at).toLocaleDateString();
+
+  if (filed.reason === "own-reply" && filed.reply) {
+    return (
+      <div>
+        <strong>You answered on this PR on {on(filed.reply.at)}, and nobody has replied since.</strong>{" "}
+        So cerber filed this draft under settled: GitHub does not count a{" "}
+        {link ? (
+          <a href={link} target="_blank" rel="noreferrer">
+            comment
+          </a>
+        ) : (
+          "comment"
+        )}{" "}
+        as a review, but the PR is with its author either way. Nothing here was changed or sent —
+        the draft is still yours to send.
+      </div>
+    );
+  }
+  if (filed.reason === "request-withdrawn") {
+    return (
+      <div>
+        <strong>Nobody is asking for this review any more.</strong> The request that put this PR in
+        the inbox was taken back on or before {on(filed.at)}, and you had said nothing on the PR, so
+        cerber filed the draft under settled rather than leaving it out for you. Nothing here was
+        changed or sent — the draft is still yours to send.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <strong>
+        You reviewed this PR on GitHub on {on(filed.review?.at ?? filed.at)}.
+      </strong>{" "}
+      So cerber filed this draft under settled, GitHub having stopped asking you for a review and
+      shown one of your own{" "}
+      {link ? (
+        <a href={link} target="_blank" rel="noreferrer">
+          already on the PR
+        </a>
+      ) : (
+        "already on the PR"
+      )}
+      . Nothing here was changed or sent — the draft is still yours to send.
+    </div>
+  );
+}
+
 function FreshnessBanner({
   artifact,
   freshness,
@@ -1138,23 +1195,7 @@ function FreshnessBanner({
 
   return (
     <div className="freshness">
-      {filed && (
-        <div>
-          <strong>
-            You reviewed this PR on GitHub on {new Date(filed.review.at).toLocaleDateString()}.
-          </strong>{" "}
-          So cerber filed this draft under settled, GitHub having stopped asking you for a review
-          and shown one of your own{" "}
-          {filed.review.url ? (
-            <a href={filed.review.url} target="_blank" rel="noreferrer">
-              already on the PR
-            </a>
-          ) : (
-            "already on the PR"
-          )}
-          . Nothing here was changed or sent — the draft is still yours to send.
-        </div>
-      )}
+      {filed && <FiledNote filed={filed} />}
       {closed && (
         <div>
           <strong>This PR is {state === "MERGED" ? "merged" : "closed"}.</strong> A review can still

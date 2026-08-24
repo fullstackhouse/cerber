@@ -5,7 +5,7 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
-import { DaemonStatus, Reply, ReviewListItem } from "./types";
+import { DaemonStatus, Filed, FiledReason, Reply, ReviewListItem } from "./types";
 
 export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
 
@@ -141,6 +141,57 @@ export function shownTab(picked: Tab, buckets: Record<Tab, ReviewListItem[]>): T
 }
 
 /**
+ * The date a filing turns on: the thing you did, or — when the reason is that
+ * nobody is asking any more — the moment cerber noticed, since a request going
+ * away is the one cause GitHub gives no timestamp for.
+ */
+export function filedOn(filed: Filed): string {
+  return filed.reason === "own-review"
+    ? (filed.review?.at ?? filed.at)
+    : filed.reason === "own-reply"
+      ? (filed.reply?.at ?? filed.at)
+      : filed.at;
+}
+
+/**
+ * What became of a filed draft, in the three places the queue says it: the tag
+ * on the row, the tag under open requests, and the strip. One table, so they
+ * cannot tell three versions of one story — and every line names GitHub,
+ * because the whole point of a filed row is that you did not click anything here.
+ */
+const FILED_COPY: Record<
+  FiledReason,
+  { tag: string; meta: (when: string) => string; reasoning: string; requested: string }
+> = {
+  "own-review": {
+    tag: "reviewed on GitHub",
+    meta: (when) => `you reviewed this on GitHub on ${when}`,
+    reasoning:
+      "GitHub stopped asking you for a review and already had one of yours, so this draft was " +
+      "filed rather than left in the inbox. It was never sent — open it to read or send it.",
+    requested: "You submitted a review on GitHub, outside cerber, so this draft was filed.",
+  },
+  "own-reply": {
+    tag: "replied on GitHub",
+    meta: (when) => `you replied on GitHub on ${when}`,
+    reasoning:
+      "You answered in the PR conversation and nobody has answered back, so the draft was filed " +
+      "rather than left in the inbox. GitHub does not count a comment as a review, but whoever " +
+      "opened the PR is the one holding it. Nothing was sent — open it to read or send it.",
+    requested: "You commented on the PR and nobody answered, so this draft was filed.",
+  },
+  "request-withdrawn": {
+    tag: "request withdrawn",
+    meta: (when) => `nobody was asking for this any more on ${when}`,
+    reasoning:
+      "Whoever asked for this review took the request back, and you had said nothing on the PR, " +
+      "so the draft was filed rather than left in the inbox. It is still a review — open it to " +
+      "read or send it.",
+    requested: "The review request had gone away when this draft was filed.",
+  },
+};
+
+/**
  * What happened to this row, when the verdict column doesn't already say it:
  * your own decision, or GitHub's. A sent review says "sent · approve" in the
  * verdict column, so a tag there would only repeat it.
@@ -149,7 +200,7 @@ export function rowTag(r: ReviewListItem): string | null {
   if (isArchived(r)) return r.pr.state?.toLowerCase() ?? null;
   // Filed by cerber, not by you: "reviewed" here would read as a click you
   // never made, on the one row whose whole point is that you did it elsewhere.
-  if (r.filed) return "reviewed on GitHub";
+  if (r.filed) return FILED_COPY[r.filed.reason].tag;
   if (r.status === "reviewed" || r.status === "skipped") return r.status;
   return null;
 }
@@ -227,24 +278,25 @@ export function sentTag(sent: NonNullable<ReviewListItem["sent"]>): { label: str
 }
 
 /**
- * The same, for a review you submitted on GitHub rather than through cerber.
+ * The same, for a draft cerber filed away on GitHub's account rather than yours.
  *
  * A filed row can come back here — the author pushes and asks you again, and
- * GitHub lists a fresh request against a PR you have provably reviewed. The
- * conversation read cannot see that review either, so without this the row
- * would be tagged "you haven't replied" at someone who did.
+ * GitHub lists a fresh request against a PR you have provably dealt with. The
+ * conversation read cannot see a submitted review at all, so without this the
+ * row would be tagged "you haven't replied" at someone who did.
  */
 export function filedTag(filed: NonNullable<ReviewListItem["filed"]>): {
   label: string;
   title: string;
 } {
-  const when = new Date(filed.review.at).toLocaleDateString();
+  const copy = FILED_COPY[filed.reason];
+  const when = new Date(filedOn(filed)).toLocaleDateString();
   return {
-    label: "you reviewed this on GitHub",
+    label: copy.tag,
     title:
-      `You submitted a review on GitHub on ${when}, outside cerber, so this draft was filed. ` +
-      `GitHub lists a review request for you again — most likely the author has asked for another ` +
-      `look since. Re-review it to draft against the current head.`,
+      `${copy.requested} That was ${when}. GitHub lists a review request for you now — most ` +
+      `likely the author has asked for another look since. Re-review it to draft against the ` +
+      `current head.`,
   };
 }
 
@@ -372,7 +424,7 @@ export function strip(
   const meta = [readMode(r)];
   // What you did with it, when that isn't "nothing yet".
   if (r.filed) {
-    meta.unshift(`you reviewed this on GitHub on ${new Date(r.filed.review.at).toLocaleDateString()}`);
+    meta.unshift(FILED_COPY[r.filed.reason].meta(new Date(filedOn(r.filed)).toLocaleDateString()));
   } else if (r.status === "reviewed") meta.unshift("you marked this reviewed");
   if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
@@ -385,13 +437,6 @@ export function strip(
         : `below the ${daemon.autoSendThreshold}% auto-send bar`,
     );
   }
-  if (r.filed) {
-    return {
-      reasoning:
-        "GitHub stopped asking you for a review and already had one of yours, so this draft was " +
-        "filed rather than left in the inbox. It was never sent — open it to read or send it.",
-      meta,
-    };
-  }
+  if (r.filed) return { reasoning: FILED_COPY[r.filed.reason].reasoning, meta };
   return { reasoning: r.verdict?.reasoning ?? "This review has a draft but no verdict.", meta };
 }
