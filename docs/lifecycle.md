@@ -8,7 +8,7 @@ code that outdates a line here is findable.
 
 ---
 
-## 1. Three writers, one file
+## 1. Four writers, one file
 
 Everything cerber knows about a PR is one JSON file:
 
