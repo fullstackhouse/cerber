@@ -135,10 +135,10 @@ Notes on the edges that surprise people:
   rule of the product. The status field is held to it as well:
   `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two that
   are your decision, so nothing but the send path can write `sent`.
-- **Neither will send a draft a run is rewriting.** Both refuse with a `409`
-  while one is in flight — the cockpit on the artifact's status *and* this
-  process's own claim, `cerber send` on the status, which is all another
-  terminal can see.
+- **Neither will send a draft a run is rewriting.** The cockpit answers `409`,
+  refusing on the artifact's status *and* on this process's own claim;
+  `cerber send` prints the reason and exits non-zero, and goes on the status
+  alone, which is all another terminal can see.
 
 ---
 
@@ -151,8 +151,9 @@ a token it checks the artifact already on disk:
    `cerber review --force` too.)
 2. Status in `SETTLED_BY_YOU` (`reviewed`, `skipped`)? → **skip**, log
    "use --force". *This is why marking a PR reviewed survives a push.*
-3. Status in `HEAD_SENSITIVE` (`ready`, `sent`) **and** head SHA unchanged? →
-   **skip** as up to date.
+3. Status in `HEAD_SENSITIVE` (`ready`, `sent`) **and** the head the last run
+   *read* is still the PR's head? → **skip** as up to date. (Which sha that is,
+   and why it is not `pr.headSha`, is the paragraph below.)
 4. Otherwise → run.
 
 So a `ready` **or `sent`** artifact on a PR that gets a new commit is meant to
@@ -305,11 +306,15 @@ leave something behind:
    request is its only evidence and a `null` cannot be told from a draft you
    asked for.
 3. **On success** — `ready`, plus `summary`, `chapters`, `comments`, `verdict`,
-   `run.costUsd`, and `run.sessionId` — the Claude session chat turns resume,
-   recorded **only for a source-backed run** (`source ? review.sessionId : null`),
-   since there is no checkout for a `--no-source` turn to resume into.
-4. **On failure** — `failed`, with `run.error` — but only for failures *after*
-   step 1. `reviewPr` fetches the diff and resolves trust and the checkout
+   `run.costUsd`, and `run.reviewedSha`, the head this run actually read, which
+   is what §4's freshness guard compares against. Also `run.sessionId` — the
+   Claude session chat turns resume, recorded **only for a source-backed run**
+   (`source ? review.sessionId : null`), since there is no checkout for a
+   `--no-source` turn to resume into.
+4. **On failure** — `run.error`, and `failed` *unless the status is yours*: a
+   `sent`, `reviewed` or `skipped` that landed while the run worked stands, and
+   the error is recorded beside it (`userOwnsStatus`). Only for failures *after*
+   step 1, at that. `reviewPr` fetches the diff and resolves trust and the checkout
    before it first saves, so a failure there leaves no `failed` row behind for
    a direct caller (`cerber review`, the poll) to find. The cockpit's endpoints
    close that hole themselves: create and re-review both persist `running`

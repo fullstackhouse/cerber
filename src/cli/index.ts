@@ -180,7 +180,11 @@ program
     // by another terminal is invisible to this process. Sending mid-run vouches
     // for a draft that is being replaced as you read it.
     if (artifact.status === "running") {
-      console.error(`A review of ${id} is running — wait for it to finish, then send.`);
+      console.error(
+        `A review of ${id} is running — wait for it to finish, then send. ` +
+          `If nothing is actually running, the last run died mid-flight: re-run it, or restart \`cerber serve\`, ` +
+          `either of which clears the stale status.`,
+      );
       process.exit(1);
     }
 
