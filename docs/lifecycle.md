@@ -26,7 +26,8 @@ Three things write the artifact, and every question in this document is really
 | --- | --- | --- |
 | **the poll** | `src/server/daemon.ts` | create stubs, archive, file, delete stubs, start drafts |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
-| **you** | cockpit → `src/server/index.ts`, or the CLI | edit, mark, send, re-review, chat |
+| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat |
+| **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews), `send`, `export`, `prune` — no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
 are defensive and writers are atomic (tmp+rename, `src/core/state.ts`).
@@ -45,7 +46,7 @@ time.
 | `ready` | a draft exists and wants you to read it | runner, on success |
 | `reviewed` | **you** are done with it — or the poll filed it (see §5) | you, or poll |
 | `skipped` | **you** decided not to review it | you |
-| `sent` | the review reached GitHub | Send button, or auto-send |
+| `sent` | the review reached GitHub | the cockpit's Send, `cerber send`, or auto-send |
 | `failed` | the run errored | runner, or restart reconciliation |
 
 Two derived groupings drive most behaviour:
@@ -56,24 +57,41 @@ Two derived groupings drive most behaviour:
   push must not drag these back.
 
 `archived` is *not* a status. It is `pr.state !== "OPEN"` — merged or closed —
-and it overrides every tab (`isArchived`, `web/src/inbox.ts`).
+and it takes a row out of every tab except **open requests**, which is computed
+over *all* artifacts and so can still name an archived one GitHub is asking
+about (`isArchived` / `hiddenAwaiting`, `web/src/inbox.ts`).
 
 ---
 
 ## 3. Transitions
 
+Every run goes through `running`; nothing reaches `ready` or `failed` without
+it — so the machine reads most easily as three questions.
+
+**What starts a run** — i.e. what enters `running`:
+
 ```
-                  poll finds it                    run succeeds
-       (nothing) ───────────────► awaiting ───────────────────► ready
-            │                        │  ▲                        │
-   you paste a URL / cerber review   │  │ re-review (force)      │
-            │                        ▼  │                        │
-            └──────────────────► running ┴────────────► failed ──┘
-                                              run errors    ▲
-                                                            │ restart while running
-   ready ──you mark reviewed / skipped──► reviewed | skipped
-   ready ──poll finds GitHub moved past it──────► reviewed (+ filed)
-   ready ──Send / auto-send────────────────────► sent
+(nothing)           ──you paste a URL, or `cerber review`──► running
+awaiting            ──the poll, when auto-review is on────► running
+ready | sent        ──the poll, once the head has moved───► running
+failed              ──the poll, next time round───────────► running
+reviewed | skipped  ──only with --force───────────────────► running
+```
+
+**What a run becomes:**
+
+```
+running ──the AI answered──► ready
+running ──it errored───────► failed
+running ──cerber restarted─► failed   (reconcileRunning)
+```
+
+**And what happens to a finished draft** — all of these start at `ready`:
+
+```
+ready ──you mark it──────────────────────────► reviewed | skipped
+ready ──the poll finds GitHub moved past it──► reviewed  (+ `filed`)
+ready ──Send / `cerber send` / auto-send─────► sent
 ```
 
 Notes on the edges that surprise people:
@@ -84,10 +102,14 @@ Notes on the edges that surprise people:
 - **A restart turns any `running` into `failed`** and marks a pending chat turn
   errored (`reconcileRunning`, `src/core/state.ts`). Nothing in a fresh process
   is actually running, so anything still marked so would wedge forever.
-- **`failed` is retried by the next poll** — it is neither settled nor
-  head-sensitive, so the freshness guard below lets it through every time.
-- **Nothing transitions to `sent` without either a human click or opt-in
-  auto-send.** That is the one hard rule of the product.
+- **`failed` is retried by the poll** — it is neither settled nor
+  head-sensitive, so the freshness guard below lets it through every time. Only
+  by the poll, though: `reviewAll` runs solely when auto-review is on and solely
+  over PRs the awaiting search returned, so a failed artifact GitHub has stopped
+  asking about is never retried on its own.
+- **Nothing transitions to `sent` except by a deliberate human act — the
+  cockpit's Send button or `cerber send` — or by opt-in auto-send.** That is
+  the one hard rule of the product.
 
 ---
 
@@ -104,9 +126,12 @@ a token it checks the artifact already on disk:
    **skip** as up to date.
 4. Otherwise → run.
 
-So a `ready` draft on a PR that gets a new commit **is re-drafted
-automatically** by the next poll — but only if that PR is still in the awaiting
-search. `reviewAll(refs)` is fed the search results, so a PR you pasted by hand
+So a `ready` **or `sent`** artifact on a PR that gets a new commit is
+re-drafted automatically by the next poll: `HEAD_SENSITIVE` only skips while
+the head is *unchanged*. For a sent one that is the point — submitting cleared
+GitHub's request, so a fresh one only ever arrives because someone asked for
+another look (`review.test.ts`). Both need the PR to still be in the awaiting
+search: `reviewAll(refs)` is fed the search results, so a PR you pasted by hand
 and that GitHub isn't asking you about is never auto re-reviewed.
 
 **A re-review does not throw away your work.** `carryOverComments`
@@ -118,14 +143,21 @@ new run just regenerated them.
 
 | | **refresh** (`POST /api/reviews/:key/refresh`) | **re-review** (`POST /api/reviews/:key/rerun`) |
 | --- | --- | --- |
-| Costs | one diff fetch | a full AI run |
+| Costs | a PR fetch, plus a diff fetch only if the head moved | a full AI run |
 | Changes | `diff`, `pr`, comment line anchors | everything the AI writes |
 | Runs when | **you open a review** (automatic, `web/src/Detail.tsx`) | you press the button |
 | Refuses on | `sent`, `running`, or head unchanged | `sent`, or a run already in flight |
 
+The re-review endpoint passes `force: true`, so an unchanged head is no
+obstacle to it — the guard in §4 is what the *poll* and a plain `cerber review`
+obey, not the button.
+
 Refresh keeps comments *postable* against current code (`anchor.ts` matches
-line **text**, not position). The summary, chapters and verdict still describe
-the commit that was actually reviewed — only a re-review updates the opinion.
+line **text**, not position). It forms no opinion about the new head: the
+summary, chapters and verdict it carries across still describe the commit that
+was actually reviewed. A re-review is what re-reads the new code. (A chat turn
+can rewrite those same fields too — but from the conversation, not from a fresh
+reading of a commit nobody has reviewed.)
 
 ---
 
@@ -145,7 +177,7 @@ Let `open` = artifacts with `pr.state === "OPEN"`, and
 | **open requests** | `hiddenAwaiting` | see below |
 | **settled** | `open` where status is `reviewed` or `skipped` | |
 | **sent** | `open` where status is `sent` | |
-| **archived** | everything with `pr.state !== "OPEN"` | wins over every other tab |
+| **archived** | everything with `pr.state !== "OPEN"` | excluded from every tab above except `open requests` |
 
 Filed tabs only appear while they hold something; standing on one that empties
 drops you back to the inbox (`shownTab`).
@@ -153,8 +185,8 @@ drops you back to the inbox (`shownTab`).
 **Open requests** is the one tab that is a question about GitHub rather than a
 place a review is filed, so it deliberately overlaps the others: it is the
 rows GitHub still requests from you that the queue is *not* showing — i.e. you
-settled or archived them locally, and since cerber never writes to GitHub, the
-request outlived your decision. Without it the cockpit would say "nothing
+settled or archived them locally without sending, and nothing you did here
+reached GitHub, so the request outlived your decision. Without it the cockpit would say "nothing
 awaits you" over a poll that had just counted two.
 
 **Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
@@ -169,8 +201,11 @@ walk `walkable()`: open, unsettled rows only.
 | A pure stub leaves the awaiting search, PR still open | **deleted** — it held no work | `syncQueue` / `isPureStub` |
 | GitHub moved past a finished draft | status → `reviewed`, `filed` set | `fileIfSettledElsewhere` |
 
-A **pure stub** is `awaiting` with no comments and no chapters. Search lag at
-worst re-creates it next poll.
+A **pure stub** is `awaiting`, with no comments and **`run === null`** — it
+does not look at chapters. The `run` block is what makes this safe: the create
+endpoint persists one before it answers, so a review you pulled in by hand is
+never a pure stub even in the minutes before its first output lands. Search lag
+at worst re-creates a deleted stub next poll.
 
 ### Filing: the three reasons
 
@@ -210,8 +245,13 @@ leave something behind:
 2. **`trigger`** is `daemon` or `user`. It is what lets filing spare a second
    opinion you deliberately asked for.
 3. **On success** — `ready`, plus `summary`, `chapters`, `comments`, `verdict`,
-   `run.sessionId` (the Claude session, so chat turns resume it), `run.costUsd`.
-4. **On failure** — `failed`, with `run.error`.
+   `run.costUsd`, and `run.sessionId` — the Claude session chat turns resume,
+   recorded **only for a source-backed run** (`source ? review.sessionId : null`),
+   since there is no checkout for a `--no-source` turn to resume into.
+4. **On failure** — `failed`, with `run.error`. Only for failures *after* step 1:
+   the diff fetch, trust resolution and checkout all happen before the artifact
+   is first saved, so an error there leaves no `failed` row for its caller to
+   find.
 
 Written by other paths:
 
@@ -234,7 +274,9 @@ failures included, since there is no response left to hand them to.
 ## 7. Settings that change any of this
 
 `~/.cerber/config.json`, zod-validated, re-read **every poll** — cockpit
-toggles apply without a restart. Absent = defaults, all on.
+toggles apply without a restart. Absent = defaults, which is a working state,
+not an open one: polling and auto-review are on, `trust` is empty (every run
+read-only) and auto-send does nothing but log.
 
 | Key | Default | Effect |
 | --- | --- | --- |
@@ -251,25 +293,35 @@ CLI flags cap the config, never raise it: `--no-poll`, `--no-auto-review`,
 **Auto-send** is deliberately narrow (`src/core/autosend.ts`): only `ready`,
 only an `approve` verdict, only with **zero** standing blocker findings, only
 at or above `--auto-send-threshold` (default 90, clamped to 50–100), never a
-re-send. Without `--auto-send` the daemon still evaluates every finished draft
-in **shadow mode** and logs what it *would* have sent; the flag is what makes
-it actually send. Either way every decision — including the declines and why —
-appends to `autosend.ndjson`.
+re-send. Without `--auto-send` the daemon still evaluates in **shadow mode**
+and logs what it *would* have sent; the flag is what makes it actually send.
+Either way the decision — including the declines and why — appends to
+`autosend.ndjson`. It is evaluated per *run*, not per draft: `handleAutoSend`
+fires only where `reviewAll` actually produced a review, so a `ready` draft the
+freshness guard skipped is not re-judged or re-logged on later polls.
 
 ---
 
 ## 8. Quick answers
 
-**"Why is this PR not in my inbox?"** — In order: it's settled (`reviewed` /
-`skipped` — check the settled tab, and open requests), the PR is merged/closed
-(archived), the poll is off, or GitHub isn't requesting your review.
+**"Why is this PR not in my inbox?"** — In order: you already sent the review
+(the **sent** tab — `sent` is in `SETTLED` too), it's settled (`reviewed` /
+`skipped` — the **settled** tab, and check **open requests**), the PR is
+merged/closed (**archived**), the poll is off, or GitHub isn't requesting your
+review.
 
 **"Why did this PR come back?"** — The author pushed, and its status was
-`ready` or `awaiting`. `reviewed` and `skipped` never come back on their own.
+`awaiting`, `ready`, `failed` — or `sent`, which is re-drafted on a moved head
+like any other head-sensitive row. Only `reviewed` and `skipped` never come
+back on their own.
 
-**"Why won't it re-review?"** — Status is `reviewed`/`skipped`, or head SHA is
-unchanged and status is `ready`/`sent`. The re-review button forces past both;
-a sent review is never re-run.
+**"Why won't it re-review?"** — Both causes are the freshness guard in §4, so
+they only bind the callers that obey it (the poll, plain `cerber review`):
+status is `reviewed`/`skipped`, or the head SHA is unchanged on a `ready`/`sent`
+row. `cerber review --force` forces past both. The cockpit's re-review button
+forces too, but refuses a `sent` artifact outright — that record is not
+rewritten from the UI, though the poll will still re-draft it once the head
+moves.
 
 **"Why does it say reviewed when I never touched it?"** — The poll filed it;
 `filed.reason` says which of the three cases. The draft is untouched and still
