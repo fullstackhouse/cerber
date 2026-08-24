@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { announced, arrivals, notice } from "./notify";
-import { ReviewListItem } from "./types";
+import { announced, arrivals, daemonAnnouncesHere, notice } from "./notify";
+import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
   id: "acme/web#1",
@@ -88,5 +88,51 @@ describe("notice", () => {
   it("tags the same news identically, so two open tabs show one popup", () => {
     expect(notice([pr(1), pr(2)])!.tag).toBe(notice([pr(2), pr(1)])!.tag);
     expect(notice([pr(1)])!.tag).not.toBe(notice([pr(2)])!.tag);
+  });
+});
+
+describe("who announces an arrival when both could", () => {
+  const daemon = (over: Partial<Extract<DaemonStatus, { enabled: true }>> = {}): DaemonStatus => ({
+    enabled: true,
+    polling: false,
+    repos: [],
+    intervalMs: 300_000,
+    pollEnabled: true,
+    notify: true,
+    autoReview: true,
+    trustedRuns: false,
+    polls: 3,
+    errors: 0,
+    lastPollAt: null,
+    nextPollAt: null,
+    lastSummary: null,
+    awaiting: [],
+    lastPollError: null,
+    autoSend: "shadow",
+    autoSendThreshold: 85,
+    autoSent: 0,
+    autoSendCandidates: 0,
+    ...over,
+  });
+
+  it("stands down when serve is tapping this same machine", () => {
+    expect(daemonAnnouncesHere(daemon(), "127.0.0.1")).toBe(true);
+    expect(daemonAnnouncesHere(daemon(), "localhost")).toBe(true);
+  });
+
+  // The notification would land on the VPS, where nobody is looking — this
+  // browser is that setup's only channel.
+  it("keeps ringing for a cockpit served from somewhere else", () => {
+    expect(daemonAnnouncesHere(daemon(), "cerber.example.com")).toBe(false);
+    expect(daemonAnnouncesHere(daemon(), "192.168.1.20")).toBe(false);
+  });
+
+  it("keeps ringing when the machine's own notification is off", () => {
+    expect(daemonAnnouncesHere(daemon({ notify: false }), "127.0.0.1")).toBe(false);
+  });
+
+  it("keeps ringing when there is no daemon to defer to", () => {
+    expect(daemonAnnouncesHere(null, "127.0.0.1")).toBe(false);
+    expect(daemonAnnouncesHere({ enabled: false }, "127.0.0.1")).toBe(false);
   });
 });

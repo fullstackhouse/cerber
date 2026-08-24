@@ -6,9 +6,9 @@
 // has already been announced live in localStorage rather than in config.json.
 
 import { useEffect, useRef, useState } from "react";
-import { fetchReviews } from "./api";
+import { fetchDaemonStatus, fetchReviews } from "./api";
 import { walkable } from "./inbox";
-import { ReviewListItem } from "./types";
+import { DaemonStatus, ReviewListItem } from "./types";
 
 const SEEN = "cerber.notify.seen";
 const PREF = "cerber.notify";
@@ -86,6 +86,26 @@ export function notice(arrived: ReviewListItem[]): Notice | null {
   };
 }
 
+/** Hosts that mean the cockpit and the `serve` behind it are one machine. */
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+/**
+ * Whether the machine this page is on already gets tapped by the daemon, in
+ * which case this bell would be a second popup about one PR.
+ *
+ * The host test is what keeps a remote cockpit ringing. `cerber serve -H
+ * 0.0.0.0 --token` on a VPS notifies the VPS, where nobody is looking, so the
+ * browser's bell is that setup's only channel — and deferring to a notifier
+ * you cannot see is how a notification quietly stops existing.
+ */
+export function daemonAnnouncesHere(
+  daemon: DaemonStatus | null,
+  hostname: string = window.location.hostname,
+): boolean {
+  if (!daemon?.enabled || !daemon.notify) return false;
+  return LOOPBACK.has(hostname);
+}
+
 /**
  * What the bell says. `ask` is the default state of a fresh browser: cerber
  * wants to notify you, but only the browser can grant that, and only off a
@@ -136,11 +156,16 @@ function show(n: Notice) {
  * on its own rather than riding the queue screen's poll: that one stops the
  * moment you open a review, and a notification you only get on one screen is a
  * default that half-works.
+ *
+ * Returns whether the daemon is announcing arrivals on this machine already —
+ * the one case where this hook deliberately watches in silence, and what the
+ * bell in the top bar says instead of claiming a job it isn't doing.
  */
-export function useArrivalNotifications() {
+export function useArrivalNotifications(): boolean {
   // Null until the first response lands. A browser that has never seen this
   // queue must not announce the whole backlog, so the first poll only records.
   const seen = useRef<string[] | null>(null);
+  const [daemonAnnounces, setDaemonAnnounces] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -155,9 +180,11 @@ export function useArrivalNotifications() {
     }
 
     const tick = () =>
-      fetchReviews()
-        .then((list) => {
+      Promise.all([fetchReviews(), fetchDaemonStatus().catch(() => null)])
+        .then(([list, daemon]) => {
           if (!alive) return;
+          const machineHasIt = daemonAnnouncesHere(daemon);
+          setDaemonAnnounces(machineHasIt);
           const before = seen.current;
           // Recorded even when we stay quiet, so turning the bell on later
           // announces what arrives next rather than everything already here.
@@ -165,6 +192,9 @@ export function useArrivalNotifications() {
           write(SEEN, JSON.stringify(seen.current));
           if (!before) return;
           if (notifyState() !== "on") return;
+          // The daemon taps this same machine off the same arrival: one popup
+          // per PR, and its one is the one that works with no tab open.
+          if (machineHasIt) return;
           // Looking straight at the queue? The row appearing is the notice.
           if (document.visibilityState === "visible" && document.hasFocus()) return;
           const n = notice(arrivals(list, before));
@@ -181,6 +211,8 @@ export function useArrivalNotifications() {
       clearInterval(timer);
     };
   }, []);
+
+  return daemonAnnounces;
 }
 
 /** The bell's state, kept in sync with the browser's own permission prompt. */

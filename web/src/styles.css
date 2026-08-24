@@ -376,6 +376,13 @@ button {
   cursor: help;
 }
 
+/* Standing down because the machine itself is announcing arrivals: on, and not
+   a switch — hence the accent without the pointer. */
+.bell-daemon {
+  color: var(--accent);
+  cursor: help;
+}
+
 /* ---- daemon bar ---- */
 
 .daemon-bar {
