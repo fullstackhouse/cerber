@@ -46,15 +46,6 @@ export function refreshArtifact(artifact: Artifact, pr: PrInfo, diff: string): R
   };
 }
 
-/**
- * Comments a human put work into: their own, and AI ones they rewrote.
- * A re-review regenerates everything the AI said, but must not silently bin
- * these — see `mergeRunResult` and the seeding step in `reviewPr`.
- */
-export function humanComments(artifact: Artifact): Artifact["comments"] {
-  return artifact.comments.filter((c) => c.origin === "user" || c.editedByUser);
-}
-
 
 /**
  * Is this artifact's status the user's to keep, rather than the run's to set?
@@ -71,37 +62,33 @@ export function userOwnsStatus(a: Artifact): boolean {
 /**
  * Fold a finished review run onto whatever the artifact says now.
  *
- * A run takes minutes and the cockpit stays live throughout: the user can add,
- * edit or delete a comment, mark the review, or send it while waiting. Saving
- * the run's result wholesale silently undid all of that — the same mistake
+ * A run takes minutes and the cockpit stays live throughout, so by the time one
+ * lands the artifact may have moved under it. Saving the result wholesale
+ * silently undid whatever had happened in between — the same mistake
  * `mergeConcurrentEdits` exists to stop a chat turn making.
  *
  * `fresh` is what the run produced; `current` is what is on disk now. The run
- * owns everything it regenerated — summary, chapters, verdict, AI comments —
- * and the user owns the rest:
+ * owns the draft — summary, chapters, verdict, comments — and that includes
+ * replacing comments the user wrote: a re-review starts fresh by design, and
+ * `docs/lifecycle.md` says so plainly rather than leaving anyone to count on
+ * work surviving one. What it does *not* own are the decisions:
  *
- *   - **their comments** come from `current`, not from the artifact the run
- *     read at the start, so a mid-run edit survives and a mid-run delete stays
- *     deleted. They need no re-anchoring: the run re-anchored them onto its own
- *     diff before it began (see `reviewPr`), which is the diff the cockpit was
- *     showing while they were written.
  *   - **a send** stands, and takes the status with it. Without this a run
  *     finishing after a send wrote `sent: null` back over the record, and the
  *     "already sent" guard would then wave a second submission through.
  *   - **a settle** stands too: `reviewed` and `skipped` are decisions about the
  *     PR, not facts about the code, so a run completing does not reopen one.
- *     The draft still lands underneath, which is what the row shows if the
- *     user changes their mind.
+ *     The fresh draft still lands underneath, which is what the row shows if
+ *     the user changes their mind.
+ *   - **the conversation** is the user's writing, snapshot and all.
  */
 export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
   return {
     ...fresh,
-    comments: [...fresh.comments, ...humanComments(current)],
     status: userOwnsStatus(current) ? current.status : fresh.status,
     sent: current.sent,
     calibration: current.calibration,
     filed: current.filed,
-    // The conversation and its snapshot belong to the user either way.
     chat: current.chat,
     preChat: current.preChat,
     pendingChat: current.pendingChat,

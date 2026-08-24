@@ -143,23 +143,26 @@ any of them — it names the files each rule lives in.
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
-- Don't let a re-review discard human work, on any path it can take. The user's
-  comments are re-anchored onto the new diff *before* the run starts, so they
-  are never off disk while it is in flight and a failure cannot take them; the
-  result is then folded onto whatever the artifact says now (`mergeRunResult`)
-  rather than written over it, so a comment edited mid-run keeps the user's
-  version and one they deleted stays deleted. Both halves matter — carrying
-  only on success loses everything when a run errors. Nor is the decision to be
-  done with a PR discardable: `reviewed` and `skipped` survive a new push
+- A re-review replaces the whole draft, comments included — the user's own
+  along with the AI's. That is a decision, not a gap to fix: half-keeping them
+  (carrying on success, losing on failure) costs the code and still loses the
+  work, so cerber does neither and `docs/lifecycle.md` tells the reader plainly
+  instead. Don't add carry-over back without changing that page too.
+- Don't let a re-review discard a *decision*, on any path it can take. Its
+  result is folded onto whatever the artifact says now (`mergeRunResult`)
+  rather than written over it, so a send stands and the chat is kept.
+  `reviewed` and `skipped` survive a new push
   (`SETTLED_BY_YOU` in `review.ts`), because a row dragged back into the inbox
   every time the author pushes is cerber overruling you, and a settle or a send
   that lands mid-run outlives the run. Only `ready` and `sent` track the head —
   against `run.reviewedSha`, the commit the AI actually read, never `pr.headSha`,
   which a refresh moves forward whenever a draft is merely opened. The way back
-  in is the re-review button, which forces. A chat turn is the second way to
-  lose human work — it refuses to rewrite the user's own comments, and its
-  result is folded onto the current artifact (`mergeConcurrentEdits`) rather
-  than overwriting whatever they edited while the turn ran
+  in is the re-review button, which forces. A chat turn is held to a stricter
+  line than a re-review — it refuses to rewrite the user's own comments, and
+  its result is folded onto the current artifact (`mergeConcurrentEdits`)
+  rather than overwriting whatever they edited while the turn ran. The
+  difference is deliberate: a re-review is asking for a new draft, a chat turn
+  is asking for an edit to this one
 - Don't add an accept step to a revision the user asked for. The chat agent
   writes the draft directly; Send is where a human vouches for what reaches
   GitHub, and one pre-chat snapshot is the way back. A per-turn undo is

@@ -172,21 +172,18 @@ push convinced the guard the draft was current and the poll never re-reviewed
 that PR again. An artifact written before `reviewedSha` existed has none, and
 falls back to the old comparison.
 
-**A re-review does not throw away your work** — whether it succeeds, fails, or
-finishes after you have changed something. Two halves make that true:
+**A re-review replaces the whole draft, including comments you wrote.** They
+are dropped when the run starts and they do not come back — not on success, not
+if the run fails. This is a decision rather than an oversight, and it is stated
+here rather than left to be discovered: if you have written comments you want
+to keep, send the review or copy them out before pressing re-review.
 
-- **Your comments are carried onto the new diff before the run starts**, not
-  after it succeeds (`reanchorComments` in `reviewPr`). They are on disk, and
-  correctly anchored to the diff the cockpit is showing, for every instant the
-  run is in flight — so a failure has nothing to take with it. AI comments are
-  not carried: the run is about to regenerate them.
-- **The result is folded onto what the artifact says now**, not written over it
-  (`mergeRunResult`, `src/core/refresh.ts`). The run owns what it regenerated —
-  summary, chapters, verdict, its own comments — and you own the rest: a
-  comment you edited mid-run keeps your version, one you added is kept, one you
-  deleted stays deleted, and a send or a settle that landed while the run was
-  going stands, with the fresh draft underneath it. This is the same discipline
-  `mergeConcurrentEdits` applies to a chat turn, and for the same reason.
+What a re-review does *not* touch are the decisions you have made
+(`mergeRunResult`, `src/core/refresh.ts`). The run's result is folded onto
+whatever the artifact says now rather than written over it, so a send stands, a
+`reviewed` or `skipped` you set while the run was going stands — with the fresh
+draft underneath it, which is what the row shows if you change your mind — and
+the chat transcript is kept. Only the draft itself is the run's to replace.
 
 ### Re-review vs refresh — different things
 
@@ -402,8 +399,8 @@ moves.
 `filed.reason` says which of the three cases. The draft is untouched and still
 sendable.
 
-**"Where did my edited comment go after a re-review?"** — Still there,
-re-anchored, whichever way the run went: comments you wrote or edited are
-carried across before it starts and folded back on top of its result, so a
-failure keeps them and a mid-run edit wins over the version the run read. Only
-untouched AI comments are regenerated.
+**"Where did my edited comment go after a re-review?"** — Gone, deliberately: a
+re-review regenerates the draft and your comments go with it, whether the run
+succeeded or failed. Send or copy anything you want to keep first. What does
+survive is the chat, and any decision you had already made — a send, a
+`reviewed`, a `skipped`.

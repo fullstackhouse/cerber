@@ -116,86 +116,36 @@ beforeEach(() => {
   diff.mockResolvedValue(DIFF);
 });
 
-describe("what a re-review does to the comments you wrote", () => {
-  it("keeps them when the run fails", async () => {
-    // They used to be dropped to `comments: []` before the run and put back
-    // only on the success path, so any failure — a model error, a lost
-    // connection — took the user's own writing with it, permanently.
-    await saveArtifact(ready([comment()]));
-    claudeThat(async () => {}, new Error("model unavailable"));
-
-    await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
-
-    const after = (await loadArtifact(ID))!;
-    expect(after.status).toBe("failed");
-    expect(after.comments.map((c) => c.body)).toEqual(["I wrote this myself"]);
-  });
-
-  it("keeps them on disk for the whole run, not just at the end", async () => {
-    // The guarantee has to hold at every instant, because a crash can land at
-    // any of them. Reading the artifact mid-run is how we check that.
-    await saveArtifact(ready([comment()]));
-    let midRun: Artifact | null = null;
-    claudeThat(async () => {
-      midRun = await loadArtifact(ID);
-    });
-
-    await reviewPr(REF, { withSource: false });
-    expect(midRun!.status).toBe("running");
-    expect(midRun!.comments.map((c) => c.body)).toEqual(["I wrote this myself"]);
-  });
-
-  it("takes the version you edited while it ran, not the one it read", async () => {
-    await saveArtifact(ready([comment()]));
-    claudeThat(async () => {
-      await updateArtifactByKey(KEY, (a) => ({
-        ...a,
-        comments: a.comments.map((c) => ({ ...c, body: "edited while it ran" })),
-      }));
-    });
-
-    const { artifact } = await reviewPr(REF, { withSource: false });
-    expect(artifact.comments.map((c) => c.body).sort()).toEqual([
-      "edited while it ran",
-      "the AI's finding",
-    ]);
-  });
-
-  it("keeps one you added while it ran", async () => {
-    await saveArtifact(ready([]));
-    claudeThat(async () => {
-      await updateArtifactByKey(KEY, (a) => ({
-        ...a,
-        comments: [...a.comments, comment({ id: "added-mid-run", body: "added while it ran" })],
-      }));
-    });
-
-    const { artifact } = await reviewPr(REF, { withSource: false });
-    expect(artifact.comments.map((c) => c.body).sort()).toEqual([
-      "added while it ran",
-      "the AI's finding",
-    ]);
-  });
-
-  it("leaves one you deleted while it ran deleted", async () => {
-    // The mirror of the case above, and the reason the merge reads the disk
-    // rather than replaying what the run started from: resurrecting a comment
-    // the user deleted is the same class of mistake as losing one they wrote.
-    await saveArtifact(ready([comment()]));
-    claudeThat(async () => {
-      await updateArtifactByKey(KEY, (a) => ({ ...a, comments: [] }));
-    });
+describe("what a re-review does to the previous draft", () => {
+  it("replaces the comments wholesale, including ones you wrote", async () => {
+    // A decided behaviour, not an oversight: a re-review starts fresh. Pinned
+    // so that changing it back is a deliberate act with a failing test, and so
+    // `docs/lifecycle.md` cannot quietly drift from what the code does.
+    await saveArtifact(ready([comment({ id: "mine", body: "I wrote this myself" })]));
+    claudeThat(async () => {});
 
     const { artifact } = await reviewPr(REF, { withSource: false });
     expect(artifact.comments.map((c) => c.body)).toEqual(["the AI's finding"]);
   });
 
-  it("regenerates the AI's own comments rather than accumulating them", async () => {
+  it("does not accumulate the AI's own comments either", async () => {
     await saveArtifact(ready([comment({ id: "old-ai", origin: "ai", body: "a stale AI finding" })]));
     claudeThat(async () => {});
 
     const { artifact } = await reviewPr(REF, { withSource: false });
     expect(artifact.comments.map((c) => c.body)).toEqual(["the AI's finding"]);
+  });
+
+  it("leaves nothing behind when it fails", async () => {
+    // The failure path holds the same line as the success path: no half-kept
+    // draft, so what a reader is told about re-review is true either way.
+    await saveArtifact(ready([comment({ id: "mine", body: "I wrote this myself" })]));
+    claudeThat(async () => {}, new Error("model unavailable"));
+
+    await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("failed");
+    expect(after.comments).toEqual([]);
   });
 });
 

@@ -10,8 +10,7 @@ import {
 } from "../core/artifact.js";
 import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
-import { reanchorComments } from "../core/anchor.js";
-import { humanComments, mergeRunResult, userOwnsStatus } from "../core/refresh.js";
+import { mergeRunResult, userOwnsStatus } from "../core/refresh.js";
 import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
@@ -178,23 +177,13 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     }
   }
 
-  // The human's own comments are carried onto the new diff *before* the run
-  // starts, not after it succeeds. They used to be dropped here and put back
-  // only on the success path, which meant a run that failed took them with it
-  // — and a run that succeeded restored the versions it had read minutes
-  // earlier, over the top of anything edited since. Re-anchoring them now also
-  // makes them right on screen while the run is in flight, since the cockpit
-  // is already showing the new diff.
-  const carried = existing
-    ? reanchorComments(humanComments(existing), existing.diff, diff)
-    : { comments: [], drifted: 0 };
-  if (carried.comments.length > 0) {
-    log(
-      `Carried over ${carried.comments.length} comment(s) you wrote or edited` +
-        (carried.drifted > 0
-          ? `; ${carried.drifted} no longer match the diff and will post in the body.`
-          : "."),
-    );
+  // A re-review regenerates the draft, comments and all — deliberately, and
+  // including any the user wrote. Carrying them across is a feature this tool
+  // has decided not to have, so nothing here tries to half-keep them: they go
+  // when the run starts, whichever way it ends. `docs/lifecycle.md` says so
+  // where a reader would otherwise assume otherwise.
+  if (existing && existing.comments.length > 0) {
+    log(`Replacing the previous draft's ${existing.comments.length} comment(s) — a re-review starts fresh.`);
   }
 
   let artifact: Artifact = {
@@ -207,7 +196,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     diff,
     summary: "",
     chapters: [],
-    comments: carried.comments,
+    comments: [],
     verdict: null,
     run: {
       model: opts.model ?? null,
