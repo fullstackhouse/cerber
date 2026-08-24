@@ -6,11 +6,12 @@ import {
   PrInfo,
   SCHEMA_VERSION,
   artifactId,
+  artifactKey,
 } from "../core/artifact.js";
 import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
-import { carryOverComments } from "../core/refresh.js";
-import { loadArtifact, saveArtifact } from "../core/state.js";
+import { mergeRunResult, userOwnsStatus } from "../core/refresh.js";
+import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
 import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
@@ -136,12 +137,15 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       log(`You marked this ${existing.status} — leaving it alone. Use --force to re-review.`);
       return { artifact: existing, skipped: true };
     }
-    if (
-      HEAD_SENSITIVE.has(existing.status) &&
-      existing.pr.headSha !== "" &&
-      existing.pr.headSha === pr.headSha
-    ) {
-      log(`Up to date (head ${pr.headSha.slice(0, 7)}, status ${existing.status}) — skipping. Use --force to re-review.`);
+    // The sha the AI *read*, not the one the artifact happens to mention.
+    // `pr.headSha` is moved forward by the refresh that runs whenever a review
+    // is opened, so comparing against it meant that merely looking at a draft
+    // after a push convinced this guard the draft was current, and the poll
+    // never re-reviewed it again. Older artifacts have no `reviewedSha` and
+    // fall back to the old comparison.
+    const reviewedSha = existing.run?.reviewedSha ?? existing.pr.headSha;
+    if (HEAD_SENSITIVE.has(existing.status) && reviewedSha !== "" && reviewedSha === pr.headSha) {
+      log(`Up to date (reviewed at ${reviewedSha.slice(0, 7)}, status ${existing.status}) — skipping. Use --force to re-review.`);
       return { artifact: existing, skipped: true };
     }
   }
@@ -173,6 +177,15 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     }
   }
 
+  // A re-review regenerates the draft, comments and all — deliberately, and
+  // including any the user wrote. Carrying them across is a feature this tool
+  // has decided not to have, so nothing here tries to half-keep them: they go
+  // when the run starts, whichever way it ends. `docs/lifecycle.md` says so
+  // where a reader would otherwise assume otherwise.
+  if (existing && existing.comments.length > 0) {
+    log(`Replacing the previous draft's ${existing.comments.length} comment(s) — a re-review starts fresh.`);
+  }
+
   let artifact: Artifact = {
     schemaVersion: SCHEMA_VERSION,
     id: artifactId(pr),
@@ -195,6 +208,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       trusted: trusted && source !== null,
       sessionId: null,
       trigger: opts.trigger ?? "user",
+      reviewedSha: null,
     },
     sent: null,
     refresh: null,
@@ -260,37 +274,36 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
         // whose working directory was empty has nothing a chat turn could read.
         sessionId: source ? review.sessionId : null,
         trigger: artifact.run!.trigger,
+        // What this run actually read — the thing the freshness guard needs
+        // and `pr.headSha` cannot say, because a refresh moves that forward
+        // without anybody re-reading the code.
+        reviewedSha: pr.headSha,
       },
     };
-
-    // A re-review regenerates the AI's comments, but the human's own comments
-    // and their rewrites of AI ones are work the run must not throw away.
-    if (existing) {
-      const { comments, carried, drifted } = carryOverComments(existing, artifact);
-      if (carried > 0) {
-        artifact = { ...artifact, comments };
-        log(
-          `Carried over ${carried} comment(s) you wrote or edited` +
-            (drifted > 0 ? `; ${drifted} no longer match the diff and will post in the body.` : "."),
-        );
-      }
-    }
   } catch (err: unknown) {
-    artifact = {
-      ...artifact,
-      status: "failed",
-      updatedAt: now(),
-      run: {
-        ...artifact.run!,
-        finishedAt: now(),
-        error: err instanceof Error ? err.message : String(err),
-      },
+    const run = {
+      ...artifact.run!,
+      finishedAt: now(),
+      error: err instanceof Error ? err.message : String(err),
     };
-    await saveArtifact(artifact);
+    // Onto what is on disk, not over it: the artifact this run built holds none
+    // of the comments or marks that may have landed while it ran, and a failure
+    // is no reason to lose them — nor to reopen a decision the user made.
+    const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) => ({
+      ...a,
+      status: userOwnsStatus(a) ? a.status : ("failed" as const),
+      run,
+    }));
+    artifact = saved ?? { ...artifact, status: "failed", run, updatedAt: now() };
+    if (!saved) await saveArtifact(artifact);
     throw err;
   }
 
-  await saveArtifact(artifact);
+  const merged = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
+    mergeRunResult(artifact, current),
+  );
+  if (merged) artifact = merged;
+  else await saveArtifact(artifact);
   return { artifact, skipped: false };
 }
 

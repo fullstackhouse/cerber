@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Artifact, Comment } from "./artifact.js";
-import { carryOverComments, refreshArtifact } from "./refresh.js";
+import { mergeRunResult, refreshArtifact } from "./refresh.js";
 
 const DIFF_AT_HEAD1 = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -128,45 +128,50 @@ describe("refreshArtifact", () => {
   });
 });
 
-describe("carryOverComments", () => {
-  const previous = makeArtifact({
-    comments: [
-      comment({ id: "ai-untouched", origin: "ai" }),
-      comment({ id: "ai-edited", origin: "ai", editedByUser: true, body: "my rewrite" }),
-      comment({ id: "mine", origin: "user", body: "my own note" }),
-      comment({ id: "mine-dropped", origin: "user", status: "dropped" }),
-    ],
-  });
+describe("mergeRunResult — folding a finished run onto what is on disk", () => {
+  // The run owns the draft outright, comments included; what it may not touch
+  // are the decisions the user made while it worked.
   const fresh = makeArtifact({
     diff: DIFF_AT_HEAD2,
+    summary: "the new draft",
     comments: [comment({ id: "ai-new", body: "fresh ai comment" })],
   });
 
-  it("keeps the human's comments and drops the regenerated AI ones", () => {
-    const { comments, carried } = carryOverComments(previous, fresh);
-    expect(carried).toBe(3);
-    expect(comments.map((c) => c.id)).toEqual(["ai-new", "ai-edited", "mine", "mine-dropped"]);
-    expect(comments.find((c) => c.id === "ai-edited")!.body).toBe("my rewrite");
-    expect(comments.find((c) => c.id === "mine-dropped")!.status).toBe("dropped");
-  });
-
-  it("re-anchors what it carries to the new diff", () => {
-    const { comments } = carryOverComments(previous, fresh);
-    expect(comments.find((c) => c.id === "mine")!.line).toBe(12);
-  });
-
-  it("leaves a review with no human input alone", () => {
-    const untouched = makeArtifact({ comments: [comment({ id: "ai-1" })] });
-    const { comments, carried } = carryOverComments(untouched, fresh);
-    expect(carried).toBe(0);
-    expect(comments).toBe(fresh.comments);
-  });
-
-  it("carries a comment's severity across a re-review", () => {
-    const graded = makeArtifact({
-      comments: [comment({ id: "mine", origin: "user", severity: "blocker" })],
+  it("replaces the previous draft's comments, whoever wrote them", () => {
+    const current = makeArtifact({
+      comments: [
+        comment({ id: "ai-untouched", origin: "ai" }),
+        comment({ id: "ai-edited", origin: "ai", editedByUser: true, body: "my rewrite" }),
+        comment({ id: "mine", origin: "user", body: "my own note" }),
+      ],
     });
-    const { comments } = carryOverComments(graded, fresh);
-    expect(comments.find((c) => c.id === "mine")!.severity).toBe("blocker");
+    const merged = mergeRunResult(fresh, current);
+    expect(merged.comments.map((c) => c.id)).toEqual(["ai-new"]);
+    expect(merged.summary).toBe("the new draft");
+  });
+
+  it("does not undo a send that landed while the run worked", () => {
+    const sent = { at: "2026-08-21T10:02:00.000Z", event: "APPROVE" as const, url: "u", auto: false };
+    const merged = mergeRunResult(fresh, makeArtifact({ status: "sent", sent }));
+    expect(merged.sent).toEqual(sent);
+    expect(merged.status).toBe("sent");
+    expect(merged.summary).toBe("the new draft");
+  });
+
+  it("does not reopen a decision you made while the run worked", () => {
+    for (const status of ["reviewed", "skipped"] as const) {
+      expect(mergeRunResult(fresh, makeArtifact({ status })).status).toBe(status);
+    }
+  });
+
+  it("keeps the conversation, which is the user's writing", () => {
+    const chat = [
+      { id: "t1", role: "user" as const, at: "2026-08-21T10:01:00.000Z", body: "why?", refs: [], revisions: [], refused: [], costUsd: null },
+    ];
+    expect(mergeRunResult(fresh, makeArtifact({ chat })).chat).toEqual(chat);
+  });
+
+  it("otherwise takes the run's own status", () => {
+    expect(mergeRunResult(fresh, makeArtifact({ status: "running" })).status).toBe(fresh.status);
   });
 });

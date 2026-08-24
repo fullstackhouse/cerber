@@ -13,9 +13,11 @@ import {
   listArtifacts,
   loadArtifact,
   readAutoSendLog,
+  reconcileRunning,
   updateArtifactByKey,
 } from "../core/state.js";
 import { pool, reviewPr } from "../runner/review.js";
+import { isReviewRunning } from "../runner/inflight.js";
 import { startDaemon } from "../server/daemon.js";
 import { startServer } from "../server/index.js";
 
@@ -172,6 +174,17 @@ program
     }
     if (artifact.sent) {
       console.error(`Already sent at ${artifact.sent.at}${artifact.sent.url ? ` — ${artifact.sent.url}` : ""}`);
+      process.exit(1);
+    }
+    // The persisted status is the only signal here: a run started by `serve` or
+    // by another terminal is invisible to this process. Sending mid-run vouches
+    // for a draft that is being replaced as you read it.
+    if (artifact.status === "running") {
+      console.error(
+        `A review of ${id} is running — wait for it to finish, then send. ` +
+          `If nothing is actually running, the last run died mid-flight: re-run it, or restart \`cerber serve\`, ` +
+          `either of which clears the stale status.`,
+      );
       process.exit(1);
     }
 
@@ -458,6 +471,13 @@ program
             `or --no-auto-review to only review on click.`,
         );
       }
+
+      // Before anything polls. Reconciliation is what makes "nothing is running"
+      // true after an unclean shutdown, and the daemon's first tick fires the
+      // moment it is constructed — so starting it first put both of them on the
+      // same leftover artifact with no ordering between them.
+      const cleared = await reconcileRunning({ inUse: isReviewRunning });
+      if (cleared > 0) console.log(`Cleared ${cleared} interrupted run(s) left by a previous process.`);
 
       const daemon = opts.poll
         ? startDaemon({

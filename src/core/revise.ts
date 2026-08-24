@@ -8,7 +8,7 @@ import { Artifact, Refusal, Revision, ReviewSnapshot } from "./artifact.js";
  * asking again with an "accept" button would be friction wearing safety's coat.
  * What it must NOT do is quietly overwrite the user's own words: a comment the
  * user wrote or rewrote is the one thing in the artifact the AI did not author,
- * and `carryOverComments` already exists so a re-review never discards it. A
+ * and a re-review already carries it across rather than discarding it. A
  * chat turn is the second way to lose that work, and this is where it doesn't.
  *
  * Pure: no I/O, no clock beyond what the caller passes in.

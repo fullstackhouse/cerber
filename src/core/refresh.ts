@@ -46,26 +46,51 @@ export function refreshArtifact(artifact: Artifact, pr: PrInfo, diff: string): R
   };
 }
 
+
 /**
- * Comments a human put work into: their own, and AI ones they rewrote.
- * A re-review regenerates everything the AI said, but must not silently bin
- * these — see carryOverComments.
+ * Is this artifact's status the user's to keep, rather than the run's to set?
+ *
+ * A send or a settle is a decision about the PR; a run finishing is a fact
+ * about the code. Whichever way the run went — a draft or an error — it does
+ * not get to reopen one, which is the same rule `SETTLED_BY_YOU` applies to
+ * starting a run in the first place.
  */
-export function humanComments(artifact: Artifact): Artifact["comments"] {
-  return artifact.comments.filter((c) => c.origin === "user" || c.editedByUser);
+export function userOwnsStatus(a: Artifact): boolean {
+  return a.sent !== null || a.status === "reviewed" || a.status === "skipped";
 }
 
 /**
- * Carry a previous review's human comments into a fresh one, re-anchored to
- * the new diff. AI comments are dropped: the new run just regenerated them.
+ * Fold a finished review run onto whatever the artifact says now.
+ *
+ * A run takes minutes and the cockpit stays live throughout, so by the time one
+ * lands the artifact may have moved under it. Saving the result wholesale
+ * silently undid whatever had happened in between — the same mistake
+ * `mergeConcurrentEdits` exists to stop a chat turn making.
+ *
+ * `fresh` is what the run produced; `current` is what is on disk now. The run
+ * owns the draft — summary, chapters, verdict, comments — and that includes
+ * replacing comments the user wrote: a re-review starts fresh by design, and
+ * `docs/lifecycle.md` says so plainly rather than leaving anyone to count on
+ * work surviving one. What it does *not* own are the decisions:
+ *
+ *   - **a send** stands, and takes the status with it. Without this a run
+ *     finishing after a send wrote `sent: null` back over the record, and the
+ *     "already sent" guard would then wave a second submission through.
+ *   - **a settle** stands too: `reviewed` and `skipped` are decisions about the
+ *     PR, not facts about the code, so a run completing does not reopen one.
+ *     The fresh draft still lands underneath, which is what the row shows if
+ *     the user changes their mind.
+ *   - **the conversation** is the user's writing, snapshot and all.
  */
-export function carryOverComments(
-  previous: Artifact,
-  fresh: Artifact,
-): { comments: Artifact["comments"]; carried: number; drifted: number } {
-  const human = humanComments(previous);
-  if (human.length === 0) return { comments: fresh.comments, carried: 0, drifted: 0 };
-
-  const { comments, drifted } = reanchorComments(human, previous.diff, fresh.diff);
-  return { comments: [...fresh.comments, ...comments], carried: comments.length, drifted };
+export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
+  return {
+    ...fresh,
+    status: userOwnsStatus(current) ? current.status : fresh.status,
+    sent: current.sent,
+    calibration: current.calibration,
+    filed: current.filed,
+    chat: current.chat,
+    preChat: current.preChat,
+    pendingChat: current.pendingChat,
+  };
 }

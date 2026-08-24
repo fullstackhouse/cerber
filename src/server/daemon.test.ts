@@ -240,6 +240,7 @@ describe("stubArtifact", () => {
           trusted: false,
           sessionId: null,
           trigger: null,
+          reviewedSha: null,
         },
       }),
     ).toBe(false);
@@ -363,6 +364,7 @@ describe("draft PRs in the inbox", () => {
         trusted: false,
         sessionId: null,
         trigger: null,
+        reviewedSha: null,
       },
     });
 
@@ -419,6 +421,7 @@ describe("a draft you already answered on GitHub", () => {
     trusted: true,
     sessionId: null,
     trigger: "daemon" as const,
+    reviewedSha: null,
   };
 
   const YOUR_REVIEW = {
@@ -655,6 +658,7 @@ describe("filedByYourAct", () => {
       trusted: false,
       sessionId: null,
       trigger: "user" as const,
+      reviewedSha: null,
     };
     expect(filedByYourAct({ ...artifact, run }, sameSecond.at)).toBe(false);
     // And the same run started a second *before* it still files: the guard is
@@ -686,6 +690,7 @@ describe("filedByWithdrawnRequest", () => {
     trusted: false,
     sessionId: null,
     trigger: "daemon" as const,
+    reviewedSha: null,
   };
 
   it("only files what the poll wrote on its own", () => {

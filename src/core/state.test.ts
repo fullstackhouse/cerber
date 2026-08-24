@@ -69,6 +69,7 @@ describe("reconcileRunning", () => {
           trusted: false,
           sessionId: null,
           trigger: null,
+          reviewedSha: null,
         },
       }),
     );
@@ -89,6 +90,35 @@ describe("reconcileRunning", () => {
     expect(after?.status).toBe("ready");
     expect(after?.pendingChat?.message).toBe("why?");
     expect(after?.pendingChat?.error).toMatch(/interrupted/);
+  });
+
+  it("leaves a run this process actually owns alone", async () => {
+    // `serve` reconciles before it starts anything that polls, but ordering is
+    // a promise about wiring and this is the guard that holds regardless: a
+    // reconciliation racing a daemon's first tick must not stamp "interrupted"
+    // over a review that has just legitimately begun.
+    await saveArtifact(
+      artifact({
+        status: "running",
+        run: {
+          model: null,
+          startedAt: "t",
+          finishedAt: null,
+          costUsd: null,
+          error: null,
+          withSource: true,
+          trusted: false,
+          sessionId: null,
+          trigger: "daemon",
+          reviewedSha: null,
+        },
+      }),
+    );
+
+    expect(await reconcileRunning({ inUse: (id) => id === "acme/widgets#42" })).toBe(0);
+    const after = await loadArtifact("acme/widgets#42");
+    expect(after?.status).toBe("running");
+    expect(after?.run?.error).toBeNull();
   });
 
   it("leaves a turn that already failed, and everything else, alone", async () => {

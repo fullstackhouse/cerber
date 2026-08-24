@@ -27,7 +27,6 @@ import {
   listArtifacts,
   loadArtifact,
   loadArtifactByKey,
-  reconcileRunning,
   saveArtifact,
   updateArtifactByKey,
 } from "../core/state.js";
@@ -39,6 +38,22 @@ import { progressWriter } from "./progress.js";
 import { ChatTurnSchema } from "../core/artifact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The statuses `PATCH /api/reviews/:key` will set: the two that are the user's
+ * own decision about a PR. Everything else is a fact some other path owns.
+ */
+const SETTLEABLE = ["reviewed", "skipped"];
+
+/**
+ * Is an AI run rewriting this draft right now?
+ *
+ * Two questions, because neither alone is enough: `isReviewRunning` is an
+ * in-memory claim and cannot see a `cerber review` going in another terminal,
+ * while the persisted status cannot see a run this process started moments ago
+ * that has not written yet.
+ */
+const inFlight = (a: Artifact) => a.status === "running" || isReviewRunning(a.id);
 
 export interface ServeOptions {
   port: number;
@@ -295,6 +310,7 @@ export async function buildApp(
         trusted: false,
         sessionId: null,
         trigger: "user",
+        reviewedSha: null,
       },
       sent: null,
       refresh: null,
@@ -334,6 +350,17 @@ export async function buildApp(
 
   app.patch("/api/reviews/:key", async (c) => {
     const body = await c.req.json();
+    // Only the two statuses that are the user's own decision. The schema
+    // permits all seven, and taking them all meant this endpoint would happily
+    // write `status: "sent"` with no `sent` record and nothing submitted —
+    // a row that claims a review reached GitHub, which no honest path produces.
+    // `running`/`ready`/`failed` belong to the runner, `sent` to the send path.
+    if (body.status !== undefined && !SETTLEABLE.includes(body.status)) {
+      return c.json(
+        { error: `status must be one of ${SETTLEABLE.join(", ")} — got ${body.status}` },
+        400,
+      );
+    }
     const updated = await updateArtifactByKey(c.req.param("key"), (a) => {
       const next = { ...a };
       if (body.status !== undefined) {
@@ -483,6 +510,7 @@ export async function buildApp(
         trusted: false,
         sessionId: null,
         trigger: "user",
+        reviewedSha: null,
       },
     }));
 
@@ -659,6 +687,13 @@ export async function buildApp(
     if (artifact.sent) {
       return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
     }
+    // Not while a run is rewriting this draft. Vouching for a review that is
+    // being replaced under you is reason enough on its own; on top of that the
+    // run used to save `sent: null` back over the record when it landed, so the
+    // guard above would wave a *second* submission through afterwards.
+    if (inFlight(artifact)) {
+      return c.json({ error: "a review of this PR is running — wait for it to finish" }, 409);
+    }
 
     const payload = buildReviewPayload(artifact, event as ReviewEvent);
     try {
@@ -708,13 +743,13 @@ export async function buildApp(
   return app;
 }
 
+/**
+ * Serve the cockpit. `reconcileRunning` is deliberately *not* called here: the
+ * caller must have done it before starting the daemon, because the daemon polls
+ * as soon as it is constructed. Doing it here as well would have marked that
+ * poll's own fresh run as an interrupted leftover.
+ */
 export async function startServer(opts: ServeOptions): Promise<void> {
-  const cleared = await reconcileRunning();
-  if (cleared > 0) {
-    console.log(
-      `Cleared ${cleared} AI run(s) left in flight by a previous process — start them again from the cockpit.`,
-    );
-  }
   const app = await buildApp(opts);
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
     const tokenHint = opts.token ? `/?token=${opts.token}` : "";
