@@ -71,12 +71,16 @@ archived PR GitHub is asking about (`isArchived` / `hiddenAwaiting`,
 Every *review* run goes through `running`; nothing reaches `ready` or `failed`
 without it — so the machine reads most easily as three questions. (A chat turn
 is the exception: it is an AI run too, but it leaves the status alone and lives
-on `pendingChat` instead, because the review it is about is already finished.)
+on `pendingChat` instead. Nothing restricts it to a finished draft either —
+`/chat` refuses only a sent artifact and one already busy, so an `awaiting` or
+`failed` row can be talked about and keeps its status while the turn runs.)
 
 **What starts a run** — i.e. what enters `running`. The two forcing paths
 ignore the freshness guard in §4; everything else obeys it. The re-review
-button is refused only on `sent` and on `running`, where the endpoint answers
-`409` because a run is already in flight:
+button is refused on `sent`, and on a run the *same process* is already
+running — the `409` comes from `isReviewRunning`, an in-memory claim
+(`src/runner/inflight.ts`), not from the persisted status, so a `cerber review`
+going in another terminal is invisible to it:
 
 ```
 (nothing)           ──you paste a URL, or `cerber review`──► running
@@ -125,9 +129,14 @@ Notes on the edges that surprise people:
   by the poll, though: `reviewAll` runs solely when auto-review is on and solely
   over PRs the awaiting search returned, so a failed artifact GitHub has stopped
   asking about is never retried on its own.
-- **Nothing transitions to `sent` except by a deliberate human act — the
-  cockpit's Send button or `cerber send` — or by opt-in auto-send.** That is
-  the one hard rule of the product.
+- **Nothing *reaches GitHub* except by a deliberate human act — the cockpit's
+  Send button or `cerber send` — or by opt-in auto-send.** That is the one hard
+  rule of the product, and it is a rule about GitHub writes rather than about
+  the status field: `PATCH /api/reviews/:key` will set `status` to `sent` on
+  request without submitting anything or writing a `sent` record. The cockpit
+  never asks it to, and nothing is posted either way, but the endpoint is
+  wider than the rule it looks like it enforces —
+  [#39](https://github.com/fullstackhouse/cerber/issues/39).
 
 ---
 
@@ -285,9 +294,13 @@ leave something behind:
 1. **On start** — `running`, with a `run` block (`startedAt`, `withSource`,
    `trusted`, `trigger`).
 2. **`trigger`** is `daemon` or `user` on anything written since the field
-   existed; it is `null` on older artifacts, and the filing guards treat that
-   legacy case as "no claim". It is what lets filing spare a second opinion you
-   deliberately asked for.
+   existed, and `null` on older artifacts. It is what lets filing spare a
+   second opinion you deliberately asked for — and the two guards read a `null`
+   in opposite directions, deliberately. `filedByYourAct` still files a legacy
+   draft, because it has GitHub's own timestamp to stand on;
+   `filedByWithdrawnRequest` requires `daemon` outright, because a withdrawn
+   request is its only evidence and a `null` cannot be told from a draft you
+   asked for.
 3. **On success** — `ready`, plus `summary`, `chapters`, `comments`, `verdict`,
    `run.costUsd`, and `run.sessionId` — the Claude session chat turns resume,
    recorded **only for a source-backed run** (`source ? review.sessionId : null`),
@@ -376,5 +389,8 @@ moves.
 `filed.reason` says which of the three cases. The draft is untouched and still
 sendable.
 
-**"Where did my edited comment go after a re-review?"** — It's still there,
-re-anchored. Only untouched AI comments are regenerated.
+**"Where did my edited comment go after a re-review?"** — If the run
+succeeded: still there, re-anchored; only untouched AI comments are
+regenerated. If it **failed**, it is gone, and that is
+[#37](https://github.com/fullstackhouse/cerber/issues/37) — see the warning
+in §4.
