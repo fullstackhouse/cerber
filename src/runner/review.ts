@@ -52,8 +52,24 @@ export interface ReviewResult {
   skipped: boolean;
 }
 
-/** Statuses that a fresh artifact can keep without a re-run. */
-const FRESH_STATUSES = new Set(["ready", "reviewed", "sent", "skipped"]);
+/**
+ * Statuses a re-review may overwrite once the PR has moved on. A draft nobody
+ * has acted on should track the current head, and a sent review has cleared
+ * GitHub's request — a fresh one only ever arrives because the author asked
+ * again, which is exactly when a new draft is the point.
+ */
+const HEAD_SENSITIVE = new Set(["ready", "sent"]);
+
+/**
+ * Statuses that are your decision, not a fact about the code.
+ *
+ * Marking a review reviewed or skipped says you are done with this PR. New
+ * commits do not undo that: the author pushing again would otherwise drag the
+ * row back into the inbox with a fresh draft on top, which is the same thing
+ * as cerber overruling you — and on a busy PR it happens every few minutes.
+ * The way back in is the way you got out: press re-review, which forces.
+ */
+const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
 
 /**
  * Fetch a PR, run the AI review, persist the artifact at each stage.
@@ -115,10 +131,13 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
   const pr = await fetchPrInfo(ref);
 
   const existing = await loadArtifact(artifactId(pr));
-  if (!opts.force) {
+  if (existing && !opts.force) {
+    if (SETTLED_BY_YOU.has(existing.status)) {
+      log(`You marked this ${existing.status} — leaving it alone. Use --force to re-review.`);
+      return { artifact: existing, skipped: true };
+    }
     if (
-      existing &&
-      FRESH_STATUSES.has(existing.status) &&
+      HEAD_SENSITIVE.has(existing.status) &&
       existing.pr.headSha !== "" &&
       existing.pr.headSha === pr.headSha
     ) {

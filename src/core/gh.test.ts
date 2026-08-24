@@ -41,8 +41,8 @@ describe("currentLogin", () => {
 });
 
 describe("classifyReply", () => {
-  const c = (author: string, at: string) => ({ author, at, bot: false });
-  const bot = (author: string, at: string) => ({ author, at, bot: true });
+  const c = (author: string, at: string) => ({ author, at, bot: false, url: `#${author}-${at}` });
+  const bot = (author: string, at: string) => ({ author, at, bot: true, url: null });
 
   it("says nobody has heard from you when you never spoke", () => {
     expect(classifyReply([], "me")).toBe("none");

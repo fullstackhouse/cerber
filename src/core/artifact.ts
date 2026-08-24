@@ -126,19 +126,36 @@ export type SentInfo = z.infer<typeof SentInfoSchema>;
 /**
  * Why a draft was filed away without ever being sent.
  *
- * The only cause today is the one the queue could not see before: you reviewed
- * the PR through GitHub itself, so cerber's draft is a second opinion on a
- * conversation you already had. It is a record, not a decision to defend — the
- * review is untouched, still openable and still sendable.
+ * All three causes are the same shape of fact: the inbox was still holding a
+ * row out for you that GitHub had already moved past. You reviewed the PR
+ * through GitHub itself; you answered in the conversation and nobody has
+ * answered back; or whoever asked for the review took the request away. It is
+ * a record, not a decision to defend — the review is untouched, still openable
+ * and still sendable.
+ *
+ * `reason` defaults to the one that shipped first, so artifacts written before
+ * the other two existed load unchanged and keep saying what they always said.
  */
+export const FiledReasonSchema = z.enum(["own-review", "own-reply", "request-withdrawn"]);
+export type FiledReason = z.infer<typeof FiledReasonSchema>;
+
 export const FiledInfoSchema = z.object({
   at: z.string(),
-  /** The review of yours GitHub had, which is what settled this one. */
-  review: z.object({
-    at: z.string(),
-    state: z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]),
-    url: z.string().nullable().default(null),
-  }),
+  reason: FiledReasonSchema.default("own-review"),
+  /** The review of yours GitHub had. Set when `reason` is "own-review". */
+  review: z
+    .object({
+      at: z.string(),
+      state: z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]),
+      url: z.string().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+  /** The comment that gave you the last word. Set when `reason` is "own-reply". */
+  reply: z
+    .object({ at: z.string(), url: z.string().nullable().default(null) })
+    .nullable()
+    .default(null),
 });
 export type FiledInfo = z.infer<typeof FiledInfoSchema>;
 

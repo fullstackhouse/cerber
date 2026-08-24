@@ -5,6 +5,7 @@ import {
   bucket,
   hiddenAwaiting,
   hiddenAwaitingNote,
+  filedOn,
   isArchived,
   replyOf,
   replyTag,
@@ -323,19 +324,40 @@ describe("rowTag", () => {
   });
 });
 
-describe("a draft cerber filed because you reviewed on GitHub", () => {
+describe("a draft cerber filed rather than you", () => {
   const filed = (over: Partial<ReviewListItem> = {}) =>
     row({
       status: "reviewed",
       filed: {
         at: "2026-08-21T07:00:00.000Z",
+        reason: "own-review",
         review: { at: "2026-08-20T14:55:00.000Z", state: "CHANGES_REQUESTED", url: null },
+        reply: null,
       },
+      ...over,
+    });
+
+  const repliedTo = (over: Partial<ReviewListItem> = {}) =>
+    filed({
+      filed: {
+        at: "2026-08-21T07:00:00.000Z",
+        reason: "own-reply",
+        review: null,
+        reply: { at: "2026-08-20T14:55:00.000Z", url: "https://gh/c/1" },
+      },
+      ...over,
+    });
+
+  const unrequested = (over: Partial<ReviewListItem> = {}) =>
+    filed({
+      filed: { at: "2026-08-21T07:00:00.000Z", reason: "request-withdrawn", review: null, reply: null },
       ...over,
     });
 
   it("does not put a click you never made in the tag", () => {
     expect(rowTag(filed())).toBe("reviewed on GitHub");
+    expect(rowTag(repliedTo())).toBe("replied on GitHub");
+    expect(rowTag(unrequested())).toBe("request withdrawn");
     expect(rowTag(row({ status: "reviewed" }))).toBe("reviewed");
   });
 
@@ -347,12 +369,30 @@ describe("a draft cerber filed because you reviewed on GitHub", () => {
     expect(s.meta.join(" ")).not.toContain("you marked this reviewed");
   });
 
+  it("gives each reason its own account of itself", () => {
+    // Three different things happened; a row that says "reviewed on GitHub"
+    // over a PR you only commented on is a claim about you that is not true.
+    expect(strip(repliedTo(), daemon()).reasoning).toContain("nobody has answered back");
+    expect(strip(repliedTo(), daemon()).meta[0]).toContain("you replied on GitHub");
+    expect(strip(unrequested(), daemon()).reasoning).toContain("took the request back");
+    expect(strip(unrequested(), daemon()).meta[0]).toContain("nobody was asking");
+  });
+
+  it("dates each reason from the thing that caused it", () => {
+    // The withdrawal is the one cause GitHub gives no timestamp for, so it
+    // falls back to when cerber noticed rather than inventing one.
+    expect(filedOn(filed().filed!)).toBe("2026-08-20T14:55:00.000Z");
+    expect(filedOn(repliedTo().filed!)).toBe("2026-08-20T14:55:00.000Z");
+    expect(filedOn(unrequested().filed!)).toBe("2026-08-21T07:00:00.000Z");
+  });
+
   it("never says you haven't replied when GitHub asks again", () => {
     // The author pushed and re-requested: the row is back under open requests,
     // and the conversation read still cannot see the review you submitted.
     const tag = requestTag(filed(), "none");
-    expect(tag.label).toBe("you reviewed this on GitHub");
+    expect(tag.label).toBe("reviewed on GitHub");
     expect(tag.title).toContain("outside cerber");
+    expect(requestTag(repliedTo(), "none").label).toBe("replied on GitHub");
   });
 });
 

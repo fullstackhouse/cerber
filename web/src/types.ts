@@ -39,10 +39,18 @@ export interface ReviewListItem {
   filed?: Filed | null;
 }
 
-/** Why cerber filed a draft away: a review of your own that GitHub already had. */
+/** Why cerber filed a draft away — see `FiledInfoSchema` for the three causes. */
+export type FiledReason = "own-review" | "own-reply" | "request-withdrawn";
+
 export interface Filed {
   at: string;
-  review: { at: string; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"; url: string | null };
+  reason: FiledReason;
+  review: {
+    at: string;
+    state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+    url: string | null;
+  } | null;
+  reply: { at: string; url: string | null } | null;
 }
 
 export interface Verdict {

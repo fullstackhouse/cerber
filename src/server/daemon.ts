@@ -1,16 +1,18 @@
-import { Artifact, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
+import { Artifact, FiledInfo, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
 import { loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
-  OwnReview,
   Reply,
   classifyReply,
   currentLogin,
   fetchConversation,
   fetchOwnReview,
   fetchPrInfo,
+  fetchReviewRequests,
+  lastWordOfYours,
   searchAwaitingMe,
+  stillRequested,
   submitReview,
 } from "../core/gh.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
@@ -161,21 +163,25 @@ export function isPureStub(artifact: Artifact): boolean {
 }
 
 /**
- * Whether a review of yours on GitHub settles this draft.
+ * Whether something you did on GitHub at `at` settles this draft.
  *
  * Two facts have to hold. GitHub must have stopped asking you — the caller has
  * already established that, since this only runs on artifacts absent from the
- * awaiting search — and you must have submitted a review of your own, which is
- * the half cerber could not see before: a review clears the request whether it
- * went through Send or through GitHub's own button, and only the first left a
- * trace here. Together they mean the PR is back with its author, while the
- * inbox went on listing the draft as work still waiting on you.
+ * awaiting search — and you must have had your say, which is the half cerber
+ * could not see before: it happens on github.com and leaves no trace here.
+ * Together they mean the PR is back with its author, while the inbox went on
+ * listing the draft as work still waiting on you.
+ *
+ * Having your say is a review of your own or a comment nobody has answered
+ * since. GitHub counts only the first as a review — a comment leaves the
+ * request standing — but the question here is not what GitHub counts, it is
+ * whether the row is still work. Somebody waiting on the author is not.
  *
  * The trigger test is what keeps this from undoing a deliberate act. A draft
  * you asked for — pasted the URL in, pressed re-review — after you had already
- * reviewed the PR is a second opinion you went and requested, so filing it
- * away would answer a question you had just posed. A draft the poll wrote on
- * its own carries no such intent: it is exactly the row this is here to close.
+ * spoken is a second opinion you went and requested, so filing it away would
+ * answer a question you had just posed. A draft the poll wrote on its own
+ * carries no such intent: it is exactly the row this is here to close.
  *
  * A run recorded before the trigger was kept is treated as the poll's, which is
  * the deliberate choice: the alternative leaves every draft written before this
@@ -183,14 +189,32 @@ export function isPureStub(artifact: Artifact): boolean {
  * is one legacy draft filed once — and the re-review that un-files it records a
  * trigger, so it cannot happen to the same row twice.
  */
-export function filedByOwnReview(artifact: Artifact, review: OwnReview | null): boolean {
-  if (artifact.status !== "ready" || artifact.sent || !review) return false;
+export function filedByYourAct(artifact: Artifact, at: string | null): boolean {
+  if (artifact.status !== "ready" || artifact.sent || at === null) return false;
   const run = artifact.run;
   // Parsed, not compared as text. `startedAt` carries milliseconds and GitHub's
   // `submitted_at` does not, and "…:00.500Z" sorts *before* "…:00Z" — so a run
   // that began half a second after your review would read as older than it, and
   // the second opinion this guard exists to protect would be filed away.
-  return !(run?.trigger === "user" && Date.parse(run.startedAt) >= Date.parse(review.at));
+  return !(run?.trigger === "user" && Date.parse(run.startedAt) >= Date.parse(at));
+}
+
+/**
+ * Whether a review request that simply went away settles this draft.
+ *
+ * The other two reasons rest on something you did; this one rests on something
+ * that stopped being true, which is a weaker kind of evidence and gets a
+ * stricter guard for it. Only a draft the poll wrote on its own can be filed
+ * this way: the poll only ever writes one because GitHub asked you, so the
+ * request going away is the whole of that draft's reason for existing going
+ * away. A draft you pasted in or asked for was never in that search to begin
+ * with, and `null` — a run older than the trigger field — cannot be told from
+ * one, so neither qualifies. Unlike the own-review case there is no second
+ * fact to fall back on, so an unknown here has to mean no.
+ */
+export function filedByWithdrawnRequest(artifact: Artifact): boolean {
+  if (artifact.status !== "ready" || artifact.sent) return false;
+  return artifact.run?.trigger === "daemon";
 }
 
 /** How many open-PR artifacts to re-check against GitHub per poll, and how often each. */
@@ -279,31 +303,86 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     let login: string | null | undefined;
 
     /**
-     * File a draft away once GitHub says you already reviewed the PR yourself.
+     * File a draft away once GitHub has moved past it without cerber's help.
      *
-     * The queue lists what you have not dealt with locally, and a review
-     * submitted on github.com never reached it — so a PR you answered days ago
-     * sat in the inbox as if it still wanted you. This is the one read that
-     * closes that gap, on the same 30-minute-per-artifact leash as the state
-     * check it rides along with.
+     * The queue lists what you have not dealt with locally, and everything that
+     * happens on github.com is invisible to it — so a PR you answered days ago
+     * sat in the inbox as if it still wanted you. Three ways that happens, in
+     * the order of how much they say:
+     *
+     *   1. You submitted a review there. The strongest: GitHub itself counts it.
+     *   2. You commented and nobody has answered since. Not a review as far as
+     *      GitHub is concerned, but the ball is still in the author's court.
+     *   3. Nobody is asking any more. You never said anything; whoever
+     *      requested you took the request back, or the PR got its reviews
+     *      elsewhere. Nothing left here is work.
+     *
+     * Someone answering your comment (`them`) is the case that deliberately
+     * files nothing: that is a reply addressed to you, sitting on a PR whose
+     * draft is right here.
+     *
+     * All of it rides the same 30-minute-per-artifact leash as the state check
+     * it hangs off, so a queue of a hundred rows is still a handful of calls.
      */
-    async function fileIfYouReviewedItYourself(artifact: Artifact): Promise<void> {
+    async function fileIfSettledElsewhere(artifact: Artifact): Promise<void> {
       // Only a finished, unsent draft can be filed — checked here too, so a row
       // that could never qualify costs no GitHub call at all.
       if (artifact.status !== "ready" || artifact.sent) return;
       if (login === undefined) login = await currentLogin().catch(() => null);
       if (login === null) return;
-      const review = await fetchOwnReview(artifact.pr, login);
-      if (!review || !filedByOwnReview(artifact, review)) return;
-      const filed = { at: new Date().toISOString(), review };
-      const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
-        // Re-read from disk: a run or a send may have started in the seconds
-        // this read took, and neither wants filing out from under it.
-        filedByOwnReview(a, review) ? { ...a, status: "reviewed" as const, filed } : a,
-      );
-      if (saved?.filed) {
-        log(`[${artifact.id}] you reviewed this on GitHub on ${review.at.slice(0, 10)} — filed as reviewed`);
+      const me = login;
+
+      /** Re-reads from disk: a run or a send may have started in the seconds
+       *  these reads took, and neither wants filing out from under it. */
+      async function file(filed: FiledInfo, note: string, stillFilable: (a: Artifact) => boolean) {
+        const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
+          stillFilable(a) ? { ...a, status: "reviewed" as const, filed } : a,
+        );
+        if (saved?.filed) log(`[${artifact.id}] ${note} — filed as reviewed`);
       }
+
+      const review = await fetchOwnReview(artifact.pr, me);
+      if (review) {
+        // A review of yours is the answer either way: if the guard rejects it,
+        // this is a second opinion you asked for, not a row to keep looking for
+        // another reason to file.
+        if (filedByYourAct(artifact, review.at)) {
+          await file(
+            { at: new Date().toISOString(), reason: "own-review", review, reply: null },
+            `you reviewed this on GitHub on ${review.at.slice(0, 10)}`,
+            (a) => filedByYourAct(a, review.at),
+          );
+        }
+        return;
+      }
+
+      const conversation = await fetchConversation(artifact.pr);
+      const mine = lastWordOfYours(conversation, me);
+      if (mine) {
+        if (filedByYourAct(artifact, mine.at)) {
+          const reply = { at: mine.at, url: mine.url };
+          await file(
+            { at: new Date().toISOString(), reason: "own-reply", review: null, reply },
+            `you replied on GitHub on ${mine.at.slice(0, 10)} and nobody has answered since`,
+            (a) => filedByYourAct(a, mine.at),
+          );
+        }
+        return;
+      }
+      // Anything but silence from you leaves the row alone: `them` is somebody
+      // answering a comment of yours, which is the opposite of settled.
+      if (classifyReply(conversation, me) !== "none") return;
+      if (!filedByWithdrawnRequest(artifact)) return;
+
+      // The awaiting search says nobody is asking, and here that is the entire
+      // case — so confirm it against the PR itself before acting on it. The
+      // other two reasons stand on a fact of their own and need no such check.
+      if (stillRequested(await fetchReviewRequests(artifact.pr), me)) return;
+      await file(
+        { at: new Date().toISOString(), reason: "request-withdrawn", review: null, reply: null },
+        "nobody is asking for this review any more",
+        filedByWithdrawnRequest,
+      );
     }
 
     const awaitingIds = new Set(refs.map((r) => artifactId(r)));
@@ -352,7 +431,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           }));
         }
         if (pr.state !== "OPEN") log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
-        else await fileIfYouReviewedItYourself(artifact);
+        else await fileIfSettledElsewhere(artifact);
       } catch {
         // Same: book-keeping can wait for the next poll.
       }
