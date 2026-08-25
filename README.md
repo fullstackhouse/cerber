@@ -391,6 +391,12 @@ above: the seven statuses and what sets each, which tab a PR lands in and why,
 when the poll files or archives a row on its own, when a re-review happens and
 what it will not overwrite, and what gets written to disk at each step.
 
+[**SPEC.md**](SPEC.md) is the full service specification — the artifact
+schema, every lifecycle and filing rule, the runner's tool policy and
+credential hygiene, the send path — written precisely enough to reimplement
+cerber from. lifecycle.md is the operator's view of the product; SPEC.md is
+the engineer's.
+
 ## Development
 
 ```bash

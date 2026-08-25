@@ -64,6 +64,12 @@ pending reviews, no comments, no reactions — reviewing is read-only.**
 rules, filing/archiving, and the re-review guards. Keep it true when you change
 any of them — it names the files each rule lives in.
 
+`SPEC.md` is the RFC-style specification of the whole product — schemas,
+lifecycle, tool policy, the send path, in normative language. A PR that
+changes behavior the spec describes updates the spec in the same PR; a
+divergence you find but don't fix goes in its Appendix B rather than being
+left unwritten. Code and tests win when they disagree.
+
 
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
