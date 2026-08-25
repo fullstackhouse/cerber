@@ -61,6 +61,7 @@ function artifact(status: ArtifactStatus): Artifact {
     run: null,
     sent: null,
     filed: null,
+    settledAt: null,
     refresh: null,
     calibration: null,
     chat: [],
@@ -144,6 +145,37 @@ describe("PATCH /api/reviews/:key — only the statuses that are your decision",
       expect(res.status).toBe(200);
       expect((await loadArtifact(ID))!.status).toBe(status);
     }
+  });
+
+  // The poll asks which side of your decision a review request falls on, so the
+  // decision has to be dated as it is made. `updatedAt` cannot answer it: just
+  // opening a settled review refreshes it and moves that field forward.
+  it("dates the decision as it makes it", async () => {
+    await saveArtifact(artifact("ready"));
+    expect((await loadArtifact(ID))!.settledAt).toBeNull();
+
+    const before = Date.now();
+    expect((await patchStatus("skipped")).status).toBe(200);
+
+    const at = (await loadArtifact(ID))!.settledAt;
+    expect(at).not.toBeNull();
+    expect(Date.parse(at!)).toBeGreaterThanOrEqual(before);
+  });
+
+  // `filed` outranks the status wherever the queue tags a row, on the grounds
+  // that "reviewed" would read as a click nobody made. Clicking makes it a
+  // click — so cerber's account of the row goes with the status it explained.
+  it("drops cerber's filing note when you settle the row yourself", async () => {
+    await saveArtifact({
+      ...artifact("reviewed"),
+      filed: { at: "2026-08-21T09:00:00.000Z", reason: "own-review" as const, review: null, reply: null },
+    });
+
+    expect((await patchStatus("skipped")).status).toBe(200);
+
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("skipped");
+    expect(after.filed).toBeNull();
   });
 
   it("refuses to call a review sent when nothing was sent", async () => {

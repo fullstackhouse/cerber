@@ -85,6 +85,7 @@ function ready(comments: Comment[], headSha = "old-sha"): Artifact {
     run: null,
     sent: null,
     filed: null,
+    settledAt: null,
     refresh: null,
     calibration: null,
     chat: [],
@@ -178,6 +179,31 @@ describe("what a re-review does to a decision you made while it ran", () => {
       expect(artifact.status).toBe(status);
       expect(artifact.summary).toBe("the new draft");
     }
+  });
+
+  it("keeps the settle whole — the stamp with the status", async () => {
+    // The stamp is what the poll compares a review request against. Half a
+    // settle would leave the row settled with nothing to date the decision by,
+    // and a re-request would then read as older than a skip that came after it.
+    await saveArtifact(ready([]));
+    const settledAt = "2026-08-21T10:02:00.000Z";
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, status: "skipped" as const, settledAt }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.status).toBe("skipped");
+    expect(artifact.settledAt).toBe(settledAt);
+  });
+
+  // A forced re-review is you taking the row back, so the settle goes entirely.
+  it("clears the stamp when it does reopen a row", async () => {
+    await saveArtifact({ ...ready([]), status: "skipped" as const, settledAt: "2026-08-20T09:00:00Z" });
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false, force: true });
+    expect(artifact.status).toBe("ready");
+    expect(artifact.settledAt).toBeNull();
   });
 
   it("does not reopen one you settled when the run fails either", async () => {

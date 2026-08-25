@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifyReply, currentLogin, latestOwnReview, resetLoginCache } from "./gh.js";
+import { classifyReply, currentLogin, lastRequestOf, latestOwnReview, resetLoginCache } from "./gh.js";
 
 // gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
 // resolves to the `{ stdout }` shape the real one does, while still recording
@@ -145,6 +145,41 @@ describe("latestOwnReview", () => {
   // work away on the strength of a review GitHub itself no longer honours.
   it("ignores a review that was dismissed", () => {
     expect(latestOwnReview([r("me", "2026-08-19T10:00:00Z", "DISMISSED")], "me")).toBeNull();
+  });
+});
+
+describe("lastRequestOf", () => {
+  const asked = (login: string, createdAt: string, typename = "User") => ({
+    createdAt,
+    requestedReviewer: { __typename: typename, login },
+  });
+
+  it("finds nothing when nobody has asked you", () => {
+    expect(lastRequestOf([], "me")).toBeNull();
+    expect(lastRequestOf([asked("them", "2026-08-20T10:00:00Z")], "me")).toBeNull();
+  });
+
+  // The whole point: a request that was withdrawn and made again is a second
+  // ask, and only its timestamp can tell it from the first.
+  it("takes the most recent ask, not the first", () => {
+    expect(
+      lastRequestOf(
+        [
+          asked("me", "2026-08-21T10:43:27Z"),
+          asked("them", "2026-08-24T11:00:00Z"),
+          asked("me", "2026-08-24T12:41:22Z"),
+        ],
+        "me",
+      ),
+    ).toBe("2026-08-24T12:41:22Z");
+  });
+
+  // A team request names the team, never you. This answer decides whether to
+  // undo a decision of yours, so it acts only on somebody naming you.
+  it("ignores requests that did not name you", () => {
+    expect(lastRequestOf([{ createdAt: "2026-08-24T12:41:22Z", requestedReviewer: { __typename: "Team" } }], "me")).toBeNull();
+    expect(lastRequestOf([asked("me", "2026-08-24T12:41:22Z", "Bot")], "me")).toBeNull();
+    expect(lastRequestOf([{ createdAt: "2026-08-24T12:41:22Z", requestedReviewer: null }], "me")).toBeNull();
   });
 });
 

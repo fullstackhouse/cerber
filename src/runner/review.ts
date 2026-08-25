@@ -71,7 +71,7 @@ const HEAD_SENSITIVE = new Set(["ready", "sent"]);
  * as cerber overruling you — and on a busy PR it happens every few minutes.
  * The way back in is the way you got out: press re-review, which forces.
  */
-const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
+export const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
 
 /**
  * Fetch a PR, run the AI review, persist the artifact at each stage.
@@ -146,9 +146,11 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       log(`You marked this ${existing.status} — leaving it alone. Use --force to re-review.`);
       // Written down because it is the poll's most confusing silence: a row
       // the author keeps pushing to, that never comes back into the inbox.
+      // Only a push, now — somebody asking again does reopen it, and says so
+      // for itself (`reopenIfAskedAgain`).
       await noteHistory(
         existing.id,
-        `left alone: you marked it ${existing.status}, so a new push or review request does not reopen it`,
+        `left alone: you marked it ${existing.status}, so a new push does not reopen it`,
       );
       return { artifact: existing, skipped: true };
     }
@@ -247,6 +249,7 @@ async function performReview(
     sent: null,
     refresh: null,
     filed: null,
+    settledAt: null,
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the
     // chat prompt replays the transcript, which is what makes it survive the

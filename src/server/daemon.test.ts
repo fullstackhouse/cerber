@@ -7,6 +7,7 @@ import { loadConfig } from "../core/config.js";
 import {
   currentLogin,
   fetchConversation,
+  fetchLastReviewRequest,
   fetchOwnReview,
   fetchPrInfo,
   fetchReviewRequests,
@@ -17,9 +18,12 @@ import { notify } from "../core/notify.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import {
   DaemonHandle,
+  askedAgainAfterSettling,
   filedByWithdrawnRequest,
   filedByYourAct,
   isPureStub,
+  reopenedStatus,
+  settledAtOf,
   startDaemon,
   stubArtifact,
 } from "./daemon.js";
@@ -32,6 +36,7 @@ vi.mock("../core/gh.js", async (orig) => ({
   searchAwaitingMe: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchConversation: vi.fn(),
+  fetchLastReviewRequest: vi.fn(),
   fetchOwnReview: vi.fn(),
   fetchReviewRequests: vi.fn(),
   currentLogin: vi.fn(),
@@ -52,6 +57,7 @@ const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
 const ownReview = fetchOwnReview as Mock;
+const lastRequest = fetchLastReviewRequest as Mock;
 const requests = fetchReviewRequests as Mock;
 const login = currentLogin as Mock;
 const notified = notify as Mock;
@@ -817,5 +823,242 @@ describe("the tap on the machine when a PR lands", () => {
     config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, poll: false } });
     // A loop that isn't polling discovers nothing, so it promises nothing.
     expect((await pollTimes(1)).notify).toBe(false);
+  });
+});
+
+describe("a review you settled, and were asked for again", () => {
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
+  // autoReview off: what's under test is the queue's bookkeeping, not the runner.
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: false,
+    notify: false,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  const RUN = {
+    model: "claude",
+    startedAt: "2026-08-24T09:10:00Z",
+    finishedAt: "2026-08-24T09:17:00Z",
+    costUsd: 6.8,
+    error: null,
+    withSource: true,
+    trusted: true,
+    sessionId: null,
+    trigger: "daemon" as const,
+    reviewedSha: "abc1234",
+  };
+
+  /** A draft you skipped at a known moment — the row this whole change is about. */
+  const settled = (over: Record<string, unknown> = {}) => ({
+    ...stubArtifact(DISCOVERED),
+    status: "skipped" as const,
+    run: RUN,
+    settledAt: "2026-08-24T10:00:00Z",
+    ...over,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-reopen-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+    lastRequest.mockResolvedValue(null);
+    // GitHub is asking for this one right now — every case here starts there.
+    search.mockResolvedValue([DISCOVERED]);
+  });
+
+  async function pollOnce() {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      await stopAndDrain(handle);
+    }
+    return loadArtifact("acme/widgets#7");
+  }
+
+  it("puts the row back in the inbox when the ask came after your skip", async () => {
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    // The stamp goes with the decision it dated: this row is not settled now.
+    expect(after?.settledAt).toBeNull();
+    // The draft itself is untouched — it is the same review, back on your desk.
+    expect(after?.run?.reviewedSha).toBe("abc1234");
+  });
+
+  it("writes down why the row came back, not just that it did", async () => {
+    // A status change says a row moved. The point of undoing a settle is *why*
+    // it was undone, and that is the one thing the status cannot carry.
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.history?.map((e) => e.what)).toContain(
+      "back in the inbox: your review was requested again on 2026-08-24, after you settled it",
+    );
+  });
+
+  it("leaves your skip standing when the ask is the one you already answered", async () => {
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue("2026-08-21T10:43:27Z");
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("skipped");
+    expect(after?.settledAt).toBe("2026-08-24T10:00:00Z");
+  });
+
+  // The request left open by a skip is the ordinary case — a row you dealt with
+  // that GitHub never stopped asking about. Nothing to undo, nothing to say.
+  it("says nothing about a request that predates nothing", async () => {
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue(null);
+
+    expect((await pollOnce())?.status).toBe("skipped");
+  });
+
+  it("drops cerber's own account of why the row was settled", async () => {
+    // Filed by the poll, not by you: the note explains a status that is going.
+    await saveArtifact(
+      settled({
+        status: "reviewed" as const,
+        settledAt: "2026-08-24T10:00:00Z",
+        filed: { at: "2026-08-24T10:00:00Z", reason: "request-withdrawn" as const, review: null, reply: null },
+      }),
+    );
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("reopens a row with no draft as awaiting one", async () => {
+    await saveArtifact(settled({ run: null }));
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    expect((await pollOnce())?.status).toBe("awaiting");
+  });
+
+  it("never reopens a review that was sent", async () => {
+    await saveArtifact(
+      settled({
+        status: "sent" as const,
+        sent: { at: "2026-08-24T10:00:00Z", event: "COMMENT" as const, url: null, auto: false },
+      }),
+    );
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("sent");
+    expect(lastRequest).not.toHaveBeenCalled();
+  });
+
+  // One GitHub call per poll per settled row is the whole cost of this; a row
+  // that could never be reopened must not cost even that.
+  it("asks GitHub nothing about a row that isn't settled", async () => {
+    await saveArtifact({ ...stubArtifact(DISCOVERED), status: "ready" as const, run: RUN });
+
+    expect((await pollOnce())?.status).toBe("ready");
+    expect(lastRequest).not.toHaveBeenCalled();
+  });
+
+  it("leaves the row alone when GitHub cannot be reached", async () => {
+    await saveArtifact(settled());
+    lastRequest.mockRejectedValue(new Error("gh api graphql failed: offline"));
+
+    expect((await pollOnce())?.status).toBe("skipped");
+  });
+});
+
+describe("askedAgainAfterSettling", () => {
+  const RUN = {
+    model: null,
+    startedAt: "2026-08-24T09:10:00Z",
+    finishedAt: "2026-08-24T09:17:00Z",
+    costUsd: null,
+    error: null,
+    withSource: false,
+    trusted: false,
+    sessionId: null,
+    trigger: "daemon" as const,
+    reviewedSha: null,
+  };
+  const skipped = {
+    ...stubArtifact(DISCOVERED),
+    status: "skipped" as const,
+    run: RUN,
+    settledAt: "2026-08-24T10:00:00Z",
+  };
+
+  it("only counts an ask that came after the decision", () => {
+    expect(askedAgainAfterSettling(skipped, "2026-08-24T12:41:22Z")).toBe(true);
+    expect(askedAgainAfterSettling(skipped, "2026-08-24T09:00:00Z")).toBe(false);
+    expect(askedAgainAfterSettling(skipped, null)).toBe(false);
+  });
+
+  // Same second on both sides: our stamps carry milliseconds and GitHub's do
+  // not, and "…:00.500Z" sorts before "…:00Z" as text.
+  it("compares moments, not strings", () => {
+    const settledAt = "2026-08-24T10:00:26.500Z";
+    expect(askedAgainAfterSettling({ ...skipped, settledAt }, "2026-08-24T10:00:26Z")).toBe(false);
+    expect(askedAgainAfterSettling({ ...skipped, settledAt }, "2026-08-24T10:00:27Z")).toBe(true);
+  });
+
+  it("has nothing to undo on a row you never settled", () => {
+    expect(askedAgainAfterSettling({ ...skipped, status: "ready" }, "2026-08-24T12:41:22Z")).toBe(false);
+    expect(askedAgainAfterSettling({ ...skipped, status: "running" }, "2026-08-24T12:41:22Z")).toBe(false);
+  });
+
+  it("never speaks for a review that was sent", () => {
+    const sent = {
+      ...skipped,
+      status: "reviewed" as const,
+      sent: { at: "2026-08-24T10:00:00Z", event: "COMMENT" as const, url: null, auto: false },
+    };
+    expect(askedAgainAfterSettling(sent, "2026-08-24T12:41:22Z")).toBe(false);
+  });
+
+  // Rows settled before `settledAt` existed still have to be reachable, or the
+  // bug this fixes is permanent for every one of them.
+  it("dates a legacy row by the latest moment it can prove", () => {
+    const legacy = { ...skipped, settledAt: null };
+    // You cannot have skipped a draft before the draft existed.
+    expect(settledAtOf(legacy)).toBe(RUN.finishedAt);
+    expect(askedAgainAfterSettling(legacy, "2026-08-24T12:41:22Z")).toBe(true);
+    expect(askedAgainAfterSettling(legacy, "2026-08-24T09:15:00Z")).toBe(false);
+
+    // Cerber filing it is a later, better-known moment than the run finishing.
+    const filed = {
+      ...legacy,
+      status: "reviewed" as const,
+      filed: { at: "2026-08-24T13:00:00Z", reason: "own-review" as const, review: null, reply: null },
+    };
+    expect(settledAtOf(filed)).toBe("2026-08-24T13:00:00Z");
+    expect(askedAgainAfterSettling(filed, "2026-08-24T12:41:22Z")).toBe(false);
+
+    // Nothing to go on at all: a stub you skipped before it was ever drafted.
+    expect(settledAtOf({ ...legacy, run: null })).toBeNull();
+  });
+
+  it("sends a row back to the draft it has, or to waiting for one", () => {
+    expect(reopenedStatus(skipped)).toBe("ready");
+    expect(reopenedStatus({ ...skipped, run: null })).toBe("awaiting");
+    expect(reopenedStatus({ ...skipped, run: { ...RUN, error: "claude exited 1" } })).toBe("awaiting");
+    expect(reopenedStatus({ ...skipped, run: { ...RUN, finishedAt: null } })).toBe("awaiting");
   });
 });

@@ -59,6 +59,7 @@ function artifact(status: ArtifactStatus, headSha: string): Artifact {
     run: null,
     sent: null,
     filed: null,
+    settledAt: null,
     refresh: null,
     calibration: null,
     chat: [],
@@ -190,7 +191,7 @@ describe("what the poll writes down when it decides to do nothing", () => {
     // Re-taken every poll; said once.
     await reviewPr(REF);
     expect((await whatHappened()).slice(before)).toEqual([
-      "left alone: you marked it skipped, so a new push or review request does not reopen it",
+      "left alone: you marked it skipped, so a new push does not reopen it",
     ]);
   });
 
