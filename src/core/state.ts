@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Artifact, ArtifactSchema, artifactKey } from "./artifact.js";
+import { appendHistory } from "./history.js";
 
 export function cerberHome(): string {
   return process.env.CERBER_HOME ?? path.join(os.homedir(), ".cerber");
@@ -15,13 +16,87 @@ function artifactPath(id: string): string {
   return path.join(reviewsDir(), `${artifactKey(id)}.json`);
 }
 
-export async function saveArtifact(artifact: Artifact): Promise<string> {
+/**
+ * Read whatever is on disk, tolerating anything.
+ *
+ * These files are the user's to edit, so a broken one has to be survivable:
+ * before, a save simply overwrote it. It still does — but the timeline says so
+ * rather than quietly claiming the review began at that moment.
+ */
+async function readPrior(file: string): Promise<{ artifact: Artifact | null; unreadable: boolean }> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { artifact: null, unreadable: false };
+    return { artifact: null, unreadable: true };
+  }
+  try {
+    return { artifact: ArtifactSchema.parse(JSON.parse(raw)), unreadable: false };
+  } catch {
+    return { artifact: null, unreadable: true };
+  }
+}
+
+/**
+ * Write an artifact, and record what changed about it.
+ *
+ * The history is appended here rather than by the caller on purpose. Around
+ * twenty places write artifacts and several of them overwrite one wholesale
+ * from a copy built minutes earlier — a log any of them had to remember to
+ * carry would be lost by the first one that didn't. Appending at the one place
+ * every write goes through makes the record a property of writing.
+ *
+ * `prior` is an optimisation for callers that have just read the file (it
+ * saves reading it twice, and an artifact carries a whole diff); `note` records
+ * a decision that changed nothing, which is the only kind of history the diff
+ * cannot see. Neither touches `updatedAt` — that is `updateArtifactByKey`'s.
+ */
+export async function saveArtifact(
+  artifact: Artifact,
+  opts: { prior?: Artifact | null; note?: string } = {},
+): Promise<string> {
   await fs.mkdir(reviewsDir(), { recursive: true });
   const file = artifactPath(artifact.id);
+  const prior =
+    opts.prior !== undefined
+      ? { artifact: opts.prior, unreadable: false }
+      : await readPrior(file);
+  const next: Artifact = {
+    ...artifact,
+    history: appendHistory(prior.artifact, artifact, {
+      note: opts.note,
+      unreadable: prior.unreadable,
+    }),
+  };
   const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(artifact, null, 2));
+  await fs.writeFile(tmp, JSON.stringify(next, null, 2));
   await fs.rename(tmp, file);
   return file;
+}
+
+/**
+ * Write down a decision that changed nothing.
+ *
+ * The poll's silences are the hardest thing to debug about it — it looks at a
+ * settled row, decides deliberately to leave it alone, and leaves no trace of
+ * having looked. This is that trace. It is not a change to the review, so
+ * `updatedAt` stays put: a note must not reorder the queue.
+ *
+ * Missing artifacts are ignored, and a note identical to the last entry is
+ * dropped, so a decision re-taken every poll is recorded once.
+ */
+export async function noteHistory(id: string, what: string): Promise<void> {
+  const prior = await loadArtifact(id).catch(() => null);
+  if (!prior) return;
+  // `appendHistory` drops a note identical to the last entry — ask it, rather
+  // than knowing the rule twice. Nothing to add means nothing to write: the
+  // poll re-takes these decisions every few minutes, and rewriting a whole
+  // artifact, diff and all, to change nothing is the expensive half of saying
+  // it again.
+  const history = appendHistory(prior, prior, { note: what });
+  if (history.length === (prior.history ?? []).length) return;
+  await saveArtifact(prior, { prior, note: what });
 }
 
 export async function loadArtifact(id: string): Promise<Artifact | null> {
@@ -101,7 +176,7 @@ export async function updateArtifactByKey(
   const artifact = await loadArtifactByKey(key);
   if (!artifact) return null;
   const updated = { ...mutate(artifact), updatedAt: new Date().toISOString() };
-  await saveArtifact(updated);
+  await saveArtifact(updated, { prior: artifact });
   return updated;
 }
 
@@ -132,18 +207,21 @@ export async function reconcileRunning(
     const stuckChat =
       artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;
     if (!stuckRun && !stuckChat) continue;
-    await saveArtifact({
-      ...artifact,
-      status: stuckRun ? "failed" : artifact.status,
-      updatedAt: new Date().toISOString(),
-      run:
-        stuckRun && artifact.run
-          ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
-          : artifact.run,
-      pendingChat: stuckChat
-        ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
-        : artifact.pendingChat,
-    });
+    await saveArtifact(
+      {
+        ...artifact,
+        status: stuckRun ? "failed" : artifact.status,
+        updatedAt: new Date().toISOString(),
+        run:
+          stuckRun && artifact.run
+            ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
+            : artifact.run,
+        pendingChat: stuckChat
+          ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
+          : artifact.pendingChat,
+      },
+      { prior: artifact },
+    );
     cleared++;
   }
   return cleared;

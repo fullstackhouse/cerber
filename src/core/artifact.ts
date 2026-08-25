@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HistoryEntrySchema } from "./history.js";
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -325,6 +326,14 @@ export const ArtifactSchema = z.object({
   pendingChat: PendingChatSchema.nullable().default(null),
   /** The review as it stood before the first chat turn — "reset" restores this. */
   preChat: ReviewSnapshotSchema.nullable().default(null),
+  /**
+   * Everything that has happened to this review, oldest first.
+   *
+   * Optional because nothing outside `saveArtifact` writes it: hand one in and
+   * it is ignored, since the log on disk is the only copy that is current. See
+   * `history.ts` for what is recorded and what is deliberately left out.
+   */
+  history: z.array(HistoryEntrySchema).default([]).optional(),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

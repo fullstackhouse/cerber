@@ -75,7 +75,11 @@ any of them — it names the files each rule lives in.
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
   an LRU cache of 8, evicted as reviews run, reclaimable with `cerber prune`),
   trust rules (`trust.ts` — `@login`, `@org/team`, `@org/*`; people only, no
-  way to trust a repo; denials win) and settings
+  way to trust a repo; denials win), the per-review history
+  (`history.ts` — appended by `saveArtifact` itself, never by its callers, so
+  no write path can forget it; a watchlist of what changed, who wrote it from
+  an ambient `withWriter`, and `noteHistory` for the decisions that changed
+  nothing) and settings
   (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
   the cockpit's settings screen)
 - `src/runner/` — review prompt + headless `claude -p --output-format

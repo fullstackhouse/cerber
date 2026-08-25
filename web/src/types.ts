@@ -172,6 +172,22 @@ export interface Artifact {
   pendingChat?: PendingChat | null;
   /** Present once a chat has started — what "reset" goes back to. */
   preChat?: { at: string } | null;
+  /**
+   * Everything that has happened to this review, oldest first. Absent on
+   * artifacts written before cerber kept one.
+   */
+  history?: HistoryEntry[];
+}
+
+/** One thing that happened to a review — see src/core/history.ts. */
+export interface HistoryEntry {
+  at: string;
+  /** Which part of cerber did it. "unknown" when nothing claimed the write. */
+  by: "daemon" | "cockpit" | "cli" | "runner" | "unknown";
+  /** What happened, in plain words. */
+  what: string;
+  /** What was being done at the time: the request, the poll, the run. */
+  cause: string | null;
 }
 
 /** A chat turn in flight. Turns run detached; this is what the cockpit polls. */

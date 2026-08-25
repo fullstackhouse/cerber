@@ -1561,6 +1561,55 @@ button {
   margin-bottom: 14px;
 }
 
+/* The history card: a dense log, read newest first. Columns rather than a
+   sentence, so a run of entries scans as one shape and the odd one out shows. */
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line-3);
+  font-size: 11.5px;
+}
+
+.history-row:last-child {
+  border-bottom: 0;
+}
+
+.history-at {
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 92px;
+}
+
+.history-by {
+  color: var(--faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.history-what {
+  color: var(--fg-2);
+}
+
+/* What asked for the write. Wanted only when two paths could have made the
+   same change, so it sits out of the way at the end of the row. */
+.history-cause {
+  color: var(--fainter);
+  margin-left: auto;
+  padding-left: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .chat-turn {
   border-left: 2px solid var(--line-2);
   padding: 2px 0 2px 12px;

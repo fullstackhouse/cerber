@@ -28,10 +28,12 @@ Four things write the artifact, and most questions in this document are really
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
 | **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
-| **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `prune` only clears checkouts, and there is no edit, mark or chat |
+| **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `history` only reads, `prune` only clears checkouts, and there is no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
-are defensive and writers are atomic (tmp+rename, `src/core/state.ts`).
+are defensive and writers are atomic (tmp+rename, `src/core/state.ts`). Which
+of the four moved a given row, and when, is on the artifact itself: every write
+appends to its `history` (§6).
 
 ---
 
@@ -155,6 +157,10 @@ a token it checks the artifact already on disk:
    *read* is still the PR's head? → **skip** as up to date. (Which sha that is,
    and why it is not `pr.headSha`, is the paragraph below.)
 4. Otherwise → run.
+
+Steps 2 and 3 write a note to the review's history (§6) saying so — a poll that
+looks at a row and deliberately does nothing is otherwise indistinguishable
+from one that never looked, which is the hardest thing about it to debug.
 
 So a `ready` **or `sent`** artifact on a PR that gets a new commit is meant to
 be re-drafted by the next poll: `HEAD_SENSITIVE` only skips while the head is
@@ -280,6 +286,12 @@ Someone *answering* your comment files nothing — that reply is addressed to
 you. State checks are leashed to one per artifact per 30 minutes and capped
 per poll.
 
+The two cases that leave a row alone — someone has answered you, and GitHub
+still lists you as a requested reviewer despite the search — write a note to
+the review's history (§6) rather than passing in silence. The second is the one
+fact nobody can reconstruct afterwards: what the awaiting search said at that
+minute, and that the PR itself disagreed with it.
+
 ### "Whose move is it"
 
 Independent of status. Each poll reads the PR conversation per awaiting PR
@@ -335,6 +347,42 @@ Written by other paths:
 **No HTTP request is ever held open for an AI run.** A review and a chat turn
 both answer `202` and put their state on the artifact for the cockpit to poll —
 failures included, since there is no response left to hand them to.
+
+### The history: the record one `updatedAt` cannot keep
+
+An artifact carries a single `updatedAt`, so every write erases the answer to
+"when did this become `skipped`, and did anything ask for it again afterwards?".
+`history` is the answer that survives — an append-only list on the artifact,
+oldest first, read in the cockpit's **history** card and with `cerber history
+<pr>`.
+
+It is written by `saveArtifact` itself (`src/core/state.ts`), never by its
+callers: several write paths hand over an artifact built minutes earlier, and a
+log any of them had to remember to carry would be lost by the first that
+didn't. So a history handed in is ignored — what is on disk is the only copy —
+and a new write path is recorded without knowing history exists.
+
+Three things go in, and two deliberately don't (`src/core/history.ts`):
+
+- **What changed**, from a watchlist: status, head sha, PR state and draftness,
+  a run starting/finishing/failing and what it could read, the verdict,
+  comment churn, send, filing, refresh. A watchlist rather than a deep diff,
+  or a running turn's narration — rewritten every couple of seconds — would
+  bury everything else.
+- **Who did it**: `daemon`, `cockpit`, `cli`, `runner`, with the request, poll
+  or run that caused it. Set once at each entry point (`withWriter`), ambient
+  from there down.
+- **What the poll decided *not* to do** — the notes in §4 and §5 below, written
+  with `noteHistory`. A decision re-taken every poll is recorded once, and a
+  note does not touch `updatedAt`: it is not a change to the review and must
+  not reorder the queue.
+- **Not** GitHub's timeline. Pushes, requests and reviews are GitHub's own
+  record and `gh` can be asked for them again; the exception is what the
+  awaiting *search* said at a given minute, which cannot be asked for later.
+- **Not** the chat, which already carries its own turns, timestamps and edits.
+
+The most recent 500 entries are kept, with a marker where older ones were
+dropped. Deleting a stub deletes its history with it; nothing else removes one.
 
 ---
 
@@ -399,6 +447,12 @@ PR's head on a `ready`/`sent` row. `cerber review --force` forces past both. The
 forces too, but refuses a `sent` artifact outright — that record is not
 rewritten from the UI, though the poll will still re-draft it once the head
 moves.
+
+**"When did I skip this — and did they ask again after?"** — `cerber history
+<pr>`, or the **history** card at the foot of the review. It carries the status
+change with its timestamp and who made it, every push it saw, and the poll's
+own notes for the times it looked at the row and deliberately left it alone.
+Empty on reviews that predate it being kept.
 
 **"Why does it say reviewed when I never touched it?"** — The poll filed it;
 `filed.reason` says which of the three cases. The draft is untouched and still
