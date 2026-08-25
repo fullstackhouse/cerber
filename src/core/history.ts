@@ -200,6 +200,20 @@ export function describeChange(before: Artifact | null, after: Artifact): string
 }
 
 /**
+ * Would this note be dropped as a repeat of the last thing said?
+ *
+ * The rule belongs to `appendHistory`, which drops such a note; this is the
+ * same question asked ahead of time, so a caller can skip a write that would
+ * change nothing. Exported rather than inferred from the result: at the cap an
+ * appended entry trims an older one, so the log's *length* is not evidence of
+ * anything having been added, and a caller comparing lengths would silently
+ * stop recording notes the moment a review reached `MAX_ENTRIES`.
+ */
+export function noteIsRepeat(prior: Artifact | null, note: string): boolean {
+  return (prior?.history ?? []).at(-1)?.what === note;
+}
+
+/**
  * The history to write, given what is on disk and what is about to replace it.
  *
  * Whatever history the caller is holding is ignored: several write paths
@@ -221,7 +235,7 @@ export function appendHistory(
       ? // A note explains a decision the poll re-takes every few minutes. Said
         // once: repeating it until something else happens is noise, and the
         // entry it would duplicate already says the same thing.
-        kept.at(-1)?.what === opts.note
+        noteIsRepeat(prior, opts.note)
         ? []
         : [opts.note]
       : describeChange(prior, next);

@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Artifact, ArtifactSchema, artifactKey } from "./artifact.js";
-import { appendHistory } from "./history.js";
+import { appendHistory, noteIsRepeat } from "./history.js";
 
 export function cerberHome(): string {
   return process.env.CERBER_HOME ?? path.join(os.homedir(), ".cerber");
@@ -92,13 +92,13 @@ export async function saveArtifact(
 export async function noteHistory(id: string, what: string): Promise<void> {
   const prior = await loadArtifact(id).catch(() => null);
   if (!prior) return;
-  // `appendHistory` drops a note identical to the last entry — ask it, rather
-  // than knowing the rule twice. Nothing to add means nothing to write: the
-  // poll re-takes these decisions every few minutes, and rewriting a whole
-  // artifact, diff and all, to change nothing is the expensive half of saying
-  // it again.
-  const history = appendHistory(prior, prior, { note: what });
-  if (history.length === (prior.history ?? []).length) return;
+  // Nothing to add means nothing to write: the poll re-takes these decisions
+  // every few minutes, and rewriting a whole artifact, diff and all, to change
+  // nothing is the expensive half of saying it again. The rule for "nothing to
+  // add" is `appendHistory`'s, so ask it rather than knowing it twice — and ask
+  // it directly, because at the cap an appended note trims an older entry and
+  // leaves the length exactly as it was.
+  if (noteIsRepeat(prior, what)) return;
   await saveArtifact(prior, { note: what });
 }
 

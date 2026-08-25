@@ -9,7 +9,7 @@ process.env.CERBER_HOME = home;
 
 const { loadArtifact, noteHistory, reconcileRunning, saveArtifact, updateArtifactByKey } =
   await import("./state.js");
-const { withWriter } = await import("./history.js");
+const { MAX_ENTRIES, withWriter } = await import("./history.js");
 
 function artifact(over: Partial<Artifact> = {}): Artifact {
   return {
@@ -214,6 +214,29 @@ describe("the history every write keeps", () => {
     const written = (await fs.stat(file)).mtimeMs;
     await noteHistory(id, note);
     expect((await fs.stat(file)).mtimeMs).toBe(written);
+  });
+
+  it("still records a note when the log is already at its cap", async () => {
+    await saveArtifact(artifact({ status: "skipped" }));
+    const file = path.join(home, "reviews", `${key}.json`);
+    const seeded = JSON.parse(readFileSync(file, "utf8"));
+    seeded.history = Array.from({ length: MAX_ENTRIES }, (_, i) => ({
+      at: "2026-08-24T11:07:00Z",
+      by: "daemon",
+      what: `entry ${i}`,
+      cause: null,
+    }));
+    writeFileSync(file, JSON.stringify(seeded));
+
+    const note = "left alone: you marked it skipped";
+    await noteHistory(id, note);
+
+    // At the cap, appending trims an older entry — so the log is the same
+    // length either way, and a caller reading that as "nothing was added"
+    // would leave a full row unable to record another decision, ever.
+    const after = await loadArtifact(id);
+    expect(after?.history).toHaveLength(MAX_ENTRIES);
+    expect(after?.history?.at(-1)?.what).toBe(note);
   });
 
   it("says so rather than starting over quietly, when the file on disk is broken", async () => {
