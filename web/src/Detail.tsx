@@ -1202,7 +1202,9 @@ function HistoryCard({
             : "nothing recorded"}
         </span>
         <span className="grow" />
-        <button className="btn btn-sm" onClick={onToggle}>
+        {/* A disclosure, so it says whether it is open — the label alone leaves
+            a screen reader to infer that from the word "show". */}
+        <button className="btn btn-sm" aria-expanded={open} onClick={onToggle}>
           <Icon name={open ? "up" : "down"} size={12} />
           {open ? "hide" : "show"}
         </button>
