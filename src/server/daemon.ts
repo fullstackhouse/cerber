@@ -7,6 +7,7 @@ import {
   classifyReply,
   currentLogin,
   fetchConversation,
+  fetchLastReviewRequest,
   fetchOwnReview,
   fetchPrInfo,
   fetchReviewRequests,
@@ -26,7 +27,7 @@ import {
   updateArtifactByKey,
 } from "../core/state.js";
 import { ReviewInProgressError } from "../runner/inflight.js";
-import { pool, reviewPr } from "../runner/review.js";
+import { SETTLED_BY_YOU, pool, reviewPr } from "../runner/review.js";
 
 export interface DaemonOptions {
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
@@ -151,6 +152,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    settledAt: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -230,7 +232,59 @@ export function filedByWithdrawnRequest(artifact: Artifact): boolean {
   return artifact.run?.trigger === "daemon";
 }
 
-/** How many open-PR artifacts to re-check against GitHub per poll, and how often each. */
+/**
+ * When a settled row was settled, as well as cerber can date it — or null if it
+ * isn't settled at all, or a send already spoke for it.
+ *
+ * `settledAt` is the record and the only exact answer. Rows settled before that
+ * field existed fall back to the latest moment cerber can prove the decision
+ * came after: cerber filed it (`filed.at`), or you settled a draft, which you
+ * cannot have done before the draft existed (`run.finishedAt`). Both are lower
+ * bounds, so a stale one can only make this read a request as newer than it
+ * really was — one row coming back into the inbox once, against leaving every
+ * pre-existing settled row permanently unreachable, which is the bug.
+ *
+ * Not `updatedAt`: opening a settled review refreshes it onto the new head,
+ * which moves that field forward long after the decision it would be dating.
+ */
+export function settledAtOf(a: Artifact): string | null {
+  if (!SETTLED_BY_YOU.has(a.status) || a.sent) return null;
+  return a.settledAt ?? a.filed?.at ?? a.run?.finishedAt ?? null;
+}
+
+/**
+ * Whether a review request is a *new* ask rather than the one you settled.
+ *
+ * A skip says "I am done with this PR", and a push does not undo that — the
+ * whole point of `SETTLED_BY_YOU`. Somebody asking you again is a different
+ * event: your skip answered the request that was open when you made it, and it
+ * cannot have answered one that came after. Withdrawn-then-re-added is the
+ * shape this catches, and it is not exotic — an author who pulls the request
+ * while you are mid-look and puts it back with the next push leaves the inbox
+ * silent about a review someone is now actively waiting on.
+ *
+ * Parsed, not compared as text, for the reason `filedByYourAct` gives: our
+ * timestamps carry milliseconds and GitHub's do not, and "…:00.500Z" sorts
+ * before "…:00Z".
+ */
+export function askedAgainAfterSettling(a: Artifact, requestedAt: string | null): boolean {
+  if (requestedAt === null) return false;
+  const settled = settledAtOf(a);
+  return settled !== null && Date.parse(requestedAt) > Date.parse(settled);
+}
+
+/**
+ * What a reopened row goes back to being: the draft it has, or a row waiting
+ * for one. A run that failed left no draft to show, so it reopens as `awaiting`
+ * and the poll drafts it again.
+ */
+export function reopenedStatus(a: Artifact): "ready" | "awaiting" {
+  return a.run?.finishedAt && !a.run.error ? "ready" : "awaiting";
+}
+
+/** How many artifacts each of the poll's GitHub re-checks — the open-PR state
+ *  refresh, and the settled rows it asks about again — may spend per poll, and
+ *  how often any one artifact is re-asked about. */
 const STATE_REFRESH_CAP = 10;
 const STATE_REFRESH_MIN_MS = 30 * 60_000;
 
@@ -272,6 +326,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   /** When GitHub last confirmed an artifact's PR state, by artifact id. In-memory:
    *  a restart just re-checks sooner, which is harmless. */
   const stateCheckedAt = new Map<string, number>();
+  /** When GitHub was last asked whether a settled row has been re-requested, by
+   *  artifact id. In-memory for the same reason: a restart just asks sooner. */
+  const requestCheckedAt = new Map<string, number>();
 
   async function discover(): Promise<DiscoveredPr[]> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
@@ -294,9 +351,68 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    */
   async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: DiscoveredPr[] }> {
     const discovered: DiscoveredPr[] = [];
+    /** Reopen checks spent this poll — the same cap the state refresh below obeys. */
+    let reopenChecks = 0;
+
+    // Asked once per pass, and only if a row actually reaches a check that
+    // needs it. Undefined is "not asked yet"; null is "gh could not say", which
+    // attributes nothing to you rather than guessing.
+    let login: string | null | undefined;
+
+    /**
+     * Put a settled row back in the inbox when somebody has asked you again.
+     *
+     * The mirror of `fileIfSettledElsewhere`: that one files rows away once
+     * GitHub has moved past them, this one brings one back when GitHub has
+     * moved *to* it. Both exist because the queue's picture of who is waiting
+     * on what is local, and the thing it is a picture of lives on github.com.
+     *
+     * Only rows GitHub is asking about right now get here at all — the caller
+     * is looping over the awaiting search — so the extra read is one call for
+     * one question: was that request made after you settled?
+     */
+    async function reopenIfAskedAgain(artifact: Artifact): Promise<void> {
+      if (settledAtOf(artifact) === null) return;
+      const last = requestCheckedAt.get(artifact.id) ?? 0;
+      if (reopenChecks >= STATE_REFRESH_CAP || Date.now() - last < STATE_REFRESH_MIN_MS) return;
+      reopenChecks++;
+      requestCheckedAt.set(artifact.id, Date.now());
+      if (login === undefined) login = await currentLogin().catch(() => null);
+      if (login === null) return;
+
+      let requestedAt: string | null;
+      try {
+        requestedAt = await fetchLastReviewRequest(artifact.pr, login);
+      } catch {
+        // A read that failed is not evidence of anything, so nothing happens to
+        // the row. It is not re-asked about until the leash above expires: the
+        // stamp is spent before the call on purpose, so gh being down cannot
+        // turn every settled row into a retry on every poll.
+        return;
+      }
+      if (requestedAt === null || !askedAgainAfterSettling(artifact, requestedAt)) return;
+      const at = requestedAt;
+
+      // Re-read from disk: a re-review or a send may have started in the time
+      // that call took, and neither wants its status rewritten underneath it.
+      const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
+        askedAgainAfterSettling(a, at)
+          ? // `filed` goes with the status it explained: cerber's account of why
+            // this row was settled is not the story of a row that is back.
+            { ...a, status: reopenedStatus(a), settledAt: null, filed: null }
+          : a,
+      );
+      // The status is what says the write landed. `settledAt` cannot: a legacy
+      // row never had one, so a mutation that declined would read as a reopen.
+      if (saved && !SETTLED_BY_YOU.has(saved.status)) {
+        log(`[${artifact.id}] your review was requested again on ${at.slice(0, 10)} — back in the inbox`);
+      }
+    }
+
     for (const ref of refs) {
       const existing = await loadArtifact(artifactId(ref));
       if (existing) {
+        await reopenIfAskedAgain(existing);
         // The search result is what the PR is right now; the artifact can
         // predate a draft→ready flip. Refresh from it — it costs nothing, it's
         // already in hand — or the queue keeps calling a ready PR a draft until
@@ -312,11 +428,6 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       await saveArtifact(stubArtifact(ref));
       discovered.push(ref);
     }
-
-    // Asked once per pass, and only if a row actually reaches the check that
-    // needs it. Undefined is "not asked yet"; null is "gh could not say", which
-    // attributes nothing to you rather than guessing.
-    let login: string | null | undefined;
 
     /**
      * File a draft away once GitHub has moved past it without cerber's help.
@@ -352,7 +463,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
        *  these reads took, and neither wants filing out from under it. */
       async function file(filed: FiledInfo, note: string, stillFilable: (a: Artifact) => boolean) {
         const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
-          stillFilable(a) ? { ...a, status: "reviewed" as const, filed } : a,
+          stillFilable(a) ? { ...a, status: "reviewed" as const, filed, settledAt: filed.at } : a,
         );
         if (saved?.filed) log(`[${artifact.id}] ${note} — filed as reviewed`);
       }

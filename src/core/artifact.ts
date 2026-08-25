@@ -316,6 +316,18 @@ export const ArtifactSchema = z.object({
   sent: SentInfoSchema.nullable().default(null),
   /** Set when cerber filed this draft away itself, and why. Never on a sent one. */
   filed: FiledInfoSchema.nullable().default(null),
+  /**
+   * When this review was settled — marked `reviewed` or `skipped`, by you or by
+   * cerber filing it. Null on anything not settled.
+   *
+   * A settle answers the request that was open at the time. It cannot answer
+   * one that came afterwards, so the poll needs to know which side of it a
+   * review request falls on before deciding a settled row stays settled
+   * (`askedAgainAfterSettling` in `src/server/daemon.ts`). `updatedAt` cannot
+   * stand in for this: opening a settled review refreshes it, which moves that
+   * field forward long after the decision it is meant to date.
+   */
+  settledAt: z.string().nullable().default(null),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),

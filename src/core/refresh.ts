@@ -86,6 +86,10 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
   return {
     ...fresh,
     status: userOwnsStatus(current) ? current.status : fresh.status,
+    // Travels with the status it dates. A settle that landed while the run
+    // worked keeps both halves of itself, and a run that reopens the row takes
+    // the stamp away with the status.
+    settledAt: userOwnsStatus(current) ? current.settledAt : fresh.settledAt,
     sent: current.sent,
     calibration: current.calibration,
     filed: current.filed,
