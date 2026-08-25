@@ -362,6 +362,12 @@ log any of them had to remember to carry would be lost by the first that
 didn't. So a history handed in is ignored — what is on disk is the only copy —
 and a new write path is recorded without knowing history exists.
 
+Which is why every save re-reads the file first, even when the caller has just
+read it. Two writers share these files (§1), so a caller's copy can be out of
+date by the time it writes, and appending to *that* would drop whatever the
+other one recorded in between. The rest of the artifact is lost in that race
+either way; the history need not be.
+
 Three things go in, and two deliberately don't (`src/core/history.ts`):
 
 - **What changed**, from a watchlist: status, head sha, PR state and draftness,

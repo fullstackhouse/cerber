@@ -1,4 +1,4 @@
-import { mkdtempSync, promises as fs } from "node:fs";
+import { mkdtempSync, promises as fs, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -159,6 +159,32 @@ describe("the history every write keeps", () => {
       }),
     );
     expect(await whatHappened()).toEqual(["first written here (ready)", "status ready → skipped"]);
+  });
+
+  it("keeps an entry another writer landed between the read and the write", async () => {
+    await saveArtifact(artifact({ status: "ready" }));
+    const file = path.join(home, "reviews", `${key}.json`);
+
+    await updateArtifactByKey(key, (a) => {
+      // The poll lands a note in the window between the load this mutation was
+      // handed and the save that follows it — the race two writers on one file
+      // genuinely have. Appending to the copy in hand would drop it.
+      const theirs = JSON.parse(readFileSync(file, "utf8"));
+      theirs.history.push({
+        at: "2026-08-24T14:45:00Z",
+        by: "daemon",
+        what: "left alone: you marked it skipped",
+        cause: "poll",
+      });
+      writeFileSync(file, JSON.stringify(theirs));
+      return { ...a, status: "skipped" as const };
+    });
+
+    expect(await whatHappened()).toEqual([
+      "first written here (ready)",
+      "left alone: you marked it skipped",
+      "status ready → skipped",
+    ]);
   });
 
   it("names which part of cerber made the change", async () => {

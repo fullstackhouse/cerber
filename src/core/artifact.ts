@@ -329,11 +329,13 @@ export const ArtifactSchema = z.object({
   /**
    * Everything that has happened to this review, oldest first.
    *
-   * Optional because nothing outside `saveArtifact` writes it: hand one in and
-   * it is ignored, since the log on disk is the only copy that is current. See
-   * `history.ts` for what is recorded and what is deliberately left out.
+   * Optional, and with no default: nothing outside `saveArtifact` writes this,
+   * so absent means absent — an artifact from before it was kept, which the
+   * cockpit and the CLI say so about rather than showing as an empty history.
+   * Hand one in and it is ignored; the log on disk is the only current copy.
+   * See `history.ts` for what is recorded and what is deliberately left out.
    */
-  history: z.array(HistoryEntrySchema).default([]).optional(),
+  history: z.array(HistoryEntrySchema).optional(),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

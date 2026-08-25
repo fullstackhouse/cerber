@@ -47,21 +47,24 @@ async function readPrior(file: string): Promise<{ artifact: Artifact | null; unr
  * carry would be lost by the first one that didn't. Appending at the one place
  * every write goes through makes the record a property of writing.
  *
- * `prior` is an optimisation for callers that have just read the file (it
- * saves reading it twice, and an artifact carries a whole diff); `note` records
- * a decision that changed nothing, which is the only kind of history the diff
- * cannot see. Neither touches `updatedAt` — that is `updateArtifactByKey`'s.
+ * The read here is not skippable, even for a caller that has just done one of
+ * its own. Two writers share these files — the poll's timer and the cockpit's
+ * button — so a caller's copy can be out of date by the time it writes, and
+ * appending to *that* would drop whatever the other one recorded in between.
+ * The rest of the artifact is lost in that race either way; the history need
+ * not be, and the extra read is one file next to a write of the same file.
+ *
+ * `note` records a decision that changed nothing, which is the only kind of
+ * history a diff cannot see. It does not touch `updatedAt` — that belongs to
+ * `updateArtifactByKey`.
  */
 export async function saveArtifact(
   artifact: Artifact,
-  opts: { prior?: Artifact | null; note?: string } = {},
+  opts: { note?: string } = {},
 ): Promise<string> {
   await fs.mkdir(reviewsDir(), { recursive: true });
   const file = artifactPath(artifact.id);
-  const prior =
-    opts.prior !== undefined
-      ? { artifact: opts.prior, unreadable: false }
-      : await readPrior(file);
+  const prior = await readPrior(file);
   const next: Artifact = {
     ...artifact,
     history: appendHistory(prior.artifact, artifact, {
@@ -96,7 +99,7 @@ export async function noteHistory(id: string, what: string): Promise<void> {
   // it again.
   const history = appendHistory(prior, prior, { note: what });
   if (history.length === (prior.history ?? []).length) return;
-  await saveArtifact(prior, { prior, note: what });
+  await saveArtifact(prior, { note: what });
 }
 
 export async function loadArtifact(id: string): Promise<Artifact | null> {
@@ -176,7 +179,7 @@ export async function updateArtifactByKey(
   const artifact = await loadArtifactByKey(key);
   if (!artifact) return null;
   const updated = { ...mutate(artifact), updatedAt: new Date().toISOString() };
-  await saveArtifact(updated, { prior: artifact });
+  await saveArtifact(updated);
   return updated;
 }
 
@@ -207,21 +210,18 @@ export async function reconcileRunning(
     const stuckChat =
       artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;
     if (!stuckRun && !stuckChat) continue;
-    await saveArtifact(
-      {
-        ...artifact,
-        status: stuckRun ? "failed" : artifact.status,
-        updatedAt: new Date().toISOString(),
-        run:
-          stuckRun && artifact.run
-            ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
-            : artifact.run,
-        pendingChat: stuckChat
-          ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
-          : artifact.pendingChat,
-      },
-      { prior: artifact },
-    );
+    await saveArtifact({
+      ...artifact,
+      status: stuckRun ? "failed" : artifact.status,
+      updatedAt: new Date().toISOString(),
+      run:
+        stuckRun && artifact.run
+          ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
+          : artifact.run,
+      pendingChat: stuckChat
+        ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
+        : artifact.pendingChat,
+    });
     cleared++;
   }
   return cleared;
