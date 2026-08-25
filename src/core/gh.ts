@@ -356,6 +356,67 @@ export function stillRequested(requests: ReviewRequests, login: string): boolean
   return requests.teams.length > 0 || requests.users.includes(login);
 }
 
+/**
+ * When someone last asked *you*, by name, for a review — and nothing else.
+ *
+ * `fetchReviewRequests` answers whether a request is open; this answers when it
+ * was made, which is the only way to tell a request you already dealt with from
+ * a second one asking again. A withdrawn-then-re-added request looks identical
+ * to the original in every other read GitHub offers.
+ *
+ * Team requests are deliberately ignored. `stillRequested` counts them because
+ * refusing to file work away is the safe side of that question; this one decides
+ * to *undo* a decision of yours, where the safe side is doing nothing unless
+ * somebody named you.
+ */
+export interface RequestedReviewEvent {
+  createdAt: string;
+  requestedReviewer: { __typename?: string; login?: string } | null;
+}
+
+export function lastRequestOf(events: RequestedReviewEvent[], login: string): string | null {
+  const mine = events.filter((e) => e.requestedReviewer?.__typename === "User" && e.requestedReviewer.login === login);
+  if (mine.length === 0) return null;
+  return mine.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).createdAt;
+}
+
+const LAST_REQUEST_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      timelineItems(last:20,itemTypes:[REVIEW_REQUESTED_EVENT]){
+        nodes{... on ReviewRequestedEvent{createdAt requestedReviewer{__typename ... on User{login}}}}
+      }
+    }
+  }
+}`;
+
+/**
+ * Ask GitHub when your review was last requested on a PR.
+ *
+ * GraphQL rather than the REST timeline on purpose: this runs on rows the queue
+ * already holds, poll after poll, and the timeline of a busy PR is hundreds of
+ * events across several pages. `timelineItems(last:20, itemTypes:[…])` is one
+ * call whatever the PR's history looks like.
+ */
+export async function fetchLastReviewRequest(ref: PrRef, login: string): Promise<string | null> {
+  const out = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=${LAST_REQUEST_QUERY}`,
+    "-F",
+    `owner=${ref.owner}`,
+    "-F",
+    `repo=${ref.repo}`,
+    "-F",
+    `number=${ref.number}`,
+  ]);
+  const raw = JSON.parse(out) as {
+    data?: { repository?: { pullRequest?: { timelineItems?: { nodes?: RequestedReviewEvent[] } } } };
+  };
+  return lastRequestOf(raw.data?.repository?.pullRequest?.timelineItems?.nodes ?? [], login);
+}
+
 export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",

@@ -58,6 +58,7 @@ function artifact(status: ArtifactStatus, headSha: string): Artifact {
     run: null,
     sent: null,
     filed: null,
+    settledAt: null,
     refresh: null,
     calibration: null,
     chat: [],

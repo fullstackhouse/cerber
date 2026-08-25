@@ -70,7 +70,7 @@ const HEAD_SENSITIVE = new Set(["ready", "sent"]);
  * as cerber overruling you — and on a busy PR it happens every few minutes.
  * The way back in is the way you got out: press re-review, which forces.
  */
-const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
+export const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
 
 /**
  * Fetch a PR, run the AI review, persist the artifact at each stage.
@@ -213,6 +213,7 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     sent: null,
     refresh: null,
     filed: null,
+    settledAt: null,
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the
     // chat prompt replays the transcript, which is what makes it survive the

@@ -24,7 +24,7 @@ Four things write the artifact, and most questions in this document are really
 
 | Writer | Where | What it may do |
 | --- | --- | --- |
-| **the poll** | `src/server/daemon.ts` | create stubs, archive, file, delete stubs, start drafts — and, with `--auto-send`, submit and mark `sent` |
+| **the poll** | `src/server/daemon.ts` | create stubs, archive, file, reopen a settled row someone asked you about again, delete stubs, start drafts — and, with `--auto-send`, submit and mark `sent` |
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
 | **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
@@ -55,7 +55,13 @@ Two derived groupings drive most behaviour:
 - **`SETTLED = [sent, reviewed, skipped]`** (`web/src/inbox.ts`) — out of the
   live queue.
 - **`SETTLED_BY_YOU = [reviewed, skipped]`** (`src/runner/review.ts`) — a new
-  push must not drag these back.
+  push must not drag these back. A new *request* is the one thing that can
+  (§5, "Asked again").
+
+Settling one of those stamps `settledAt`. That field exists for exactly one
+question — did this review request come before or after your decision — and
+`updatedAt` cannot answer it, because opening a settled review refreshes it and
+moves that field forward long afterwards.
 
 `archived` is *not* a status. It is `pr.state !== "OPEN"` — merged or closed.
 It moves a row out of the live tabs and out of **settled** and **sent**, and
@@ -103,9 +109,15 @@ running ──cerber restarted─► failed   (reconcileRunning)
 does not:
 
 ```
-any unsent row ──you mark it────────────────► reviewed | skipped
-ready ──the poll finds GitHub moved past it─► reviewed  (+ `filed`)
+any unsent row ──you mark it────────────────► reviewed | skipped  (+ `settledAt`)
+ready ──the poll finds GitHub moved past it─► reviewed  (+ `filed`, `settledAt`)
 ready ──Send / `cerber send` / auto-send────► sent
+```
+
+And the one way back out of settled without you pressing anything:
+
+```
+reviewed | skipped ──asked for again since `settledAt`──► ready | awaiting
 ```
 
 Settling is the one that is not restricted to a finished draft: the cockpit
@@ -150,7 +162,10 @@ a token it checks the artifact already on disk:
 1. `force`? → run. (The cockpit's **re-review** button always forces;
    `cerber review --force` too.)
 2. Status in `SETTLED_BY_YOU` (`reviewed`, `skipped`)? → **skip**, log
-   "use --force". *This is why marking a PR reviewed survives a push.*
+   "use --force". *This is why marking a PR reviewed survives a push.* The poll
+   can still take such a row out of settled first — see "Asked again" in §5 —
+   but that is a decision about the queue, made before this guard is reached,
+   and never about spending a run on a row that is still settled.
 3. Status in `HEAD_SENSITIVE` (`ready`, `sent`) **and** the head the last run
    *read* is still the PR's head? → **skip** as up to date. (Which sha that is,
    and why it is not `pr.headSha`, is the paragraph below.)
@@ -253,6 +268,10 @@ walk `walkable()`: open, unsettled rows only.
 | GitHub moved past a finished draft | status → `reviewed`, `filed` set | `fileIfSettledElsewhere` |
 | Auto-send is on and the draft qualified | status → `sent` (the **sent** tab) | `handleAutoSend` |
 
+And the one that *adds* a row back: your review requested again after you
+settled → status → `ready`/`awaiting`, `settledAt` and `filed` cleared
+(`reopenIfAskedAgain`; see "Asked again" below).
+
 A **pure stub** is `awaiting`, with no comments and **`run === null`** — it
 does not look at chapters. The `run` block is what makes this safe: the create
 endpoint persists one before it answers, so a review you pulled in by hand is
@@ -279,6 +298,37 @@ in `src/server/daemon.ts`; the `FiledReason` type itself in
 Someone *answering* your comment files nothing — that reply is addressed to
 you. State checks are leashed to one per artifact per 30 minutes and capped
 per poll.
+
+### Asked again: the way back out of settled
+
+Filing's mirror image, and the only thing that reopens a settled row on its own
+(`reopenIfAskedAgain`, `src/server/daemon.ts`). A skip says "I am done with
+this PR", and a push does not undo that. Somebody asking you *again* is a
+different event: your skip answered the request that was open when you made it
+and cannot have answered one that came later — which is what a request
+withdrawn and then re-added is. Nothing else in GitHub's API distinguishes the
+two, so this reads the one thing that does: the timestamp of the last
+`REVIEW_REQUESTED_EVENT` naming you (`fetchLastReviewRequest`, one GraphQL call).
+
+Conditions, all of them: the row is `reviewed` or `skipped`, it was never sent,
+GitHub is asking about it *now* (only rows in the awaiting search are checked
+at all), and the request is newer than `settledAt`. Then the row goes back to
+`ready` — or `awaiting` if it has no finished draft to show — `settledAt` and
+`filed` are cleared, and the ordinary rules take it from there: the freshness
+guard in §4 re-drafts it if the head has moved since the run read it, and
+leaves the existing draft alone if it has not. Same leash as the state checks
+above: one call per artifact per 30 minutes, capped per poll.
+
+Team requests are ignored here on purpose. `stillRequested` counts them because
+refusing to *file work away* is the safe side of that question; this decides to
+undo a decision of yours, where the safe side is doing nothing unless somebody
+named you.
+
+Rows settled before `settledAt` existed are dated by the latest moment cerber
+can prove the decision came after — cerber's own `filed.at`, or `run.finishedAt`
+(you cannot have skipped a draft before it existed). Both are lower bounds, so
+the cost of being wrong is one row coming back once; the alternative is that
+every row settled before this shipped stays unreachable forever.
 
 ### "Whose move is it"
 
@@ -381,7 +431,9 @@ freshness guard skipped is not re-judged or re-logged on later polls.
 (the **sent** tab — `sent` is in `SETTLED` too), it's settled (`reviewed` /
 `skipped` — the **settled** tab, and check **open requests**), the PR is
 merged/closed (**archived**), the poll is off, or GitHub isn't requesting your
-review.
+review. A settled row that GitHub *has* asked you about again since you settled
+it is meant to come back on its own — if it hasn't, the poll is off, or the
+request is older than your decision.
 
 **"Why did this PR come back?"** — The poll re-drafted it, which needs polling
 and auto-review both on and the PR still in the awaiting search. Given that:
@@ -389,8 +441,10 @@ its status was `awaiting` or `failed`, which are retried with no push involved
 at all; or the author pushed and it was `ready` or `sent`, both head-sensitive
 — though a `sent` row also needs someone to have asked you again. Whether you
 have opened the draft since the push makes no difference: the guard compares
-against the head the run *read*, not the one the artifact mentions. Only
-`reviewed` and `skipped` never come back under any of it.
+against the head the run *read*, not the one the artifact mentions. A
+`reviewed` or `skipped` row comes back for one reason only, and it is not a
+push: somebody requested your review *again* after you settled it — see "Asked
+again" in §5.
 
 **"Why won't it re-review?"** — Both causes are the freshness guard in §4, so
 they only bind the callers that obey it (the poll, plain `cerber review`):

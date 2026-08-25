@@ -315,6 +315,7 @@ export async function buildApp(
       sent: null,
       refresh: null,
       filed: null,
+      settledAt: null,
       calibration: null,
       chat: [],
       preChat: null,
@@ -365,6 +366,10 @@ export async function buildApp(
       const next = { ...a };
       if (body.status !== undefined) {
         next.status = ArtifactStatusSchema.parse(body.status);
+        // Dated on the way in, because nothing else can date it later: the poll
+        // asks whether a review request came before or after this decision, and
+        // `updatedAt` moves every time the review is opened and refreshed.
+        next.settledAt = new Date().toISOString();
       }
       if (body.verdictRecommendation !== undefined && next.verdict) {
         next.verdict = {
