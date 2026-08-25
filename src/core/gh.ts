@@ -380,11 +380,17 @@ export function lastRequestOf(events: RequestedReviewEvent[], login: string): st
   return mine.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).createdAt;
 }
 
-// 100 is the page maximum, and it costs exactly what 20 would: one call. The
-// window has to hold every request event on the PR, not just the recent ones —
-// a PR that cycled through a dozen reviewers can push the request that named
-// *you* off the end, and the answer would then be "nobody asked", silently
-// restoring the bug this exists to fix.
+// 100 is the page maximum, and it costs exactly what a smaller window would:
+// one call. It wants to be big because the recent events are not the useful
+// ones — a PR that cycled through a dozen reviewers can push the request that
+// named *you* past a short window, and the answer would come back "nobody
+// asked", silently restoring the bug this exists to fix.
+//
+// It is still a window, not a guarantee: a PR carrying more than 100 review
+// requests would lose the oldest, and that is accepted rather than paginated.
+// Paginating would cost one call per extra page on every settled row on every
+// poll, to cover a PR that does not realistically exist — and the failure mode
+// is the conservative one, a row left settled rather than one wrongly reopened.
 const LAST_REQUEST_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
@@ -399,9 +405,11 @@ const LAST_REQUEST_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
  * Ask GitHub when your review was last requested on a PR.
  *
  * GraphQL rather than the REST timeline on purpose: this runs on rows the queue
- * already holds, poll after poll, and the timeline of a busy PR is hundreds of
- * events across several pages. Filtered to the one event type, the last page
- * holds the lot in one call whatever the PR's history looks like.
+ * already holds, poll after poll, and the REST timeline of a busy PR is hundreds
+ * of events across several pages — every one of them fetched to find the handful
+ * that are review requests. Filtering server-side to the one event type turns
+ * that into a single call; the window it reads is bounded, as the query above
+ * explains.
  */
 export async function fetchLastReviewRequest(ref: PrRef, login: string): Promise<string | null> {
   const out = await gh([
