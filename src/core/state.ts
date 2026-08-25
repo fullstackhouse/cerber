@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Artifact, ArtifactSchema, artifactKey } from "./artifact.js";
+import { appendHistory, noteIsRepeat } from "./history.js";
 
 export function cerberHome(): string {
   return process.env.CERBER_HOME ?? path.join(os.homedir(), ".cerber");
@@ -15,13 +16,90 @@ function artifactPath(id: string): string {
   return path.join(reviewsDir(), `${artifactKey(id)}.json`);
 }
 
-export async function saveArtifact(artifact: Artifact): Promise<string> {
+/**
+ * Read whatever is on disk, tolerating anything.
+ *
+ * These files are the user's to edit, so a broken one has to be survivable:
+ * before, a save simply overwrote it. It still does — but the timeline says so
+ * rather than quietly claiming the review began at that moment.
+ */
+async function readPrior(file: string): Promise<{ artifact: Artifact | null; unreadable: boolean }> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { artifact: null, unreadable: false };
+    return { artifact: null, unreadable: true };
+  }
+  try {
+    return { artifact: ArtifactSchema.parse(JSON.parse(raw)), unreadable: false };
+  } catch {
+    return { artifact: null, unreadable: true };
+  }
+}
+
+/**
+ * Write an artifact, and record what changed about it.
+ *
+ * The history is appended here rather than by the caller on purpose. Around
+ * twenty places write artifacts and several of them overwrite one wholesale
+ * from a copy built minutes earlier — a log any of them had to remember to
+ * carry would be lost by the first one that didn't. Appending at the one place
+ * every write goes through makes the record a property of writing.
+ *
+ * The read here is not skippable, even for a caller that has just done one of
+ * its own. Two writers share these files — the poll's timer and the cockpit's
+ * button — so a caller's copy can be out of date by the time it writes, and
+ * appending to *that* would drop whatever the other one recorded in between.
+ * The rest of the artifact is lost in that race either way; the history need
+ * not be, and the extra read is one file next to a write of the same file.
+ *
+ * `note` records a decision that changed nothing, which is the only kind of
+ * history a diff cannot see. It does not touch `updatedAt` — that belongs to
+ * `updateArtifactByKey`.
+ */
+export async function saveArtifact(
+  artifact: Artifact,
+  opts: { note?: string } = {},
+): Promise<string> {
   await fs.mkdir(reviewsDir(), { recursive: true });
   const file = artifactPath(artifact.id);
+  const prior = await readPrior(file);
+  const next: Artifact = {
+    ...artifact,
+    history: appendHistory(prior.artifact, artifact, {
+      note: opts.note,
+      unreadable: prior.unreadable,
+    }),
+  };
   const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(artifact, null, 2));
+  await fs.writeFile(tmp, JSON.stringify(next, null, 2));
   await fs.rename(tmp, file);
   return file;
+}
+
+/**
+ * Write down a decision that changed nothing.
+ *
+ * The poll's silences are the hardest thing to debug about it — it looks at a
+ * settled row, decides deliberately to leave it alone, and leaves no trace of
+ * having looked. This is that trace. It is not a change to the review, so
+ * `updatedAt` stays put: a note must not reorder the queue.
+ *
+ * Missing artifacts are ignored, and a note identical to the last entry is
+ * dropped, so a decision re-taken every poll is recorded once.
+ */
+export async function noteHistory(id: string, what: string): Promise<void> {
+  const prior = await loadArtifact(id).catch(() => null);
+  if (!prior) return;
+  // Nothing to add means nothing to write: the poll re-takes these decisions
+  // every few minutes, and rewriting a whole artifact, diff and all, to change
+  // nothing is the expensive half of saying it again. The rule for "nothing to
+  // add" is `appendHistory`'s, so ask it rather than knowing it twice — and ask
+  // it directly, because at the cap an appended note trims an older entry and
+  // leaves the length exactly as it was.
+  if (noteIsRepeat(prior, what)) return;
+  await saveArtifact(prior, { note: what });
 }
 
 export async function loadArtifact(id: string): Promise<Artifact | null> {

@@ -901,6 +901,18 @@ describe("a review you settled, and were asked for again", () => {
     expect(after?.run?.reviewedSha).toBe("abc1234");
   });
 
+  it("writes down why the row came back, not just that it did", async () => {
+    // A status change says a row moved. The point of undoing a settle is *why*
+    // it was undone, and that is the one thing the status cannot carry.
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.history?.map((e) => e.what)).toContain(
+      "back in the inbox: your review was requested again on 2026-08-24, after you settled it",
+    );
+  });
+
   it("leaves your skip standing when the ask is the one you already answered", async () => {
     await saveArtifact(settled());
     lastRequest.mockResolvedValue("2026-08-21T10:43:27Z");

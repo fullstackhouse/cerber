@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HistoryEntrySchema } from "./history.js";
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -337,6 +338,16 @@ export const ArtifactSchema = z.object({
   pendingChat: PendingChatSchema.nullable().default(null),
   /** The review as it stood before the first chat turn — "reset" restores this. */
   preChat: ReviewSnapshotSchema.nullable().default(null),
+  /**
+   * Everything that has happened to this review, oldest first.
+   *
+   * Optional, and with no default: nothing outside `saveArtifact` writes this,
+   * so absent means absent — an artifact from before it was kept, which the
+   * cockpit and the CLI say so about rather than showing as an empty history.
+   * Hand one in and it is ignored; the log on disk is the only current copy.
+   * See `history.ts` for what is recorded and what is deliberately left out.
+   */
+  history: z.array(HistoryEntrySchema).optional(),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

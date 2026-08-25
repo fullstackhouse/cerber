@@ -16,6 +16,7 @@ import {
   stillRequested,
   submitReview,
 } from "../core/gh.js";
+import { withWriter } from "../core/history.js";
 import { notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
@@ -23,6 +24,7 @@ import {
   deleteArtifact,
   listArtifacts,
   loadArtifact,
+  noteHistory,
   saveArtifact,
   updateArtifactByKey,
 } from "../core/state.js";
@@ -406,6 +408,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // row never had one, so a mutation that declined would read as a reopen.
       if (saved && !SETTLED_BY_YOU.has(saved.status)) {
         log(`[${artifact.id}] your review was requested again on ${at.slice(0, 10)} — back in the inbox`);
+        // The status change alone says a row moved; this says why it moved,
+        // which is the whole reason a settle is allowed to be undone at all.
+        await noteHistory(
+          artifact.id,
+          `back in the inbox: your review was requested again on ${at.slice(0, 10)}, after you settled it`,
+        );
       }
     }
 
@@ -498,13 +506,24 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       }
       // Anything but silence from you leaves the row alone: `them` is somebody
       // answering a comment of yours, which is the opposite of settled.
-      if (classifyReply(conversation, me) !== "none") return;
+      if (classifyReply(conversation, me) !== "none") {
+        await noteHistory(artifact.id, "someone has answered you on the PR — the draft stays out for you");
+        return;
+      }
       if (!filedByWithdrawnRequest(artifact)) return;
 
       // The awaiting search says nobody is asking, and here that is the entire
       // case — so confirm it against the PR itself before acting on it. The
       // other two reasons stand on a fact of their own and need no such check.
-      if (stillRequested(await fetchReviewRequests(artifact.pr), me)) return;
+      if (stillRequested(await fetchReviewRequests(artifact.pr), me)) {
+        // The one fact GitHub cannot be asked for later: what its search index
+        // said at this minute, and that the PR itself disagreed with it.
+        await noteHistory(
+          artifact.id,
+          "gone from the awaiting search, but GitHub still lists you as a requested reviewer — left alone",
+        );
+        return;
+      }
       await file(
         { at: new Date().toISOString(), reason: "request-withdrawn", review: null, reply: null },
         "nobody is asking for this review any more",
@@ -661,7 +680,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     return { reviewed, skipped, failed };
   }
 
-  async function poll(): Promise<void> {
+  /** Everything a poll writes is the poll's — including the reviews it starts,
+   *  which stamp themselves as runs from inside this. */
+  const poll = () => withWriter({ by: "daemon", cause: "poll" }, runPoll);
+
+  async function runPoll(): Promise<void> {
     if (status.polling) return;
     status.polling = true;
     status.lastPollAt = new Date().toISOString();

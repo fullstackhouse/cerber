@@ -355,12 +355,36 @@ the summary, comments and verdict alone, and is still one deliberate click. A
 review that has already been sent can't be argued with: that artifact is the
 record of what GitHub has.
 
+### Every row remembers what happened to it
+
+A review keeps one "last updated" time, which means every write erases the
+answer to *when did I skip this, and did they ask again afterwards?* So each
+one also keeps a history: the status changes with their timestamps, every push
+it saw, each run and what it cost, sends, refreshes — and which part of cerber
+did it, whether that was you in the cockpit, the CLI, an AI run or the poll.
+
+The poll's silences are in there too. When it looks at a row and deliberately
+leaves it alone — you settled it, so a new push does not reopen it; or GitHub
+still lists you as a requested reviewer even though its own search has stopped
+saying so — it writes that down instead of passing without a trace. That is
+usually the answer when a PR is not where you expected it to be.
+
+It's at the foot of every review in the cockpit, and:
+
+```bash
+cerber history owner/repo#123
+```
+
+Nothing about GitHub's own timeline is copied here — GitHub keeps that, and
+`gh` can be asked for it again. This is cerber's side of the story.
+
 ## Status
 
 Early, but whole: everything described above has shipped — reviewing,
 editing and the gated Send, inbox discovery with parallel runs, confidence
 calibration (`cerber stats`), shadow-mode and opt-in auto-send, re-anchoring
-onto new commits, source-backed and trusted runs, and the reviewer chat.
+onto new commits, source-backed and trusted runs, the reviewer chat, and a
+per-review history of everything that touched it (`cerber history`).
 `cerber export` writes a review out as markdown if you want it elsewhere.
 
 ## Running on a VPS

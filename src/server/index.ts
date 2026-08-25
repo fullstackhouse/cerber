@@ -21,6 +21,7 @@ import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.j
 import { z } from "zod";
 import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact } from "../core/refresh.js";
+import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
@@ -71,6 +72,14 @@ export async function buildApp(
   opts: Pick<ServeOptions, "token" | "daemon" | "withSource" | "trust">,
 ): Promise<Hono> {
   const app = new Hono();
+
+  // Whatever any route writes to an artifact is stamped with the request that
+  // caused it — once, here, rather than route by route, so a route added later
+  // is labelled without knowing that history exists. A detached run started by
+  // a request re-labels its own writes for itself.
+  app.use("*", (c, next) =>
+    withWriter({ by: "cockpit", cause: `${c.req.method} ${new URL(c.req.url).pathname}` }, next),
+  );
 
   if (opts.token) {
     const token = opts.token;

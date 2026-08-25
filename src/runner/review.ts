@@ -11,7 +11,8 @@ import {
 import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
 import { mergeRunResult, userOwnsStatus } from "../core/refresh.js";
-import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
+import { loadArtifact, noteHistory, saveArtifact, updateArtifactByKey } from "../core/state.js";
+import { withWriter } from "../core/history.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
 import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
@@ -124,9 +125,17 @@ async function resolveTrust(
   return decision.trusted;
 }
 
+/**
+ * Decide whether to run, then run.
+ *
+ * The two halves are deliberately not in the same writer context. Everything
+ * down to the guards belongs to whoever asked — the poll's timer, you at a
+ * terminal, the cockpit's button — and that is the whole value of the notes
+ * they write: a review that did not happen has no runner to blame, and "who
+ * wanted one" is the fact worth keeping. Only the run itself is the runner's.
+ */
 async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult> {
   const log = opts.onProgress ?? (() => {});
-  const now = () => new Date().toISOString();
 
   log(`Fetching ${ref.owner}/${ref.repo}#${ref.number}…`);
   const pr = await fetchPrInfo(ref);
@@ -135,6 +144,14 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
   if (existing && !opts.force) {
     if (SETTLED_BY_YOU.has(existing.status)) {
       log(`You marked this ${existing.status} — leaving it alone. Use --force to re-review.`);
+      // Written down because it is the poll's most confusing silence: a row
+      // the author keeps pushing to, that never comes back into the inbox.
+      // Only a push, now — somebody asking again does reopen it, and says so
+      // for itself (`reopenIfAskedAgain`).
+      await noteHistory(
+        existing.id,
+        `left alone: you marked it ${existing.status}, so a new push does not reopen it`,
+      );
       return { artifact: existing, skipped: true };
     }
     // The sha the AI *read*, not the one the artifact happens to mention.
@@ -146,9 +163,28 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
     const reviewedSha = existing.run?.reviewedSha ?? existing.pr.headSha;
     if (HEAD_SENSITIVE.has(existing.status) && reviewedSha !== "" && reviewedSha === pr.headSha) {
       log(`Up to date (reviewed at ${reviewedSha.slice(0, 7)}, status ${existing.status}) — skipping. Use --force to re-review.`);
+      // Carries the sha, so it says itself again the next time the head moves
+      // and this guard stops being the reason nothing happened.
+      await noteHistory(existing.id, `already reviewed at ${reviewedSha.slice(0, 7)} — not re-reviewed`);
       return { artifact: existing, skipped: true };
     }
   }
+
+  // The run owns its writes from here, whoever asked for it: a re-review
+  // started from a cockpit click is still the runner rewriting the draft.
+  return await withWriter({ by: "runner", cause: "review" }, () =>
+    performReview(ref, pr, existing, opts, log),
+  );
+}
+
+async function performReview(
+  ref: PrRef,
+  pr: PrInfo,
+  existing: Artifact | null,
+  opts: ReviewOptions,
+  log: (message: string) => void,
+): Promise<ReviewResult> {
+  const now = () => new Date().toISOString();
 
   const diff = await fetchPrDiff(ref);
 

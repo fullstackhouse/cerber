@@ -5,6 +5,7 @@ import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
@@ -137,6 +138,47 @@ program
         `${a.status.padEnd(8)} ${a.id.padEnd(40)} ${v.padEnd(20)} ${a.pr.title}`,
       );
     }
+  });
+
+program
+  .command("history")
+  .description(
+    "Everything that has happened to a review: what changed, when, which part of cerber did it — and the decisions the poll took to leave it alone",
+  )
+  .argument("<pr>", "PR URL, owner/repo#number, or number (with --repo)")
+  .option("-R, --repo <owner/repo>", "repository for bare PR numbers")
+  .action(async (input: string, opts: { repo?: string }) => {
+    const ref = parsePrRef(input, opts.repo);
+    const artifact = await loadArtifact(artifactId(ref));
+    if (!artifact) {
+      console.error(`No review found for ${artifactId(ref)}. Run: cerber review ${input}`);
+      process.exit(1);
+    }
+    console.log(`${artifact.id} — ${artifact.pr.title}\n`);
+    const history = artifact.history ?? [];
+    if (history.length === 0) {
+      console.log(
+        "Nothing recorded. This review predates cerber keeping a history — it starts at the next thing that happens to it.",
+      );
+      return;
+    }
+    const stamp = (at: string) => {
+      const d = new Date(at);
+      return Number.isNaN(d.getTime())
+        ? at
+        : `${d.toLocaleDateString(undefined, { month: "short", day: "2-digit" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+    };
+    // The stamp's width is the locale's business, not ours — measure it.
+    const stampWidth = Math.max(...history.map((e) => stamp(e.at).length)) + 2;
+    for (const entry of history) {
+      // The cause names the path that made the change — which endpoint, which
+      // command — and is the whole point on a row two paths could have written.
+      console.log(
+        `${stamp(entry.at).padEnd(stampWidth)}${entry.by.padEnd(9)}${entry.what}` +
+          `${entry.cause ? `  ·  ${entry.cause}` : ""}`,
+      );
+    }
+    console.log(`\n(times are local · ${history.length} entr${history.length === 1 ? "y" : "ies"})`);
   });
 
 program
@@ -513,7 +555,10 @@ function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-program.parseAsync().catch((err) => {
+// Every artifact write under this command is stamped with the command that
+// made it. Nested contexts win, so `serve` labels its requests, its poll and
+// its runs for themselves rather than all of them "cli".
+withWriter({ by: "cli", cause: process.argv[2] ?? null }, () => program.parseAsync()).catch((err) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

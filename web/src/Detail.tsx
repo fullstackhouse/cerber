@@ -41,6 +41,7 @@ import {
   Chapter,
   ChatRef,
   ChatTurn,
+  HistoryEntry,
   RefreshResult,
   Revision,
   ReviewComment,
@@ -1165,6 +1166,82 @@ function FiledNote({ filed }: { filed: NonNullable<Artifact["filed"]> }) {
   );
 }
 
+/**
+ * Everything that has happened to this review.
+ *
+ * An artifact keeps one `updatedAt`, so without this the answer to "when did I
+ * skip this, and did anything ask for it again afterwards?" is gone the moment
+ * anything else touches the row. Collapsed by default: it is what you open when
+ * a review is not where you expected it, not part of reading one.
+ */
+function HistoryCard({
+  entries,
+  open,
+  onToggle,
+  anchorRef,
+}: {
+  entries: HistoryEntry[];
+  open: boolean;
+  onToggle: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
+}) {
+  const stamp = (at: string) => {
+    const d = new Date(at);
+    return Number.isNaN(d.getTime())
+      ? at
+      : `${d.toLocaleDateString(undefined, { month: "short", day: "2-digit" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  return (
+    <section className="card" ref={anchorRef}>
+      <header className="card-head">
+        <h2>history</h2>
+        <span className="faint">
+          {entries.length > 0
+            ? `${entries.length} entr${entries.length === 1 ? "y" : "ies"} — what cerber did to this row, and when`
+            : "nothing recorded"}
+        </span>
+        <span className="grow" />
+        {/* A disclosure, so it says whether it is open — the label alone leaves
+            a screen reader to infer that from the word "show". */}
+        <button className="btn btn-sm" aria-expanded={open} onClick={onToggle}>
+          <Icon name={open ? "up" : "down"} size={12} />
+          {open ? "hide" : "show"}
+        </button>
+      </header>
+      {open && (
+        <div className="card-body">
+          {entries.length === 0 ? (
+            <div className="faint">
+              This review predates cerber keeping a history — it starts at the next thing that
+              happens to it.
+            </div>
+          ) : (
+            <ol className="history">
+              {/* Newest first: the reason you opened this is almost always the
+                  last thing that happened, or the last thing that didn't. The
+                  key is the entry's position in the *append* order, which does
+                  not move when a new one lands — keying on the reversed index
+                  would re-mount every row on every poll. */}
+              {entries
+                .map((e, i) => ({ e, i }))
+                .reverse()
+                .map(({ e, i }) => (
+                <li key={`${i}-${e.at}`} className="history-row" title={e.at}>
+                  <span className="history-at">{stamp(e.at)}</span>
+                  <span className="history-by">{e.by}</span>
+                  <span className="history-what">{e.what}</span>
+                  {e.cause && <span className="history-cause">{e.cause}</span>}
+                </li>
+                ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FreshnessBanner({
   artifact,
   freshness,
@@ -1249,6 +1326,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const whyEl = useRef<HTMLDivElement | null>(null);
   const chatEl = useRef<HTMLElement | null>(null);
   const sendEl = useRef<HTMLDivElement | null>(null);
+  const historyEl = useRef<HTMLElement | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
@@ -1687,6 +1766,17 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             >
               chat
             </button>
+            {/* Where you go when the review is not where you expected it —
+                asking for it is asking to read it, so it opens on the way. */}
+            <button
+              className="lab rail-lab-btn"
+              onClick={() => {
+                setHistoryOpen(true);
+                jump(historyEl);
+              }}
+            >
+              history
+            </button>
           </div>
 
           {chapters.length > 0 && (
@@ -1859,6 +1949,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               </div>
             </section>
           )}
+
+          <HistoryCard
+            entries={artifact.history ?? []}
+            open={historyOpen}
+            onToggle={() => setHistoryOpen((v) => !v)}
+            anchorRef={historyEl}
+          />
         </div>
 
         {/* The two things you do rather than read. On a wide screen they are a
