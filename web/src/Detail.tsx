@@ -1193,7 +1193,7 @@ function HistoryCard({
   };
 
   return (
-    <section className="card" ref={anchorRef as React.RefObject<HTMLElement>}>
+    <section className="card" ref={anchorRef}>
       <header className="card-head">
         <h2>history</h2>
         <span className="faint">
@@ -1217,15 +1217,21 @@ function HistoryCard({
           ) : (
             <ol className="history">
               {/* Newest first: the reason you opened this is almost always the
-                  last thing that happened, or the last thing that didn't. */}
-              {[...entries].reverse().map((e, i) => (
-                <li key={`${e.at}-${i}`} className="history-row" title={e.at}>
+                  last thing that happened, or the last thing that didn't. The
+                  key is the entry's position in the *append* order, which does
+                  not move when a new one lands — keying on the reversed index
+                  would re-mount every row on every poll. */}
+              {entries
+                .map((e, i) => ({ e, i }))
+                .reverse()
+                .map(({ e, i }) => (
+                <li key={`${i}-${e.at}`} className="history-row" title={e.at}>
                   <span className="history-at">{stamp(e.at)}</span>
                   <span className="history-by">{e.by}</span>
                   <span className="history-what">{e.what}</span>
                   {e.cause && <span className="history-cause">{e.cause}</span>}
                 </li>
-              ))}
+                ))}
             </ol>
           )}
         </div>

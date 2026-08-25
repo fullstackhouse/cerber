@@ -5,6 +5,7 @@ import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, ArtifactStatus, PrInfo, SCHEMA_VERSION } from "../core/artifact.js";
 import { fetchPrDiff, fetchPrInfo } from "../core/gh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
+import { withWriter } from "../core/history.js";
 import { reviewPr } from "./review.js";
 
 // Only the freshness gate is under test: whether a run happens at all. Every
@@ -172,7 +173,8 @@ describe("what a new push does to a review", () => {
 });
 
 describe("what the poll writes down when it decides to do nothing", () => {
-  const whatHappened = async () => (await loadArtifact("acme/widgets#7"))?.history?.map((e) => e.what) ?? [];
+  const history = async () => (await loadArtifact("acme/widgets#7"))?.history ?? [];
+  const whatHappened = async () => (await history()).map((e) => e.what);
 
   it("explains a settled row that a push cannot reopen", async () => {
     // The silence this records is the one that is impossible to debug from the
@@ -203,6 +205,21 @@ describe("what the poll writes down when it decides to do nothing", () => {
     await reviewPr(REF);
     expect((await whatHappened()).slice(before)).toEqual([
       "already reviewed at same-sh — not re-reviewed",
+    ]);
+  });
+
+  it("credits whoever wanted the review, not the run that never happened", async () => {
+    // The note's whole value is *who was asking* — the poll's timer, or you at
+    // a terminal. Stamping it "runner" would name the one party that did
+    // nothing here, since the guard fired before any AI ran.
+    await saveArtifact(artifact("skipped", "old-sha"));
+    const before = (await whatHappened()).length;
+    prInfo.mockResolvedValue(pr("new-sha"));
+
+    await withWriter({ by: "daemon", cause: "poll" }, () => reviewPr(REF));
+
+    expect((await history()).slice(before)).toEqual([
+      expect.objectContaining({ by: "daemon", cause: "poll" }),
     ]);
   });
 });

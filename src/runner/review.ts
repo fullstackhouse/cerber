@@ -80,9 +80,7 @@ const SETTLED_BY_YOU = new Set(["reviewed", "skipped"]);
 export async function reviewPr(ref: PrRef, opts: ReviewOptions = {}): Promise<ReviewResult> {
   beginReview(artifactId(ref));
   try {
-    // The run owns its writes, whoever asked for it: a re-review started from
-    // a cockpit click is still the runner rewriting the draft.
-    return await withWriter({ by: "runner", cause: "review" }, () => runReview(ref, opts));
+    return await runReview(ref, opts);
   } finally {
     endReview(artifactId(ref));
   }
@@ -127,9 +125,17 @@ async function resolveTrust(
   return decision.trusted;
 }
 
+/**
+ * Decide whether to run, then run.
+ *
+ * The two halves are deliberately not in the same writer context. Everything
+ * down to the guards belongs to whoever asked — the poll's timer, you at a
+ * terminal, the cockpit's button — and that is the whole value of the notes
+ * they write: a review that did not happen has no runner to blame, and "who
+ * wanted one" is the fact worth keeping. Only the run itself is the runner's.
+ */
 async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult> {
   const log = opts.onProgress ?? (() => {});
-  const now = () => new Date().toISOString();
 
   log(`Fetching ${ref.owner}/${ref.repo}#${ref.number}…`);
   const pr = await fetchPrInfo(ref);
@@ -161,6 +167,22 @@ async function runReview(ref: PrRef, opts: ReviewOptions): Promise<ReviewResult>
       return { artifact: existing, skipped: true };
     }
   }
+
+  // The run owns its writes from here, whoever asked for it: a re-review
+  // started from a cockpit click is still the runner rewriting the draft.
+  return await withWriter({ by: "runner", cause: "review" }, () =>
+    performReview(ref, pr, existing, opts, log),
+  );
+}
+
+async function performReview(
+  ref: PrRef,
+  pr: PrInfo,
+  existing: Artifact | null,
+  opts: ReviewOptions,
+  log: (message: string) => void,
+): Promise<ReviewResult> {
+  const now = () => new Date().toISOString();
 
   const diff = await fetchPrDiff(ref);
 
