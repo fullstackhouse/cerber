@@ -370,6 +370,12 @@ export async function buildApp(
         // asks whether a review request came before or after this decision, and
         // `updatedAt` moves every time the review is opened and refreshed.
         next.settledAt = new Date().toISOString();
+        // And cerber's own account of why this row was settled goes with the
+        // status it explained. `filed` outranks the status wherever the queue
+        // tags a row (`rowTag`, `requestTag`), on the grounds that "reviewed"
+        // would otherwise read as a click nobody made — which stops being true
+        // the moment you click. Same rule the poll's reopen follows.
+        next.filed = null;
       }
       if (body.verdictRecommendation !== undefined && next.verdict) {
         next.verdict = {

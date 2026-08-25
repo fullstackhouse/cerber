@@ -55,8 +55,8 @@ Two derived groupings drive most behaviour:
 - **`SETTLED = [sent, reviewed, skipped]`** (`web/src/inbox.ts`) — out of the
   live queue.
 - **`SETTLED_BY_YOU = [reviewed, skipped]`** (`src/runner/review.ts`) — a new
-  push must not drag these back. A new *request* is the one thing that can
-  (§5, "Asked again").
+  push must not drag these back. The one thing that can is somebody requesting
+  your review *again* after you settled it — see §5, "Asked again".
 
 Settling one of those stamps `settledAt`. That field exists for exactly one
 question — did this review request come before or after your decision — and

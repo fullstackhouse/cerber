@@ -384,7 +384,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       try {
         requestedAt = await fetchLastReviewRequest(artifact.pr, login);
       } catch {
-        // A read that failed is not evidence of anything — next poll retries.
+        // A read that failed is not evidence of anything, so nothing happens to
+        // the row. It is not re-asked about until the leash above expires: the
+        // stamp is spent before the call on purpose, so gh being down cannot
+        // turn every settled row into a retry on every poll.
         return;
       }
       if (requestedAt === null || !askedAgainAfterSettling(artifact, requestedAt)) return;

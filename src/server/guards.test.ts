@@ -162,6 +162,22 @@ describe("PATCH /api/reviews/:key — only the statuses that are your decision",
     expect(Date.parse(at!)).toBeGreaterThanOrEqual(before);
   });
 
+  // `filed` outranks the status wherever the queue tags a row, on the grounds
+  // that "reviewed" would read as a click nobody made. Clicking makes it a
+  // click — so cerber's account of the row goes with the status it explained.
+  it("drops cerber's filing note when you settle the row yourself", async () => {
+    await saveArtifact({
+      ...artifact("reviewed"),
+      filed: { at: "2026-08-21T09:00:00.000Z", reason: "own-review" as const, review: null, reply: null },
+    });
+
+    expect((await patchStatus("skipped")).status).toBe(200);
+
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("skipped");
+    expect(after.filed).toBeNull();
+  });
+
   it("refuses to call a review sent when nothing was sent", async () => {
     // The row this used to make claims a review reached GitHub while `sent` is
     // still null — a state no honest path produces, which the queue and every
