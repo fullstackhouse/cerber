@@ -380,10 +380,15 @@ export function lastRequestOf(events: RequestedReviewEvent[], login: string): st
   return mine.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).createdAt;
 }
 
+// 100 is the page maximum, and it costs exactly what 20 would: one call. The
+// window has to hold every request event on the PR, not just the recent ones —
+// a PR that cycled through a dozen reviewers can push the request that named
+// *you* off the end, and the answer would then be "nobody asked", silently
+// restoring the bug this exists to fix.
 const LAST_REQUEST_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
-      timelineItems(last:20,itemTypes:[REVIEW_REQUESTED_EVENT]){
+      timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){
         nodes{... on ReviewRequestedEvent{createdAt requestedReviewer{__typename ... on User{login}}}}
       }
     }
@@ -395,8 +400,8 @@ const LAST_REQUEST_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
  *
  * GraphQL rather than the REST timeline on purpose: this runs on rows the queue
  * already holds, poll after poll, and the timeline of a busy PR is hundreds of
- * events across several pages. `timelineItems(last:20, itemTypes:[…])` is one
- * call whatever the PR's history looks like.
+ * events across several pages. Filtered to the one event type, the last page
+ * holds the lot in one call whatever the PR's history looks like.
  */
 export async function fetchLastReviewRequest(ref: PrRef, login: string): Promise<string | null> {
   const out = await gh([
