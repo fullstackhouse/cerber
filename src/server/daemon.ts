@@ -11,6 +11,7 @@ import {
   fetchOwnReview,
   fetchPrInfo,
   fetchReviewRequests,
+  lastMentionOfYou,
   lastWordOfYours,
   searchAwaitingMe,
   stillRequested,
@@ -255,24 +256,55 @@ export function settledAtOf(a: Artifact): string | null {
 }
 
 /**
- * Whether a review request is a *new* ask rather than the one you settled.
+ * Whether an ask is a *new* one rather than the one you settled.
  *
  * A skip says "I am done with this PR", and a push does not undo that — the
  * whole point of `SETTLED_BY_YOU`. Somebody asking you again is a different
- * event: your skip answered the request that was open when you made it, and it
- * cannot have answered one that came after. Withdrawn-then-re-added is the
- * shape this catches, and it is not exotic — an author who pulls the request
- * while you are mid-look and puts it back with the next push leaves the inbox
- * silent about a review someone is now actively waiting on.
+ * event: your skip answered whatever was open when you made it, and it cannot
+ * have answered something that came after. Withdrawn-then-re-added is one shape
+ * this catches, and it is not exotic — an author who pulls the request while
+ * you are mid-look and puts it back with the next push leaves the inbox silent
+ * about a review someone is now actively waiting on. The other shape is the
+ * same author typing it instead (`Ask`).
  *
  * Parsed, not compared as text, for the reason `filedByYourAct` gives: our
  * timestamps carry milliseconds and GitHub's do not, and "…:00.500Z" sorts
  * before "…:00Z".
  */
-export function askedAgainAfterSettling(a: Artifact, requestedAt: string | null): boolean {
-  if (requestedAt === null) return false;
+export function askedAgainAfterSettling(a: Artifact, askedAt: string | null): boolean {
+  if (askedAt === null) return false;
   const settled = settledAtOf(a);
-  return settled !== null && Date.parse(requestedAt) > Date.parse(settled);
+  return settled !== null && Date.parse(askedAt) > Date.parse(settled);
+}
+
+/**
+ * Somebody asking for you again, and which of the two ways they did it.
+ *
+ * `requested` is GitHub's re-request button, which leaves a dated event.
+ * `mentioned` is a person typing "@you this is ready for another look" — the
+ * same ask, made the way people actually make it, and one GitHub's API gives
+ * no event for at all. Both reduce to a date, which is all the settle test
+ * needs; `by` only exists because the second one can say who.
+ */
+export type Ask =
+  | { at: string; how: "requested" }
+  /** `by` is the commenter. A request has no such field: the event names nobody useful. */
+  | { at: string; how: "mentioned"; by: string };
+
+/**
+ * What the daemon says about a reopen, in the log and in the row's history.
+ *
+ * One place, so the line the user reads in the terminal and the line they read
+ * on the review months later cannot tell different stories about why a decision
+ * of theirs was undone — which is the only thing that makes undoing it fair.
+ */
+export function askWording(ask: Ask): { log: string; history: string } {
+  const day = ask.at.slice(0, 10);
+  const what =
+    ask.how === "requested"
+      ? `your review was requested again on ${day}`
+      : `${ask.by} asked for you by name on ${day}`;
+  return { log: `${what} — back in the inbox`, history: `back in the inbox: ${what}, after you settled it` };
 }
 
 /**
@@ -360,6 +392,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // needs it. Undefined is "not asked yet"; null is "gh could not say", which
     // attributes nothing to you rather than guessing.
     let login: string | null | undefined;
+    async function who(): Promise<string | null> {
+      if (login === undefined) login = await currentLogin().catch(() => null);
+      return login;
+    }
 
     /**
      * Put a settled row back in the inbox when somebody has asked you again.
@@ -369,9 +405,17 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
      * moved *to* it. Both exist because the queue's picture of who is waiting
      * on what is local, and the thing it is a picture of lives on github.com.
      *
-     * Only rows GitHub is asking about right now get here at all — the caller
-     * is looping over the awaiting search — so the extra read is one call for
-     * one question: was that request made after you settled?
+     * Two ways to be asked, because people use both. GitHub's re-request button
+     * leaves a dated event and is read first: it is the strongest evidence and
+     * the cheapest call. Failing that, the conversation is read for the last
+     * comment naming you — "@you this is ready for another look", which is the
+     * same ask with no event behind it. Reading only the button was the bug:
+     * a settled row sat invisible while its author waited, having said so in
+     * plain words on the PR.
+     *
+     * Only rows GitHub is still asking about get here — the caller is looping
+     * over the awaiting search. A row whose request is gone (you reviewed on
+     * github.com) is caught by `reopenIfAskedInWords` on the other loop instead.
      */
     async function reopenIfAskedAgain(artifact: Artifact): Promise<void> {
       if (settledAtOf(artifact) === null) return;
@@ -379,24 +423,71 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       if (reopenChecks >= STATE_REFRESH_CAP || Date.now() - last < STATE_REFRESH_MIN_MS) return;
       reopenChecks++;
       requestCheckedAt.set(artifact.id, Date.now());
-      if (login === undefined) login = await currentLogin().catch(() => null);
-      if (login === null) return;
+      const me = await who();
+      if (me === null) return;
 
-      let requestedAt: string | null;
+      let ask: Ask | null;
       try {
-        requestedAt = await fetchLastReviewRequest(artifact.pr, login);
+        const requestedAt = await fetchLastReviewRequest(artifact.pr, me);
+        const request: Ask | null = requestedAt === null ? null : { at: requestedAt, how: "requested" };
+        // The words are only worth a second call when the button did not
+        // already answer: a live re-request says everything a comment could.
+        ask = askedAgainAfterSettling(artifact, request?.at ?? null)
+          ? request
+          : await askedInWords(artifact, me);
       } catch {
         // A read that failed is not evidence of anything, so nothing happens to
         // the row. It is not re-asked about until the leash above expires: the
         // stamp is spent before the call on purpose, so gh being down cannot
-        // turn every settled row into a retry on every poll.
+        // turn every settled row into a retry on every poll. Only the reads are
+        // guarded: a write that fails is a real fault and belongs to the caller.
         return;
       }
-      if (requestedAt === null || !askedAgainAfterSettling(artifact, requestedAt)) return;
-      const at = requestedAt;
+      await reopen(artifact, ask);
+    }
+
+    /**
+     * The same reopen for a settled row GitHub is *not* asking about.
+     *
+     * The case is ordinary: you reviewed on github.com, which clears the
+     * request and drops the PR out of the awaiting search, and the author then
+     * pushes and writes "@you ready for another look". No request exists to
+     * re-read, so the words are the whole of the evidence — and without this
+     * the mention check would only work for the rows that happen to still carry
+     * an open request, which is a fix that half-works.
+     *
+     * Rides the state-refresh leash rather than one of its own: the caller has
+     * already spent that artifact's slot for this half-hour, and a settled row
+     * never reaches `fileIfSettledElsewhere`, so this costs the poll one call
+     * on rows that were costing it one already.
+     */
+    async function reopenIfAskedInWords(artifact: Artifact): Promise<void> {
+      if (settledAtOf(artifact) === null) return;
+      const me = await who();
+      if (me === null) return;
+      let ask: Ask | null;
+      try {
+        ask = await askedInWords(artifact, me);
+      } catch {
+        // Same as above: a failed read changes nothing and waits for the leash.
+        return;
+      }
+      await reopen(artifact, ask);
+    }
+
+    /** The conversation's answer to "has anybody asked for me again", or null. */
+    async function askedInWords(artifact: Artifact, me: string): Promise<Ask | null> {
+      const mention = lastMentionOfYou(await fetchConversation(artifact.pr), me);
+      return mention === null ? null : { at: mention.at, how: "mentioned", by: mention.author };
+    }
+
+    /** Undo the settle, if the ask really is newer than it. */
+    async function reopen(artifact: Artifact, ask: Ask | null): Promise<void> {
+      if (ask === null || !askedAgainAfterSettling(artifact, ask.at)) return;
+      const at = ask.at;
 
       // Re-read from disk: a re-review or a send may have started in the time
-      // that call took, and neither wants its status rewritten underneath it.
+      // those calls took, and neither wants its status rewritten underneath it.
       const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
         askedAgainAfterSettling(a, at)
           ? // `filed` goes with the status it explained: cerber's account of why
@@ -407,13 +498,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // The status is what says the write landed. `settledAt` cannot: a legacy
       // row never had one, so a mutation that declined would read as a reopen.
       if (saved && !SETTLED_BY_YOU.has(saved.status)) {
-        log(`[${artifact.id}] your review was requested again on ${at.slice(0, 10)} — back in the inbox`);
+        const said = askWording(ask);
+        log(`[${artifact.id}] ${said.log}`);
         // The status change alone says a row moved; this says why it moved,
         // which is the whole reason a settle is allowed to be undone at all.
-        await noteHistory(
-          artifact.id,
-          `back in the inbox: your review was requested again on ${at.slice(0, 10)}, after you settled it`,
-        );
+        await noteHistory(artifact.id, said.history);
       }
     }
 
@@ -463,9 +552,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // Only a finished, unsent draft can be filed — checked here too, so a row
       // that could never qualify costs no GitHub call at all.
       if (artifact.status !== "ready" || artifact.sent) return;
-      if (login === undefined) login = await currentLogin().catch(() => null);
-      if (login === null) return;
-      const me = login;
+      const me = await who();
+      if (me === null) return;
 
       /** Re-reads from disk: a run or a send may have started in the seconds
        *  these reads took, and neither wants filing out from under it. */
@@ -577,7 +665,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           }));
         }
         if (pr.state !== "OPEN") log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
-        else await fileIfSettledElsewhere(artifact);
+        else {
+          // Exactly one of these two spends a call: the first only looks at
+          // settled rows, the second only at finished drafts. They are the same
+          // question from opposite sides — has GitHub moved past this, or back
+          // to it — and a row can only be on one side of it.
+          await reopenIfAskedInWords(artifact);
+          await fileIfSettledElsewhere(artifact);
+        }
       } catch {
         // Same: book-keeping can wait for the next poll.
       }

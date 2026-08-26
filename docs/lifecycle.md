@@ -274,9 +274,10 @@ walk `walkable()`: open, unsettled rows only.
 | GitHub moved past a finished draft | status → `reviewed`, `filed` set | `fileIfSettledElsewhere` |
 | Auto-send is on and the draft qualified | status → `sent` (the **sent** tab) | `handleAutoSend` |
 
-And the one that *adds* a row back: your review requested again after you
-settled → status → `ready`/`awaiting`, `settledAt` and `filed` cleared
-(`reopenIfAskedAgain`; see "Asked again" below).
+And the one that *adds* a row back: somebody asking for you again after you
+settled — the re-request button, or your name in a comment → status →
+`ready`/`awaiting`, `settledAt` and `filed` cleared (`reopenIfAskedAgain`,
+`reopenIfAskedInWords`; see "Asked again" below).
 
 A **pure stub** is `awaiting`, with no comments and **`run === null`** — it
 does not look at chapters. The `run` block is what makes this safe: the create
@@ -314,27 +315,46 @@ minute, and that the PR itself disagreed with it.
 ### Asked again: the way back out of settled
 
 Filing's mirror image, and the only thing that reopens a settled row on its own
-(`reopenIfAskedAgain`, `src/server/daemon.ts`). A skip says "I am done with
-this PR", and a push does not undo that. Somebody asking you *again* is a
-different event: your skip answered the request that was open when you made it
-and cannot have answered one that came later — which is what a request
-withdrawn and then re-added is. Nothing else in GitHub's API distinguishes the
-two, so this reads the one thing that does: the timestamp of the last
-`REVIEW_REQUESTED_EVENT` naming you (`fetchLastReviewRequest`, one GraphQL call).
+(`reopenIfAskedAgain` / `reopenIfAskedInWords`, `src/server/daemon.ts`). A skip
+says "I am done with this PR", and a push does not undo that. Somebody asking
+you *again* is a different event: your skip answered whatever was open when you
+made it and cannot have answered something that came later.
+
+People ask in two ways, and both count:
+
+1. **The re-request button.** A request withdrawn and then re-added looks
+   identical to the original in every ordinary read GitHub offers, so this
+   reads the one thing that tells them apart: the timestamp of the last
+   `REVIEW_REQUESTED_EVENT` naming you (`fetchLastReviewRequest`, one GraphQL
+   call).
+2. **Your name in a comment** — "@you this is ready for another look". The same
+   ask, made the way people actually make it, and one GitHub has no event for
+   at all. The conversation is already read for whose-move (below); this reads
+   it for the last comment naming you (`lastMentionOfYou`). Your own comments
+   never count and bots never do, or a bot that @-mentions the reviewer on
+   every push would be an ask on every push. `@org/team` doesn't count either:
+   a room being addressed is not somebody asking for *you*.
 
 Conditions, all of them: the row is `reviewed` or `skipped`, it was never sent,
-GitHub is asking about it *now* (only rows in the awaiting search are checked
-at all), and the request is newer than `settledAt`. Then the row goes back to
-`ready` — or `awaiting` if it has no finished draft to show — `settledAt` and
-`filed` are cleared, and the ordinary rules take it from there: the freshness
-guard in §4 re-drafts it if the head has moved since the run read it, and
-leaves the existing draft alone if it has not. Same leash as the state checks
-above: one call per artifact per 30 minutes, capped per poll.
+and the ask is newer than `settledAt`. Then the row goes back to `ready` — or
+`awaiting` if it has no finished draft to show — `settledAt` and `filed` are
+cleared, and the ordinary rules take it from there: the freshness guard in §4
+re-drafts it if the head has moved since the run read it, and leaves the
+existing draft alone if it has not.
 
-Team requests are ignored here on purpose. `stillRequested` counts them because
-refusing to *file work away* is the safe side of that question; this decides to
-undo a decision of yours, where the safe side is doing nothing unless somebody
-named you.
+Where each runs, and what it costs: rows GitHub is asking about *now* (the
+awaiting search) get the button check, and the conversation only if the button
+did not already answer — a live re-request says everything a comment could.
+Rows GitHub has stopped asking about — you reviewed on github.com, which clears
+the request and drops the PR out of that search — get the comment check alone,
+hung off the same leashed state refresh that was already spending a call on
+them. Either way: one artifact per 30 minutes, capped per poll, and an
+unsettled row costs nothing.
+
+Team *requests* are ignored here on purpose. `stillRequested` counts them
+because refusing to *file work away* is the safe side of that question; this
+decides to undo a decision of yours, where the safe side is doing nothing
+unless somebody named you.
 
 Rows settled before `settledAt` existed are dated by the latest moment cerber
 can prove the decision came after — cerber's own `filed.at`, or `run.finishedAt`

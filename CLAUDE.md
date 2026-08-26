@@ -109,12 +109,18 @@ left unwritten. Code and tests win when they disagree.
   withdrawal reason is stricter still (poll-written drafts only, and it
   confirms against the PR with `fetchReviewRequests` before acting, because
   there its only evidence is a search index's silence). The poll also does the
-  reverse (`reopenIfAskedAgain`): a settled row comes back when someone
-  requested your review *again* after you settled it — the one thing that
-  reopens a `reviewed`/`skipped` row, since your skip answered the request that
-  was open at the time and cannot have answered a later one. It turns on
-  `settledAt` dating the decision and the last `REVIEW_REQUESTED_EVENT` naming
-  you; team requests never count, because this undoes a decision of yours. Config's `daemon`
+  reverse (`reopenIfAskedAgain`, `reopenIfAskedInWords`): a settled row comes
+  back when someone asked for you *again* after you settled it — the one thing
+  that reopens a `reviewed`/`skipped` row, since your skip answered whatever
+  was open at the time and cannot have answered a later ask. It turns on
+  `settledAt` dating the decision and the newer of two asks: the last
+  `REVIEW_REQUESTED_EVENT` naming you, and the last comment naming you
+  (`lastMentionOfYou`) — because "@you this is ready for another look" is the
+  same ask and GitHub has no event for it. The button is read first and spares
+  the second call; a row GitHub has stopped asking about (you reviewed on
+  github.com) gets the comment check alone, off the state-refresh leash. Team
+  requests and team mentions never count, because this undoes a decision of
+  yours, and neither do bots or your own comments. Config's `daemon`
   block is re-read every poll, so cockpit toggles apply without a restart.
   Each poll also publishes what it found (`status.awaiting`): the queue filters
   on what you settled locally, which stops matching what GitHub asks you for the

@@ -539,8 +539,8 @@ Derived sets used throughout:
 
 - `SETTLED = {sent, reviewed, skipped}` — out of the live queue.
 - `SETTLED_BY_YOU = {reviewed, skipped}` — a decision no push may undo; the
-  single thing that reopens one is a review request made *after* the settle
-  (§9.6).
+  single thing that reopens one is somebody asking for the user again *after*
+  the settle (§9.6).
 - `HEAD_SENSITIVE = {ready, sent}` — the two statuses that track the PR head.
 - **Archived is not a status**: it is `pr.state !== "OPEN"`, an orthogonal
   fact that moves a row to the archive tab whatever its status.
@@ -576,8 +576,9 @@ themselves), and filing stamps it with the filed time.
 Reopening — the one transition out of `SETTLED_BY_YOU` without a click:
 
 ```
-reviewed | skipped ── the poll, a review request naming you
-                      made after settledAt (§9.6)          ──▶ ready | awaiting
+reviewed | skipped ── the poll, someone asking for you again
+                      after settledAt — the re-request button
+                      or a comment naming you (§9.6)       ──▶ ready | awaiting
 ```
 
 `ready` if the row holds a finished, error-free draft; `awaiting` if not (the
@@ -602,8 +603,8 @@ under `force`):
    marked it skipped, so a new push or review request does not reopen it" —
    the poll's most confusing silence, §5.4). A row dragged back into the
    inbox every time the author pushes would be cerber overruling the user;
-   the ways back in are the re-review button, which forces, and a newer
-   review request (§9.6).
+   the ways back in are the re-review button, which forces, and somebody
+   asking for the user again (§9.6).
 2. Status in `HEAD_SENSITIVE` and the head the last run *read*
    (`run.reviewedSha`, falling back to `pr.headSha` for legacy artifacts,
    with an empty string never matching) equals the PR's current head →
@@ -747,19 +748,46 @@ one back when GitHub has moved *to* it — both exist because the queue's
 picture of who is waiting on what is local, while the thing it pictures lives
 on github.com.
 
-The gap it closes: a skip answers the review request that was open at the
-moment it was made. An author who withdraws the request mid-look, pushes, and
-re-requests leaves the row sitting in settled — invisible — while someone
-actively waits. Every ordinary read GitHub offers says only *whether* a
-request is open, never *when* it was made, so the poll reads the PR's
-timeline for the last review-requested event naming the user.
+The gap it closes: a skip answers whatever was open at the moment it was
+made. An author who asks again afterwards leaves the row sitting in settled —
+invisible — while someone actively waits.
 
-Rules, all normative:
+There are two ways to ask, and an implementation MUST honor both:
 
-- Only rows the awaiting search returned are checked at all — GitHub is
-  asking right now, so the extra read answers exactly one question: was that
-  request made after the settle? An unsettled row MUST cost nothing (no
-  GitHub call).
+1. **The re-request button.** Withdrawn-then-re-added looks identical to the
+   original in every ordinary read GitHub offers — they say only *whether* a
+   request is open, never *when* it was made — so the poll reads the PR's
+   timeline for the last review-requested event naming the user.
+2. **A comment naming the user.** "@you this is ready for another look" is the
+   same ask made the way people actually make it, and GitHub emits no event
+   for it. The poll reads the PR conversation (the same issue-comment listing
+   §9.7 uses) for the newest comment that mentions the user.
+
+Rules for the mention, all normative:
+
+- Only `@login` counts, matched case-insensitively and bounded so a longer
+  login is not a match (`@me` MUST NOT match `@me-bot`, and an email address
+  MUST NOT match at all). `@org/team` MUST NOT count: a room being addressed
+  is not somebody asking for *this* user — the mirror of the team rule below.
+- The user's own comments never count, and bots never count (`isBot`, §9.7):
+  a bot that @-mentions the reviewer on every push would otherwise be an ask
+  on every push.
+- The newest qualifying comment by date wins, not by position in the response.
+
+Rules for both, all normative:
+
+- Where each check runs, and what it may cost:
+  - Rows the awaiting search returned get the timeline read. The conversation
+    is read only if the timeline did not already answer — a live re-request
+    says everything a comment could, so the second call is spared.
+  - Rows the search did *not* return get the conversation read alone, hung
+    off the state-refresh leash of §9.4 that was already spending a call on
+    them. This case is not optional: the user reviewing on github.com clears
+    the request and drops the PR out of the awaiting search, which is exactly
+    the state a "ready for another look" comment tends to arrive in. A reopen
+    rule that only worked while a request was open would be a fix that
+    half-works.
+  - An unsettled row MUST cost nothing (no GitHub call) on either path.
 - The settle date is `settledAt` when present. Rows settled before the field
   existed fall back to the latest moment the decision provably came after:
   `filed.at`, else `run.finishedAt` (a draft cannot be settled before it
@@ -771,7 +799,7 @@ Rules, all normative:
   [REVIEW_REQUESTED_EVENT])` — the page maximum, because a PR that cycled
   through a dozen reviewers could push the request naming *you* out of a
   smaller window, silently restoring the bug).
-- **Only requests naming the user count.** Team requests are deliberately
+- **Only asks naming the user count.** Team requests are deliberately
   ignored here even though the withdrawal confirmation (§9.5) honors them:
   refusing to *file work away* is the safe side of that question, while this
   one *undoes a decision of the user's*, where the safe side is doing nothing
@@ -791,9 +819,15 @@ Rules, all normative:
   there the ordinary rules take over: the freshness guard re-drafts if the
   head moved since the run read the code, and leaves a current draft alone.
 
+- The log line and the history note MUST come from one place, so the line in
+  the terminal and the line on the review months later cannot tell different
+  stories about why a decision of the user's was undone. They differ only in
+  the fact that differs: the request's date, or the commenter's name and the
+  comment's date.
+
 This is the **only** thing that reopens a `reviewed`/`skipped` row. A push
 still does not. No dedicated UI is required: the row simply reappears in the
-inbox, and the daemon logs the reopen with the request's date.
+inbox, and the daemon logs the reopen with the ask's date.
 
 ### 9.7 Whose Move Is It
 
@@ -1393,7 +1427,7 @@ on every queue fetch so no screen can leave it stale.
 | GitHub read fails (poll) | poll errs, last good awaiting list stands, error published (§9.1) |
 | GitHub read fails (membership) | "not a member" — fail-closed for trust (§14.1) |
 | GitHub read fails (whose-move / filing evidence) | `unknown` / no filing — claim nothing (§9.7, §9.5) |
-| GitHub read fails (reopen timeline) | row untouched; retried after the leash expires (§9.6) |
+| GitHub read fails (reopen timeline or conversation) | row untouched; retried after the leash expires (§9.6) |
 | Checkout fails | diff-only review, logged, never fatal (§10.4) |
 | Agent output invalid | one retry with the error echoed; then the run fails (§11.2) |
 | Agent hangs | 30-min timeout, TERM→KILL, run fails (§11.5) |
@@ -1427,8 +1461,8 @@ rate-limit bookkeeping and the in-flight registry are deliberately lost.
    pushes; sends and settles survive concurrent runs; user comments survive
    chat turns; `sent` is immutable. §8.5, §12.4–12.5. The one reopening rule
    (§9.6) respects the decision's scope rather than undoing it: a settle
-   answered the request open at the time, and only a *newer* request naming
-   the user brings the row back.
+   answered whatever was open at the time, and only a *newer* ask naming the
+   user brings the row back.
 8. **Secure defaults, no insecure offering.** Non-loopback without auth is
    refused, not warned about. §16.1.
 
@@ -1500,20 +1534,41 @@ file(a, filed):   # atomic, predicate re-checked against disk
                           settledAt: filed.at} : cur)
 ```
 
-### 21.4 Reopen Check (per settled row in the awaiting search, on its own leash)
+### 21.4 Reopen Check (per settled row, on a leash)
 
 ```
-reopen_if_asked_again(a):
+# GitHub is still asking: button first, words only if it did not answer.
+reopen_if_asked_again(a):                 # rows in the awaiting search
   settled = a.settledAt or a.filed.at or a.run.finishedAt or return
   if a.sent or cap_spent or checked_recently(a.id): return
   stamp_checked(a.id)                     # before the call — outage ≠ retry storm
   me = current_login() or return
-  asked = try last_review_request_naming(a.pr, me) else return   # no evidence
-  if asked is null or parse(asked) <= parse(settled): return     # team asks never count
-  update(a.key, cur => asked_again(cur, asked)                   # re-check on disk
+  try:
+    at = last_review_request_naming(a.pr, me)                    # team asks never count
+    ask = {at, requested} if at else null
+    reopen(a, ask if newer_than_settle(a, ask) else asked_in_words(a, me))
+  except: return                          # a failed read is evidence of nothing
+
+# GitHub stopped asking (own review on github.com): the words are all there is.
+reopen_if_asked_in_words(a):              # rows the state refresh already touched
+  if not settled_at_of(a): return
+  me = current_login() or return
+  try: reopen(a, asked_in_words(a, me))
+  except: return
+
+asked_in_words(a, me):
+  c = newest(comment in conversation(a.pr)
+             where not bot(comment) and comment.author != me
+               and mentions(comment.body, me))
+  return {c.at, mentioned, by: c.author} if c else null
+
+reopen(a, ask):
+  if not ask or parse(ask.at) <= parse(settled_at_of(a)): return
+  saved = update(a.key, cur => newer_than_settle(cur, ask)        # re-check on disk
       ? {...cur, status: cur.has_clean_draft ? ready : awaiting,
          settledAt: null, filed: null}
       : cur)
+  if saved.status not in SETTLED_BY_YOU: log + note_history(wording(ask))
 ```
 
 ### 21.5 Chat Turn
@@ -1564,11 +1619,14 @@ An implementation conforms when all of the following hold:
       order, guards, and withdrawal confirmation; bots never count as
       replies.
 - [ ] Every settling path stamps `settledAt` (the status route also clears
-      `filed`); reopening follows §9.6 — only user-named requests newer than
-      the settle (parsed timestamps), legacy fallback to `filed.at` then
-      `run.finishedAt`, unsettled rows cost no GitHub call, failed reads
-      change nothing, the leash stamp is spent before the call, and the
-      reopen clears `settledAt` and `filed`; a push alone never reopens.
+      `filed`); reopening follows §9.6 — only user-named asks newer than the
+      settle (parsed timestamps), by the re-request button *or* a comment
+      naming the user (never a team, never the user's own, never a bot's, and
+      never a longer login that starts with theirs); rows outside the awaiting
+      search are checked too; legacy fallback to `filed.at` then
+      `run.finishedAt`; unsettled rows cost no GitHub call; failed reads
+      change nothing; the leash stamp is spent before the call; and the
+      reopen clears `settledAt` and `filed`. A push alone never reopens.
 
 **Runner**
 - [ ] The tool matrix of §11.3 is exact; the run environment matches §14.3;

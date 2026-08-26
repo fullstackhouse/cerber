@@ -170,6 +170,8 @@ export type Reply = "none" | "you" | "them" | "unknown";
 export interface Comment {
   author: string;
   at: string;
+  /** What was said. Read for one thing only: whether it names you (`mentionsYou`). */
+  body: string;
   /** CI, changelog and integration bots talk on PRs; none of it is an answer. */
   bot: boolean;
   url: string | null;
@@ -187,7 +189,7 @@ export async function fetchConversation(ref: PrRef): Promise<Comment[]> {
     "--paginate",
     `repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`,
     "--jq",
-    '.[] | {author: .user.login, at: .created_at, bot: (.user.type == "Bot"), url: .html_url}',
+    '.[] | {author: .user.login, at: .created_at, body: (.body // ""), bot: (.user.type == "Bot"), url: .html_url}',
   ]);
   // --jq streams one object per line rather than a JSON array.
   return out
@@ -227,6 +229,42 @@ export function lastWordOfYours(comments: Comment[], login: string): Comment | n
   if (classifyReply(comments, login) !== "you") return null;
   const mine = comments.filter((c) => !isBot(c) && c.author === login);
   return mine[mine.length - 1] ?? null;
+}
+
+/**
+ * Whether a comment speaks to you by name.
+ *
+ * GitHub's own rule, near enough: an `@login` that isn't part of a longer word.
+ * The boundary is "not a login character" rather than `\b`, because logins may
+ * contain hyphens — `@me-bot` is a different account from `@me`, and
+ * `you@me.dev` is an email address, not an ask.
+ *
+ * Deliberately not team mentions. `@org/team` is a room being addressed, and
+ * this is used to undo a decision of yours, which wants somebody naming *you*.
+ */
+export function mentionsYou(body: string, login: string): boolean {
+  const name = login.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\w-])@${name}(?![\\w-])`, "i").test(body);
+}
+
+/**
+ * The last comment somebody addressed to you by name, or null if nobody has.
+ *
+ * The other half of what the conversation can say. `classifyReply` reads it for
+ * whose move it is; this reads the same comments for the ask GitHub's own API
+ * has no event for — "@you this is ready for another look", typed instead of
+ * clicking the re-request button. Your own comments never count, and bots never
+ * do: a bot that @-mentions the assignee on every push would otherwise be an
+ * ask on every push.
+ */
+export function lastMentionOfYou(comments: Comment[], login: string): Comment | null {
+  const theirs = comments.filter(
+    (c) => !isBot(c) && c.author !== login && mentionsYou(c.body, login),
+  );
+  if (theirs.length === 0) return null;
+  // By date, not by position: this undoes a settle, so it does not lean on the
+  // API happening to return the conversation in order.
+  return theirs.reduce((a, b) => (b.at > a.at ? b : a));
 }
 
 /**
