@@ -983,6 +983,104 @@ describe("a review you settled, and were asked for again", () => {
 
     expect((await pollOnce())?.status).toBe("skipped");
   });
+  /** A PR comment, the way the conversation endpoint hands them over. */
+  const said = (author: string, at: string, body: string, bot = false) => ({
+    author,
+    at,
+    body,
+    bot,
+    url: `https://github.com/acme/widgets/pull/7#issuecomment-${at}`,
+  });
+
+  // The ask people actually make. GitHub has no event for it, so reading only
+  // the re-request button left these rows invisible while their authors waited.
+  it("puts the row back when the ask was typed instead of clicked", async () => {
+    await saveArtifact(settled());
+    conversation.mockResolvedValue([said("them", "2026-08-24T12:41:22Z", "@me this is ready for re-review")]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.settledAt).toBeNull();
+  });
+
+  it("names who asked, since here somebody did", async () => {
+    await saveArtifact(settled());
+    conversation.mockResolvedValue([said("them", "2026-08-24T12:41:22Z", "@me ready for another look")]);
+
+    expect((await pollOnce())?.history?.map((e) => e.what)).toContain(
+      "back in the inbox: them asked for you by name on 2026-08-24, after you settled it",
+    );
+  });
+
+  it("leaves your skip standing when the mention is older than it", async () => {
+    await saveArtifact(settled());
+    conversation.mockResolvedValue([said("them", "2026-08-23T09:00:00Z", "@me could you take this one")]);
+
+    expect((await pollOnce())?.status).toBe("skipped");
+  });
+
+  it("does not take your own comment, or a bot's, for somebody asking", async () => {
+    await saveArtifact(settled());
+    conversation.mockResolvedValue([
+      said("me", "2026-08-24T12:00:00Z", "cc @me so I remember"),
+      said("ci[bot]", "2026-08-24T13:00:00Z", "@me preview is up", true),
+    ]);
+
+    expect((await pollOnce())?.status).toBe("skipped");
+  });
+
+  it("does not read the conversation when the button already answered", async () => {
+    // Two calls per settled row per poll is the ceiling, not the price: a live
+    // re-request says everything a comment could, so the second one is spared.
+    // The later mention here would win if it were read — it isn't.
+    await saveArtifact(settled());
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+    conversation.mockResolvedValue([said("them", "2026-08-25T08:00:00Z", "@me ready")]);
+
+    const said_ = (await pollOnce())?.history?.map((e) => e.what) ?? [];
+    expect(said_).toContain(
+      "back in the inbox: your review was requested again on 2026-08-24, after you settled it",
+    );
+    expect(said_.some((w) => w.includes("asked for you by name"))).toBe(false);
+  });
+
+  // The other half of the same fix: you reviewed on github.com, which clears
+  // the request and drops the PR out of the awaiting search entirely — and the
+  // author then asks for you in words on a row nothing else would look at.
+  it("reopens a row GitHub is no longer asking about", async () => {
+    await saveArtifact(
+      settled({
+        status: "reviewed" as const,
+        filed: {
+          at: "2026-08-24T10:00:00Z",
+          reason: "own-review" as const,
+          review: { at: "2026-08-24T10:00:00Z", state: "CHANGES_REQUESTED" as const, url: null },
+          reply: null,
+        },
+      }),
+    );
+    search.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(DISCOVERED).pr, state: "OPEN", isDraft: false });
+    conversation.mockResolvedValue([said("them", "2026-08-24T12:41:22Z", "@me fixed, ready for another look")]);
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.filed).toBeNull();
+  });
+
+  it("leaves a finished draft to the filing rules, not the reopen ones", async () => {
+    // The two checks share the same leashed slot, and each guards itself: an
+    // unsettled row is the filing check's business, and a mention on it must
+    // not divert the row into a reopen it was never eligible for.
+    await saveArtifact({ ...stubArtifact(DISCOVERED), status: "ready" as const, run: RUN });
+    search.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(DISCOVERED).pr, state: "OPEN", isDraft: false });
+    ownReview.mockResolvedValue(null);
+    requests.mockResolvedValue({ users: [], teams: [] });
+    conversation.mockResolvedValue([said("them", "2026-08-24T12:41:22Z", "@me ready")]);
+
+    expect((await pollOnce())?.filed?.reason).toBe("request-withdrawn");
+  });
 });
 
 describe("askedAgainAfterSettling", () => {

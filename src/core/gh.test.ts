@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifyReply, currentLogin, lastRequestOf, latestOwnReview, resetLoginCache } from "./gh.js";
+import {
+  classifyReply,
+  currentLogin,
+  lastMentionOfYou,
+  lastRequestOf,
+  latestOwnReview,
+  mentionsYou,
+  resetLoginCache,
+} from "./gh.js";
 
 // gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
 // resolves to the `{ stdout }` shape the real one does, while still recording
@@ -41,8 +49,14 @@ describe("currentLogin", () => {
 });
 
 describe("classifyReply", () => {
-  const c = (author: string, at: string) => ({ author, at, bot: false, url: `#${author}-${at}` });
-  const bot = (author: string, at: string) => ({ author, at, bot: true, url: null });
+  const c = (author: string, at: string, body = "") => ({
+    author,
+    at,
+    body,
+    bot: false,
+    url: `#${author}-${at}`,
+  });
+  const bot = (author: string, at: string, body = "") => ({ author, at, body, bot: true, url: null });
 
   it("says nobody has heard from you when you never spoke", () => {
     expect(classifyReply([], "me")).toBe("none");
@@ -105,6 +119,85 @@ describe("classifyReply", () => {
 
   it("never counts a bot as you having spoken", () => {
     expect(classifyReply([bot("me", "2026-08-19T10:00:00Z")], "me")).toBe("none");
+  });
+});
+
+describe("mentionsYou", () => {
+  it("finds your name however the sentence puts it", () => {
+    expect(mentionsYou("@me this is ready for another look", "me")).toBe(true);
+    expect(mentionsYou("ready now, @me", "me")).toBe(true);
+    expect(mentionsYou("cc (@me) when you get a sec", "me")).toBe(true);
+    expect(mentionsYou("done — @me?", "me")).toBe(true);
+  });
+
+  it("is not fooled by a longer name that starts with yours", () => {
+    // The bot that shares your prefix asks for you on every push otherwise.
+    expect(mentionsYou("@me-bot rebuilt the preview", "me")).toBe(false);
+    expect(mentionsYou("@median said the same thing", "me")).toBe(false);
+  });
+
+  it("does not read an email address as an ask", () => {
+    expect(mentionsYou("mail jacek@me.dev if it breaks", "me")).toBe(false);
+  });
+
+  it("ignores the case GitHub itself ignores", () => {
+    expect(mentionsYou("@ME ready", "me")).toBe(true);
+  });
+
+  it("says nothing about a comment that names nobody", () => {
+    expect(mentionsYou("rebased onto main", "me")).toBe(false);
+    expect(mentionsYou("", "me")).toBe(false);
+  });
+
+  it("does not take a team's name for yours", () => {
+    // A room being addressed is not somebody asking for you, and this undoes
+    // a decision of yours — see `trust.ts` for where teams do count.
+    expect(mentionsYou("@acme/reviewers could someone look", "me")).toBe(false);
+  });
+});
+
+describe("lastMentionOfYou", () => {
+  const said = (author: string, at: string, body: string, bot = false) => ({
+    author,
+    at,
+    body,
+    bot,
+    url: `#${author}-${at}`,
+  });
+
+  it("returns the newest comment that named you", () => {
+    const found = lastMentionOfYou(
+      [
+        said("them", "2026-08-19T10:00:00Z", "@me first look?"),
+        said("them", "2026-08-21T10:00:00Z", "@me ready again"),
+        said("them", "2026-08-22T10:00:00Z", "rebased"),
+      ],
+      "me",
+    );
+    expect(found?.at).toBe("2026-08-21T10:00:00Z");
+  });
+
+  it("reads dates rather than trusting the order they arrived in", () => {
+    const found = lastMentionOfYou(
+      [said("them", "2026-08-21T10:00:00Z", "@me later"), said("them", "2026-08-19T10:00:00Z", "@me earlier")],
+      "me",
+    );
+    expect(found?.at).toBe("2026-08-21T10:00:00Z");
+  });
+
+  it("never counts you asking for yourself", () => {
+    expect(lastMentionOfYou([said("me", "2026-08-19T10:00:00Z", "cc @me")], "me")).toBeNull();
+  });
+
+  it("never counts a bot that @-mentions the reviewer", () => {
+    expect(
+      lastMentionOfYou([said("ci[bot]", "2026-08-19T10:00:00Z", "@me the build is green")], "me"),
+    ).toBeNull();
+  });
+
+  it("says nobody asked when nobody used your name", () => {
+    expect(lastMentionOfYou([said("them", "2026-08-19T10:00:00Z", "ready for review")], "me")).toBeNull();
+    expect(lastMentionOfYou([], "me")).toBeNull();
   });
 });
 import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
