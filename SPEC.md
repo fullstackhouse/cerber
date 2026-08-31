@@ -942,7 +942,8 @@ what keeps a wedged agent from holding a claim forever.
    `gh pr diff` output. A file whose patch GitHub withholds (binary, or too
    large) keeps its headers and carries a line saying so, so the gap cannot
    read as "nothing changed here", and a change past that API's own 3000-file
-   cap is likewise stated rather than silently dropped. A pure rename carries
+   cap is likewise flagged — as the doubt it is, since hitting the cap exactly
+   does not prove anything was lost. A pure rename carries
    `rename from`/`rename to` and no hunks, as git emits it — it MUST NOT be
    reported as binary merely for changing no lines. GitHub's `too_large`
    refusal is the only diff failure that falls back; every other one fails the

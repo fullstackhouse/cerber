@@ -122,11 +122,13 @@ export async function fetchPrDiff(ref: PrRef): Promise<string> {
     if (!/too_large|exceeded the maximum number of files/i.test(message)) throw err;
     const files = await fetchPrFiles(ref);
     const diff = assembleDiff(files);
-    // The files API stops at 3000 too, and says nothing when it does. Say it
-    // here rather than hand back a short diff that looks like the whole change.
+    // The files API stops at 3000 too, and says nothing when it does. Hitting
+    // the cap exactly is not proof of truncation — a PR can change exactly
+    // 3000 files — and there is nothing here to tell the two apart, so the
+    // note reports the doubt rather than asserting a loss that may not exist.
     return files.length < FILES_API_CAP
       ? diff
-      : `${diff}[GitHub's files API stops at ${FILES_API_CAP} files — any change beyond that is not in this diff. Read the checkout.]\n`;
+      : `${diff}[GitHub's files API returns at most ${FILES_API_CAP} files and returned exactly that many — if this PR changes more, the rest is missing from this diff. Read the checkout.]\n`;
   }
 }
 

@@ -465,7 +465,7 @@ describe("fetchPrDiff", () => {
     expect(exec.mock.calls[1]![1]).toContain("repos/o/r/pulls/1/files?per_page=100");
   });
 
-  it("says so when the files API's own 3000-file cap truncates the change", async () => {
+  it("flags the files API's own 3000-file cap as doubt, not as a proven loss", async () => {
     const rows = Array.from(
       { length: 3000 },
       (_, i) =>
@@ -480,7 +480,10 @@ describe("fetchPrDiff", () => {
     ).join("");
     exec.mockRejectedValueOnce(tooLarge).mockResolvedValueOnce({ stdout: rows });
     const diff = await fetchPrDiff({ owner: "o", repo: "r", number: 1 });
-    expect(diff).toContain("GitHub's files API stops at 3000 files");
+    // Exactly 3000 files is a PR that may or may not have been truncated, and
+    // nothing here can tell the two apart — so the note must not assert one.
+    expect(diff).toContain("returns at most 3000 files and returned exactly that many");
+    expect(diff).toContain("if this PR changes more");
   });
 
   it("does not paper over any other gh failure", async () => {
