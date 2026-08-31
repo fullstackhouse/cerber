@@ -935,7 +935,15 @@ what keeps a wedged agent from holding a claim forever.
    happen has no runner to blame — and only from here on do writes belong to
    the runner.
 2. Fetch the diff; resolve trust (§14.2); prepare the checkout (§10),
-   catching failure into diff-only mode; evict old checkouts.
+   catching failure into diff-only mode; evict old checkouts. GitHub refuses
+   to render a diff past 300 changed files (HTTP 406); such a diff MUST be
+   re-assembled from the `pulls/N/files` API — the per-file hunks with their
+   `diff --git`/`---`/`+++` headers restored, so it parses identically to
+   `gh pr diff` output. A file whose patch GitHub withholds (binary, or too
+   large) keeps its headers and carries a line saying so, so the gap cannot
+   read as "nothing changed here", and a change past that API's own 3000-file
+   cap is likewise stated rather than silently dropped. A 406 is the only
+   diff failure that falls back; every other one fails the run.
 3. Persist the `running` artifact **before** the agent starts: fresh empty
    draft, a full `run` block (`startedAt`, `withSource`, `trusted`,
    `trigger`, `reviewedSha: null`), and the previous conversation carried

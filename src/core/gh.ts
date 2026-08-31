@@ -104,8 +104,85 @@ async function membershipCheck(args: string[]): Promise<boolean> {
   }
 }
 
+/**
+ * GitHub refuses to render a diff past 300 changed files: `gh pr diff` comes
+ * back 406 and the review dies before it starts. The files API answers for ten
+ * times as many, so a too-large diff is re-assembled from it rather than
+ * reported as a broken review — see {@link assembleDiff}.
+ */
 export async function fetchPrDiff(ref: PrRef): Promise<string> {
-  return gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
+  try {
+    return await gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/too_large|exceeded the maximum number of files/i.test(message)) throw err;
+    const files = await fetchPrFiles(ref);
+    const diff = assembleDiff(files);
+    // The files API stops at 3000 too, and says nothing when it does. Say it
+    // here rather than hand back a short diff that looks like the whole change.
+    return files.length < FILES_API_CAP
+      ? diff
+      : `${diff}[GitHub's files API stops at ${FILES_API_CAP} files — any change beyond that is not in this diff. Read the checkout.]\n`;
+  }
+}
+
+const FILES_API_CAP = 3000;
+
+/** One changed file as the pulls/N/files API reports it. */
+export interface PrFile {
+  filename: string;
+  status: string;
+  previous_filename?: string | null;
+  additions: number;
+  deletions: number;
+  /** Absent for binary files, and for text files GitHub decided are too big. */
+  patch?: string | null;
+}
+
+async function fetchPrFiles(ref: PrRef): Promise<PrFile[]> {
+  const out = await gh([
+    "api",
+    "--paginate",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+    "--jq",
+    ".[] | {filename, status, previous_filename, additions, deletions, patch}",
+  ]);
+  // --jq streams one object per line rather than a JSON array.
+  return out
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as PrFile);
+}
+
+/**
+ * Put the `diff --git` / `---` / `+++` headers back on the per-file hunks the
+ * files API returns, so the result parses exactly like `gh pr diff` output —
+ * `splitDiffByFile` and the line anchoring read both the same way.
+ *
+ * A file whose patch GitHub withheld still gets its headers and a line saying
+ * so: an unexplained gap would read as "nothing changed here".
+ */
+export function assembleDiff(files: PrFile[]): string {
+  const out: string[] = [];
+  for (const file of files) {
+    const renamed = file.status === "renamed" && file.previous_filename;
+    const oldPath = file.status === "added" ? null : renamed ? file.previous_filename! : file.filename;
+    const newPath = file.status === "removed" ? null : file.filename;
+    out.push(`diff --git a/${oldPath ?? file.filename} b/${newPath ?? file.filename}`);
+    if (renamed) out.push(`rename from ${oldPath}`, `rename to ${newPath}`);
+    out.push(`--- ${oldPath ? `a/${oldPath}` : "/dev/null"}`);
+    out.push(`+++ ${newPath ? `b/${newPath}` : "/dev/null"}`);
+    if (file.patch) {
+      out.push(file.patch.replace(/\n$/, ""));
+    } else if (file.additions === 0 && file.deletions === 0) {
+      out.push(`Binary files a/${oldPath ?? file.filename} and b/${newPath ?? file.filename} differ`);
+    } else {
+      out.push(
+        `[GitHub withheld this file's patch — ${file.additions} addition(s), ${file.deletions} deletion(s). Read the file in the checkout.]`,
+      );
+    }
+  }
+  return out.length === 0 ? "" : out.join("\n") + "\n";
 }
 
 export interface DiscoveredPr extends PrRef {
