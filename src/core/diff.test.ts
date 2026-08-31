@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  diffLineCounts,
   newSideLineText,
   oldSideLineText,
   patchForFiles,
@@ -84,5 +85,19 @@ describe("oldSideLineText", () => {
   it("keeps the lines of a deleted file, which the new side has none of", () => {
     expect(oldSideLineText(SAMPLE).get("src/old.ts")!.get(1)).toBe("const gone = true;");
     expect(newSideLineText(SAMPLE).get("src/old.ts")!.size).toBe(0);
+  });
+});
+
+describe("diffLineCounts", () => {
+  it("counts each file's diff lines, which is what the cockpit has to draw", () => {
+    const counts = diffLineCounts(SAMPLE);
+    expect([...counts.keys()]).toEqual(splitDiffByFile(SAMPLE).map((p) => p.path));
+    for (const p of splitDiffByFile(SAMPLE)) {
+      expect(counts.get(p.path)).toBe(p.patch.split("\n").length);
+    }
+  });
+
+  it("has nothing to count in an empty diff", () => {
+    expect(diffLineCounts("").size).toBe(0);
   });
 });
