@@ -664,7 +664,7 @@ function ChapterSection({
           {comments.length > 0
             ? ` · ${comments.length} comment${comments.length === 1 ? "" : "s"}`
             : " · no comments"}
-          {heavy != null && (
+          {heavy != null && !open && (
             <span title="Drawing this many lines at once would leave the page too slow to scroll. Open it if you want it — nothing else on the page is affected.">
               {` · ${heavy.toLocaleString()} diff lines, folded to keep the page quick`}
             </span>
@@ -1383,6 +1383,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     // lands renders the wrong PR's chapters under this one's key — briefly
     // drawing a diff this page has no business drawing.
     setArtifact(null);
+    setError(null);
     setFreshness(null);
     setFreshnessError(null);
     setEventOverride(null);

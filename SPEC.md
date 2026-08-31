@@ -1400,9 +1400,10 @@ chapter that has already been drawn pays the whole cost it exists to avoid.
 The fold is a default, not a refusal: one click opens it, and the user's
 choice stands for as long as they are on that review. It does not outlive the
 review — a chapter opened or folded here MUST NOT carry its id (`__other`
-above all) onto the next PR's page, and neither may the artifact itself: the
-detail view clears it when the key changes, so no review is ever drawn under
-another's URL.
+above all) onto the next PR's page. Nor may anything else the last review put
+on screen: the detail view clears the artifact and the load error when the key
+changes, so no review is ever drawn under another's URL and no failure to load
+one is reported over the next.
 
 ### 17.6 Truth-Telling Surfaces
 
