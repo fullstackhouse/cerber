@@ -1,7 +1,7 @@
 import { html } from "diff2html";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
+import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
 import {
   addComment,
@@ -585,12 +585,25 @@ function AddComment({
   );
 }
 
+/**
+ * Beyond this many diff lines a chapter opens folded rather than rendered.
+ *
+ * The cockpit draws one table row per diff line and a dozen DOM nodes per row,
+ * so a catch-all chapter holding a 368-file PR lands 600,000 nodes on the page
+ * and the browser spends its time on style and layout instead of on the
+ * review. Measured over 314 chapters of real reviews, 2 are past this line —
+ * a normal walkthrough opens exactly as it did, and the ones that would grind
+ * are one click away.
+ */
+const foldChapterOverLines = 2000;
+
 function ChapterSection({
   chapter,
   n,
   diff,
   comments,
   open,
+  heavy,
   onToggle,
   onUpdateComment,
   onDeleteComment,
@@ -607,6 +620,8 @@ function ChapterSection({
   diff: string;
   comments: ReviewComment[];
   open: boolean;
+  /** Diff lines, when there are too many of them to have opened with. */
+  heavy: number | null;
   onToggle: () => void;
   flash: string | null;
   onUpdateComment: (id: string, patch: { body?: string; status?: string }) => void;
@@ -649,6 +664,11 @@ function ChapterSection({
           {comments.length > 0
             ? ` · ${comments.length} comment${comments.length === 1 ? "" : "s"}`
             : " · no comments"}
+          {heavy != null && (
+            <span title="Drawing this many lines at once would leave the page too slow to scroll. Open it if you want it — nothing else on the page is affected.">
+              {` · ${heavy.toLocaleString()} diff lines, folded to keep the page quick`}
+            </span>
+          )}
         </span>
         <span className="grow" />
         {onDiscuss && (
@@ -1317,8 +1337,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // reach the one chat panel at the bottom.
   const [chatRefs, setChatRefs] = useState<ChatRef[]>([]);
   const chatInput = useRef<HTMLTextAreaElement | null>(null);
-  // Chapters are open by default — the walkthrough is the point of the page.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Chapters are open by default — the walkthrough is the point of the page —
+  // except for one too big to draw (see foldChapterOverLines). This records
+  // only the chapters the user has since flipped the other way, so the default
+  // is decided while rendering rather than corrected after it: seeding it from
+  // an effect would draw the giant diff once before folding it away, which is
+  // the whole cost the fold exists to avoid.
+  const [flipped, setFlipped] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const verdictEl = useRef<HTMLDivElement | null>(null);
@@ -1354,6 +1379,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     // Walking to another review starts at its top, not wherever the last one
     // left the page.
     window.scrollTo({ top: 0 });
+    // Nothing of the last review outlives its URL. Keeping it until the fetch
+    // lands renders the wrong PR's chapters under this one's key — briefly
+    // drawing a diff this page has no business drawing.
+    setArtifact(null);
     setFreshness(null);
     setFreshnessError(null);
     setEventOverride(null);
@@ -1458,15 +1487,37 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       : artifact.chapters;
   }, [artifact]);
 
+  /** How many diff lines each chapter is asking the browser to draw. */
+  const weights = useMemo(() => {
+    const counts = diffLineCounts(artifact?.diff ?? "");
+    return new Map(
+      chapters.map((ch) => [ch.id, ch.files.reduce((n, f) => n + (counts.get(f) ?? 0), 0)]),
+    );
+  }, [artifact?.diff, chapters]);
+  /** Lines, when there are enough of them that this chapter opens folded. */
+  const heavy = (id: string) => {
+    const lines = weights.get(id) ?? 0;
+    return lines > foldChapterOverLines ? lines : null;
+  };
+  const isOpen = (id: string) => (flipped.has(id) ? heavy(id) != null : heavy(id) == null);
+  const flip = (id: string) =>
+    setFlipped((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // A fold belongs to the review it was made in. The cockpit walks from one
+  // review to the next without remounting, so without this a chapter opened
+  // here would carry its id — "__other" above all — onto the next PR's page.
+  useEffect(() => setFlipped(new Set()), [reviewKey]);
+
   const openChapter = (i: number) => {
     const ch = chapters[i];
     if (!ch) return null;
     setFocused(i);
-    setCollapsed((s) => {
-      const next = new Set(s);
-      next.delete(ch.id);
-      return next;
-    });
+    if (!isOpen(ch.id)) flip(ch.id);
     return ch;
   };
 
@@ -1787,7 +1838,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               {chapters.map((ch, i) => (
                 <div key={ch.id} className="rail-group">
                   <button
-                    className={`rail-item${!collapsed.has(ch.id) ? " rail-item-on" : ""}`}
+                    className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}`}
                     onClick={() => goChapter(i)}
                   >
                     <span className="grow">
@@ -1905,15 +1956,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               n={i + 1}
               diff={artifact.diff}
               comments={artifact.comments.filter((c) => c.chapterId === ch.id)}
-              open={!collapsed.has(ch.id)}
-              onToggle={() =>
-                setCollapsed((s) => {
-                  const nextSet = new Set(s);
-                  if (nextSet.has(ch.id)) nextSet.delete(ch.id);
-                  else nextSet.add(ch.id);
-                  return nextSet;
-                })
-              }
+              open={isOpen(ch.id)}
+              heavy={heavy(ch.id)}
+              onToggle={() => flip(ch.id)}
               onUpdateComment={onUpdateComment}
               onDeleteComment={onDeleteComment}
               onAddComment={onAddComment}

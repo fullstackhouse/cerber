@@ -499,7 +499,7 @@ review this rule cannot reach: the review that graded nothing at all and only
 asks questions.
 
 Severity is advisory: no code derives or enforces the verdict from it. The
-cockpit only *points out* disagreement (§17.5), and the blocker count is shown
+cockpit only *points out* disagreement (§17.6), and the blocker count is shown
 beside the verdict wherever there is room, because that is the fact a reader
 can check the verdict against.
 
@@ -1386,7 +1386,25 @@ keeps ringing, since that machine's tap lands where nobody is looking. The
 favicon shows a dot exactly while the walkable set is non-empty, re-derived
 on every queue fetch so no screen can leave it stale.
 
-### 17.5 Truth-Telling Surfaces
+### 17.5 The Walkthrough
+
+Chapters render open — the walkthrough is the point of the page — with one
+exception: a chapter holding more than 2,000 diff lines opens folded, and its
+header MUST say so and say why ("34,961 diff lines, folded to keep the page
+quick"). A rendered diff line is a table row and a dozen DOM nodes, so the
+catch-all chapter of a 368-file PR is 600,000 of them: the browser then spends
+its time on layout rather than on the review, and scrolling collapses. The
+fold MUST be decided while rendering, not corrected afterwards — folding a
+chapter that has already been drawn pays the whole cost it exists to avoid.
+
+The fold is a default, not a refusal: one click opens it, and the user's
+choice stands for as long as they are on that review. It does not outlive the
+review — a chapter opened or folded here MUST NOT carry its id (`__other`
+above all) onto the next PR's page, and neither may the artifact itself: the
+detail view clears it when the key changes, so no review is ever drawn under
+another's URL.
+
+### 17.6 Truth-Telling Surfaces
 
 - The verdict cell shows recommendation + confidence; the blocker count is
   shown wherever there is room (detail chip, queue strip) as the checkable

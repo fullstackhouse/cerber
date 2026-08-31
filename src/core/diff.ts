@@ -120,3 +120,11 @@ export function unclaimedFiles(diff: string, chapters: { files: string[] }[]): s
     .map((p) => p.path)
     .filter((p) => !claimed.has(p));
 }
+
+/**
+ * How many diff lines each file contributes, by path. The cockpit renders one
+ * table row per line, so this is what a chapter costs a browser to draw.
+ */
+export function diffLineCounts(diff: string): Map<string, number> {
+  return new Map(splitDiffByFile(diff).map((p) => [p.path, p.patch.split("\n").length]));
+}
