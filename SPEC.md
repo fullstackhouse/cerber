@@ -935,7 +935,20 @@ what keeps a wedged agent from holding a claim forever.
    happen has no runner to blame — and only from here on do writes belong to
    the runner.
 2. Fetch the diff; resolve trust (§14.2); prepare the checkout (§10),
-   catching failure into diff-only mode; evict old checkouts.
+   catching failure into diff-only mode; evict old checkouts. GitHub refuses
+   to render a diff past 300 changed files (HTTP 406); such a diff MUST be
+   re-assembled from the `pulls/N/files` API — the per-file hunks with their
+   `diff --git`/`---`/`+++` headers restored, so it parses identically to
+   `gh pr diff` output. A file whose patch GitHub withholds (binary, or too
+   large) keeps its headers and carries a line saying so, so the gap cannot
+   read as "nothing changed here", and a change past that API's own 3000-file
+   cap is likewise flagged — as the doubt it is, since hitting the cap exactly
+   does not prove anything was lost. A pure rename carries
+   `rename from`/`rename to` and no hunks, as git emits it — it MUST NOT be
+   reported as binary merely for changing no lines. GitHub's `too_large`
+   refusal is the only diff failure that falls back; every other one fails the
+   run. The match is on that signature rather than on the 406 status, which
+   GitHub also returns for unrelated reasons.
 3. Persist the `running` artifact **before** the agent starts: fresh empty
    draft, a full `run` block (`startedAt`, `withSource`, `trusted`,
    `trigger`, `reviewedSha: null`), and the previous conversation carried

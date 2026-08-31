@@ -1,14 +1,17 @@
 import { execFile } from "node:child_process";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  assembleDiff,
   classifyReply,
   currentLogin,
   lastMentionOfYou,
+  fetchPrDiff,
   lastRequestOf,
   latestOwnReview,
   mentionsYou,
   resetLoginCache,
 } from "./gh.js";
+import { newSideLineText, splitDiffByFile } from "./diff.js";
 
 // gh.ts calls `promisify(execFile)`, which honours this symbol — so the mock
 // resolves to the `{ stdout }` shape the real one does, while still recording
@@ -350,5 +353,144 @@ describe("ghErrorDetail", () => {
   it("falls back to stderr when the body is not JSON", () => {
     expect(ghErrorDetail("gh: Not Found (HTTP 404)", "<html>")).toBe("gh: Not Found (HTTP 404)");
     expect(ghErrorDetail(undefined, undefined)).toBe("");
+  });
+});
+
+describe("assembleDiff", () => {
+  const file = (over: Partial<Parameters<typeof assembleDiff>[0][number]>) => ({
+    filename: "src/a.ts",
+    status: "modified",
+    previous_filename: null,
+    additions: 1,
+    deletions: 1,
+    patch: "@@ -1,2 +1,2 @@\n-old\n+new",
+    ...over,
+  });
+
+  it("puts the headers back so the result parses like `gh pr diff` output", () => {
+    const diff = assembleDiff([file({})]);
+    expect(diff).toBe(
+      "diff --git a/src/a.ts b/src/a.ts\n" +
+        "--- a/src/a.ts\n" +
+        "+++ b/src/a.ts\n" +
+        "@@ -1,2 +1,2 @@\n-old\n+new\n",
+    );
+    expect(splitDiffByFile(diff).map((p) => p.path)).toEqual(["src/a.ts"]);
+    expect(newSideLineText(diff).get("src/a.ts")?.get(1)).toBe("new");
+  });
+
+  it("uses /dev/null on the side an added or removed file does not have", () => {
+    const diff = assembleDiff([
+      file({ filename: "new.ts", status: "added", patch: "@@ -0,0 +1 @@\n+hello" }),
+      file({ filename: "gone.ts", status: "removed", patch: "@@ -1 +0,0 @@\n-bye" }),
+    ]);
+    expect(diff).toContain("--- /dev/null\n+++ b/new.ts");
+    expect(diff).toContain("--- a/gone.ts\n+++ /dev/null");
+    // A deletion is attributed to the path it removed, as `gh pr diff` is.
+    expect(splitDiffByFile(diff).map((p) => p.path)).toEqual(["new.ts", "gone.ts"]);
+  });
+
+  it("names both sides of a rename", () => {
+    const diff = assembleDiff([
+      file({ filename: "b.ts", status: "renamed", previous_filename: "a.ts" }),
+    ]);
+    expect(diff).toContain("diff --git a/a.ts b/b.ts");
+    expect(diff).toContain("rename from a.ts\nrename to b.ts");
+    expect(splitDiffByFile(diff).map((p) => p.path)).toEqual(["b.ts"]);
+  });
+
+  it("leaves a pure rename at its rename lines instead of calling it binary", () => {
+    // A file that only moved changes no lines and carries no patch — the same
+    // shape a binary file arrives in. Counting lines alone would report the
+    // move as a binary change, which is wrong and the more alarming way to be
+    // wrong. git emits the rename lines and stops; so does this.
+    const diff = assembleDiff([
+      file({
+        filename: "b.ts",
+        status: "renamed",
+        previous_filename: "a.ts",
+        additions: 0,
+        deletions: 0,
+        patch: null,
+      }),
+    ]);
+    expect(diff).toBe("diff --git a/a.ts b/b.ts\nrename from a.ts\nrename to b.ts\n");
+    expect(diff).not.toContain("Binary");
+  });
+
+  it("still reports a renamed file's patch when it moved and changed", () => {
+    const diff = assembleDiff([
+      file({ filename: "b.ts", status: "renamed", previous_filename: "a.ts", patch: "@@ -1 +1 @@\n-old\n+new" }),
+    ]);
+    expect(diff).toContain("--- a/a.ts\n+++ b/b.ts");
+    expect(newSideLineText(diff).get("b.ts")?.get(1)).toBe("new");
+  });
+
+  it("says so when GitHub withheld a patch, rather than showing an empty file", () => {
+    const diff = assembleDiff([
+      file({ filename: "logo.png", status: "added", additions: 0, deletions: 0, patch: null }),
+      file({ filename: "huge.md", additions: 523, deletions: 48, patch: null }),
+    ]);
+    // git names the side an added file does not have /dev/null, here too.
+    expect(diff).toContain("Binary files /dev/null and b/logo.png differ");
+    expect(diff).toContain("GitHub withheld this file's patch — 523 addition(s), 48 deletion(s)");
+    // Neither note may be mistaken for a changed line.
+    expect(newSideLineText(diff).get("huge.md")?.size).toBe(0);
+  });
+});
+
+describe("fetchPrDiff", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const tooLarge = Object.assign(new Error("failed"), {
+    stderr:
+      "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300).\nPullRequest.diff too_large",
+  });
+
+  it("re-assembles the diff from the files API when GitHub refuses to render it", async () => {
+    exec.mockRejectedValueOnce(tooLarge).mockResolvedValueOnce({
+      stdout:
+        JSON.stringify({
+          filename: "src/a.ts",
+          status: "modified",
+          previous_filename: null,
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -1 +1,2 @@\n line\n+added",
+        }) + "\n",
+    });
+    const diff = await fetchPrDiff({ owner: "o", repo: "r", number: 1 });
+    expect(diff).toContain("diff --git a/src/a.ts b/src/a.ts");
+    expect(diff).toContain("+added");
+    expect(exec.mock.calls[1]![1]).toContain("repos/o/r/pulls/1/files?per_page=100");
+  });
+
+  it("flags the files API's own 3000-file cap as doubt, not as a proven loss", async () => {
+    const rows = Array.from(
+      { length: 3000 },
+      (_, i) =>
+        JSON.stringify({
+          filename: `f${i}.ts`,
+          status: "added",
+          previous_filename: null,
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+x",
+        }) + "\n",
+    ).join("");
+    exec.mockRejectedValueOnce(tooLarge).mockResolvedValueOnce({ stdout: rows });
+    const diff = await fetchPrDiff({ owner: "o", repo: "r", number: 1 });
+    // Exactly 3000 files is a PR that may or may not have been truncated, and
+    // nothing here can tell the two apart — so the note must not assert one.
+    expect(diff).toContain("returns at most 3000 files and returned exactly that many");
+    expect(diff).toContain("if this PR changes more");
+  });
+
+  it("does not paper over any other gh failure", async () => {
+    exec.mockRejectedValue(Object.assign(new Error("failed"), { stderr: "gh: not authenticated" }));
+    await expect(fetchPrDiff({ owner: "o", repo: "r", number: 1 })).rejects.toThrow(
+      "not authenticated",
+    );
+    expect(exec).toHaveBeenCalledTimes(1);
   });
 });

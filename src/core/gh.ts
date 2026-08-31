@@ -104,8 +104,102 @@ async function membershipCheck(args: string[]): Promise<boolean> {
   }
 }
 
+/**
+ * GitHub refuses to render a diff past 300 changed files: `gh pr diff` comes
+ * back 406 and the review dies before it starts. The files API answers for ten
+ * times as many, so a too-large diff is re-assembled from it rather than
+ * reported as a broken review — see {@link assembleDiff}.
+ */
 export async function fetchPrDiff(ref: PrRef): Promise<string> {
-  return gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
+  try {
+    return await gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
+  } catch (err: unknown) {
+    // Matched on GitHub's own `too_large` signature rather than the bare 406:
+    // 406 is "Not Acceptable" generally, while `too_large` is emitted for this
+    // refusal and nothing else. Matching the meaning survives a status change;
+    // matching the status would fall back on some unrelated 406 one day.
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/too_large|exceeded the maximum number of files/i.test(message)) throw err;
+    const files = await fetchPrFiles(ref);
+    const diff = assembleDiff(files);
+    // The files API stops at 3000 too, and says nothing when it does. Hitting
+    // the cap exactly is not proof of truncation — a PR can change exactly
+    // 3000 files — and there is nothing here to tell the two apart, so the
+    // note reports the doubt rather than asserting a loss that may not exist.
+    return files.length < FILES_API_CAP
+      ? diff
+      : `${diff}[GitHub's files API returns at most ${FILES_API_CAP} files and returned exactly that many — if this PR changes more, the rest is missing from this diff. Read the checkout.]\n`;
+  }
+}
+
+const FILES_API_CAP = 3000;
+
+/** One changed file as the pulls/N/files API reports it. */
+export interface PrFile {
+  filename: string;
+  status: string;
+  previous_filename?: string | null;
+  additions: number;
+  deletions: number;
+  /** Absent for binary files, and for text files GitHub decided are too big. */
+  patch?: string | null;
+}
+
+async function fetchPrFiles(ref: PrRef): Promise<PrFile[]> {
+  const out = await gh([
+    "api",
+    "--paginate",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+    "--jq",
+    ".[] | {filename, status, previous_filename, additions, deletions, patch}",
+  ]);
+  // --jq streams one object per line rather than a JSON array.
+  return out
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as PrFile);
+}
+
+/**
+ * Put the `diff --git` / `---` / `+++` headers back on the per-file hunks the
+ * files API returns, so the result parses exactly like `gh pr diff` output —
+ * `splitDiffByFile` and the line anchoring read both the same way.
+ *
+ * A file whose patch GitHub withheld still gets its headers and a line saying
+ * so: an unexplained gap would read as "nothing changed here".
+ */
+export function assembleDiff(files: PrFile[]): string {
+  const out: string[] = [];
+  for (const file of files) {
+    const renamed = file.status === "renamed" && file.previous_filename;
+    const oldPath = file.status === "added" ? null : renamed ? file.previous_filename! : file.filename;
+    const newPath = file.status === "removed" ? null : file.filename;
+    // The side a file does not have is /dev/null, in the headers and in the
+    // binary line alike — that is how git names it.
+    const a = oldPath ? `a/${oldPath}` : "/dev/null";
+    const b = newPath ? `b/${newPath}` : "/dev/null";
+    out.push(`diff --git a/${oldPath ?? file.filename} b/${newPath ?? file.filename}`);
+    if (renamed) out.push(`rename from ${oldPath}`, `rename to ${newPath}`);
+
+    if (file.patch) {
+      out.push(`--- ${a}`, `+++ ${b}`, file.patch.replace(/\n$/, ""));
+    } else if (file.additions > 0 || file.deletions > 0) {
+      // GitHub counted the lines and then withheld the patch: a text file it
+      // decided was too big. Say so — an empty file block reads as "unchanged".
+      out.push(
+        `--- ${a}`,
+        `+++ ${b}`,
+        `[GitHub withheld this file's patch — ${file.additions} addition(s), ${file.deletions} deletion(s). Read the file in the checkout.]`,
+      );
+    } else if (!renamed) {
+      out.push(`Binary files ${a} and ${b} differ`);
+    }
+    // A pure rename ends here, with no hunks and no ---/+++ pair: nothing about
+    // the content changed, and `rename from`/`rename to` have already said
+    // everything. Calling it binary — which counting lines alone would — is
+    // both wrong and the more alarming of the two ways to be wrong.
+  }
+  return out.length === 0 ? "" : out.join("\n") + "\n";
 }
 
 export interface DiscoveredPr extends PrRef {
