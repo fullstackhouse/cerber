@@ -399,12 +399,40 @@ describe("assembleDiff", () => {
     expect(splitDiffByFile(diff).map((p) => p.path)).toEqual(["b.ts"]);
   });
 
+  it("leaves a pure rename at its rename lines instead of calling it binary", () => {
+    // A file that only moved changes no lines and carries no patch — the same
+    // shape a binary file arrives in. Counting lines alone would report the
+    // move as a binary change, which is wrong and the more alarming way to be
+    // wrong. git emits the rename lines and stops; so does this.
+    const diff = assembleDiff([
+      file({
+        filename: "b.ts",
+        status: "renamed",
+        previous_filename: "a.ts",
+        additions: 0,
+        deletions: 0,
+        patch: null,
+      }),
+    ]);
+    expect(diff).toBe("diff --git a/a.ts b/b.ts\nrename from a.ts\nrename to b.ts\n");
+    expect(diff).not.toContain("Binary");
+  });
+
+  it("still reports a renamed file's patch when it moved and changed", () => {
+    const diff = assembleDiff([
+      file({ filename: "b.ts", status: "renamed", previous_filename: "a.ts", patch: "@@ -1 +1 @@\n-old\n+new" }),
+    ]);
+    expect(diff).toContain("--- a/a.ts\n+++ b/b.ts");
+    expect(newSideLineText(diff).get("b.ts")?.get(1)).toBe("new");
+  });
+
   it("says so when GitHub withheld a patch, rather than showing an empty file", () => {
     const diff = assembleDiff([
       file({ filename: "logo.png", status: "added", additions: 0, deletions: 0, patch: null }),
       file({ filename: "huge.md", additions: 523, deletions: 48, patch: null }),
     ]);
-    expect(diff).toContain("Binary files a/logo.png and b/logo.png differ");
+    // git names the side an added file does not have /dev/null, here too.
+    expect(diff).toContain("Binary files /dev/null and b/logo.png differ");
     expect(diff).toContain("GitHub withheld this file's patch — 523 addition(s), 48 deletion(s)");
     // Neither note may be mistaken for a changed line.
     expect(newSideLineText(diff).get("huge.md")?.size).toBe(0);

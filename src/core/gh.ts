@@ -114,6 +114,10 @@ export async function fetchPrDiff(ref: PrRef): Promise<string> {
   try {
     return await gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
   } catch (err: unknown) {
+    // Matched on GitHub's own `too_large` signature rather than the bare 406:
+    // 406 is "Not Acceptable" generally, while `too_large` is emitted for this
+    // refusal and nothing else. Matching the meaning survives a status change;
+    // matching the status would fall back on some unrelated 406 one day.
     const message = err instanceof Error ? err.message : String(err);
     if (!/too_large|exceeded the maximum number of files/i.test(message)) throw err;
     const files = await fetchPrFiles(ref);
@@ -168,19 +172,30 @@ export function assembleDiff(files: PrFile[]): string {
     const renamed = file.status === "renamed" && file.previous_filename;
     const oldPath = file.status === "added" ? null : renamed ? file.previous_filename! : file.filename;
     const newPath = file.status === "removed" ? null : file.filename;
+    // The side a file does not have is /dev/null, in the headers and in the
+    // binary line alike — that is how git names it.
+    const a = oldPath ? `a/${oldPath}` : "/dev/null";
+    const b = newPath ? `b/${newPath}` : "/dev/null";
     out.push(`diff --git a/${oldPath ?? file.filename} b/${newPath ?? file.filename}`);
     if (renamed) out.push(`rename from ${oldPath}`, `rename to ${newPath}`);
-    out.push(`--- ${oldPath ? `a/${oldPath}` : "/dev/null"}`);
-    out.push(`+++ ${newPath ? `b/${newPath}` : "/dev/null"}`);
+
     if (file.patch) {
-      out.push(file.patch.replace(/\n$/, ""));
-    } else if (file.additions === 0 && file.deletions === 0) {
-      out.push(`Binary files a/${oldPath ?? file.filename} and b/${newPath ?? file.filename} differ`);
-    } else {
+      out.push(`--- ${a}`, `+++ ${b}`, file.patch.replace(/\n$/, ""));
+    } else if (file.additions > 0 || file.deletions > 0) {
+      // GitHub counted the lines and then withheld the patch: a text file it
+      // decided was too big. Say so — an empty file block reads as "unchanged".
       out.push(
+        `--- ${a}`,
+        `+++ ${b}`,
         `[GitHub withheld this file's patch — ${file.additions} addition(s), ${file.deletions} deletion(s). Read the file in the checkout.]`,
       );
+    } else if (!renamed) {
+      out.push(`Binary files ${a} and ${b} differ`);
     }
+    // A pure rename ends here, with no hunks and no ---/+++ pair: nothing about
+    // the content changed, and `rename from`/`rename to` have already said
+    // everything. Calling it binary — which counting lines alone would — is
+    // both wrong and the more alarming of the two ways to be wrong.
   }
   return out.length === 0 ? "" : out.join("\n") + "\n";
 }
