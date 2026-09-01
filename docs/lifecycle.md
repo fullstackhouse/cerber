@@ -263,7 +263,14 @@ awaits you" over a poll that had just counted two.
 
 **Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
 `reviewed`, `skipped`, `sent` — newest first inside each band. The `‹ ›` arrows
-walk `walkable()`: open, unsettled rows only.
+walk `walkable()`: open, unsettled rows only. That list is fetched once, when
+the review opens — finishing one must not renumber the walk under you — so a
+review you settle *during* the walk (skipped, marked reviewed, or sent) is
+dropped from the snapshot in the browser instead (`walkFrom`, used by
+`web/src/Detail.tsx`); otherwise `‹` off the next review would walk straight
+back into the PR you just skipped. The review you have open keeps its place
+whatever you did to it, because it is what the arrows and the "n of m" count
+read their position from, and a send leaves you standing on it.
 
 ### Things that remove a row without you touching it
 

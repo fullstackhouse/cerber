@@ -17,6 +17,7 @@ import {
   tabOf,
   verdictCell,
   walkable,
+  walkFrom,
 } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
@@ -105,6 +106,34 @@ describe("walkable", () => {
     expect(walkable(list).map((r) => r.key)).toEqual(["a", "b"]);
     const settled = [{ ...list[0]!, status: "reviewed" }, list[1]!];
     expect(walkable(settled).map((r) => r.key)).toEqual(["b"]);
+  });
+});
+
+describe("walkFrom", () => {
+  const three = [
+    row({ key: "a", status: "ready" }),
+    row({ key: "b", status: "ready" }),
+    row({ key: "c", status: "ready" }),
+  ];
+
+  it("walks the whole snapshot while you have settled nothing", () => {
+    expect(walkFrom(three, "b", new Set()).map((r) => r.key)).toEqual(["a", "b", "c"]);
+  });
+
+  // The reported case: skip a review, land on the next one, press ‹ — and the
+  // PR you just skipped comes back.
+  it("steps past a review you skipped on the way here", () => {
+    expect(walkFrom(three, "b", new Set(["a"])).map((r) => r.key)).toEqual(["b", "c"]);
+  });
+
+  it("keeps the review you are on, so it still has a place to walk from", () => {
+    // Sending leaves you on the page: the walk it reads its position and its
+    // "next review" button from has to still contain it.
+    expect(walkFrom(three, "b", new Set(["b"])).map((r) => r.key)).toEqual(["a", "b", "c"]);
+  });
+
+  it("says the walk is over once everything else is settled", () => {
+    expect(walkFrom(three, "b", new Set(["a", "b", "c"])).map((r) => r.key)).toEqual(["b"]);
   });
 });
 

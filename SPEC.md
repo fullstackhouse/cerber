@@ -1370,6 +1370,13 @@ within a band) — MUST back the prev/next walk, the arrival bell and the
 favicon dot. These are one invariant, not three coincidences: the dot on the
 tab, the popup, and the arrows all answer "what still wants me?".
 
+The walk is a snapshot taken when a review opens and MUST NOT be refetched
+under the reader. A review the reader settles during the walk — skipped,
+marked reviewed, or sent — MUST leave that snapshot at once, so no arrow
+walks back into a decision just made; the open review MUST keep its place in
+it whatever its own status became, since the arrows and the position count
+read from it.
+
 ### 17.4 The Arrival Bell and Favicon
 
 The browser bell polls the queue from every screen and notifies once per new

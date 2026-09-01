@@ -88,6 +88,25 @@ export function walkable(list: ReviewListItem[]): ReviewListItem[] {
 }
 
 /**
+ * The walk as it stands from the review you have open, given what you have
+ * settled since the page opened.
+ *
+ * The list is a snapshot taken on arrival — cerber deliberately doesn't
+ * renumber the walk under you while you read — so it still calls a PR you
+ * skipped a moment ago ready, and ‹ would walk straight back into the
+ * decision you just made. The review you are on keeps its place whatever you
+ * did to it: it is where both arrows and the count read their position from,
+ * and after a send it is still the page you are standing on.
+ */
+export function walkFrom(
+  list: ReviewListItem[],
+  currentKey: string,
+  settledHere: ReadonlySet<string>,
+): ReviewListItem[] {
+  return walkable(list).filter((r) => r.key === currentKey || !settledHere.has(r.key));
+}
+
+/**
  * The reviews GitHub still wants from you that the queue is not showing.
  *
  * The queue lists what you have not dealt with locally; the daemon reports what
