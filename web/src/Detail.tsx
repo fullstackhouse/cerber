@@ -22,7 +22,7 @@ import {
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown } from "./Markdown";
-import { walkable } from "./inbox";
+import { walkFrom } from "./inbox";
 import {
   EVENT_LABEL,
   EVENT_TONE,
@@ -1332,6 +1332,11 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [freshnessError, setFreshnessError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [neighbours, setNeighbours] = useState<ReviewListItem[]>([]);
+  // The reviews settled since this page opened — skipped, marked reviewed, or
+  // sent. Kept here rather than refetched, so a decision leaves the walk the
+  // moment you make it without the rest of the list moving.
+  const [settledHere, setSettledHere] = useState<Set<string>>(new Set());
+  const markSettled = (key: string) => setSettledHere((s) => new Set(s).add(key));
   // What the user has pointed at with "discuss this", waiting to be sent with
   // their next message. Lives here so a button anywhere in the walkthrough can
   // reach the one chat panel at the bottom.
@@ -1456,8 +1461,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const readOnly = artifact?.sent != null;
   // The walk is the queue as it stood when this page opened. Deliberately not
   // refetched: finishing this review must not renumber the walk under you or
-  // strand the arrows on a list this PR has just left.
-  const walk = useMemo(() => walkable(neighbours), [neighbours]);
+  // strand the arrows on a list this PR has just left. What it does drop is
+  // the reviews you settled on the way through — the snapshot still calls them
+  // ready, and walking ‹ back into the PR you just skipped is cerber asking
+  // you to decide it twice.
+  const walk = useMemo(
+    () => walkFrom(neighbours, reviewKey, settledHere),
+    [neighbours, reviewKey, settledHere],
+  );
   const at = walk.findIndex((r) => r.key === reviewKey);
   const prev = (at > 0 ? walk[at - 1] : null) ?? null;
   const next = (at >= 0 && at < walk.length - 1 ? walk[at + 1] : null) ?? null;
@@ -1555,7 +1566,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setSending(true);
     setSendError(null);
     sendReview(reviewKey, event)
-      .then(setArtifact)
+      .then((a) => {
+        setArtifact(a);
+        // A send settles this review too — it stays on screen showing what
+        // landed, but the arrows have no reason to come back to it.
+        markSettled(reviewKey);
+      })
       .catch((e) => setSendError(String(e.message ?? e)))
       .finally(() => setSending(false));
   };
@@ -1595,7 +1611,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   /** Settle this review locally and move on. Stays put if the write failed. */
   const settle = (status: "reviewed" | "skipped") =>
     patchReview(reviewKey, { status })
-      .then(advance)
+      .then(() => {
+        markSettled(reviewKey);
+        advance();
+      })
       .catch((e) => setError(String(e)));
   const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
     apply(patchComment(reviewKey, id, patch));
