@@ -148,6 +148,14 @@ line and get the answer in the conversation below. A line the PR removes can be
 asked about too; a comment on one posts on the file, since GitHub only takes
 inline comments on the new side of a diff.
 
+A markdown file the PR **adds** opens as the document it is, not as a thousand
+rows of `+ ## Heading` — because reviewing a new spec means reading it, and
+every line being an addition means the diff's markers say nothing. It is still
+the review: the draft comments sit in the document under the paragraph they
+point at, and any paragraph takes a comment or a question where it stands. A
+markdown file the PR only *edits* stays a diff — there the change is the point
+— with "read as a document" in its header when you want the prose instead.
+
 Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
 
 The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
