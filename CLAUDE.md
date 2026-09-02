@@ -146,7 +146,14 @@ left unwritten. Code and tests win when they disagree.
   since that machine's tap lands where nobody is looking. `favicon.ts` is the
   quiet half of the same job: a dot on the tab icon while the inbox holds
   anything, re-derived on every read of the queue (`fetchReviews`) so no screen
-  can leave it stale
+  can leave it stale. `mdblocks.ts` turns a markdown file's patch back into the
+  document, in blocks that keep their source line numbers — a file the PR adds
+  opens that way, since there the diff is the file with `+` in front of every
+  line, and the block numbers are what let the review's comments stay where
+  they point. A file the PR edits stays a diff (the change is the point) and
+  says, when read, that it is only the hunks: removals are not in a document,
+  so the reading view marks the changed blocks, counts the lines it skipped,
+  and keeps the diff one click away
 
 ## Conventions
 

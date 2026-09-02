@@ -1,5 +1,5 @@
 import { html } from "diff2html";
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
@@ -21,7 +21,8 @@ import {
 } from "./api";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
-import { Markdown } from "./Markdown";
+import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
+import { MdBlock, MdDocument, isMarkdownPath, readMarkdown } from "./mdblocks";
 import { walkFrom } from "./inbox";
 import {
   EVENT_LABEL,
@@ -166,6 +167,7 @@ function LineComposer({
           }
         }}
       />
+      <MarkdownPreview className="comment-body" text={body} />
       <div className="line-composer-actions">
         <button className="btn" disabled={!text} onClick={() => onAdd(text)}>
           <Icon name="plus" />
@@ -203,7 +205,7 @@ function LineComposer({
  * something about is one click away rather than a file-and-line form at the
  * foot of the chapter.
  */
-function DiffBlock({
+function DiffGroup({
   patch,
   comments,
   renderComment,
@@ -211,6 +213,7 @@ function DiffBlock({
   chatBusy,
   onAddLineComment,
   onAskAboutLine,
+  onRead,
 }: {
   patch: string;
   comments: ReviewComment[];
@@ -220,6 +223,8 @@ function DiffBlock({
   chatBusy: boolean;
   onAddLineComment: (pick: LinePick, body: string) => void;
   onAskAboutLine: (pick: LinePick, message: string) => void;
+  /** Read this markdown file as a document instead of as a diff. */
+  onRead: (path: string) => void;
 }) {
   const rendered = useMemo(
     () =>
@@ -231,6 +236,17 @@ function DiffBlock({
   // The paths as the diff itself spells them: the rendered header shows a
   // rename as "old → new", which is not something to hang a comment on.
   const paths = useMemo(() => splitDiffByFile(patch).map((p) => p.path), [patch]);
+  // Markdown files with a new side to read. A deletion has none, so it is only
+  // ever a diff.
+  const readable = useMemo(
+    () =>
+      new Set(
+        splitDiffByFile(patch)
+          .filter((p) => isMarkdownPath(p.path) && readMarkdown(p.patch).lines > 0)
+          .map((p) => p.path),
+      ),
+    [patch],
+  );
   // Where the comments hang, not what they say. The cockpit re-polls the whole
   // artifact every few seconds while a chat turn runs, and rebuilding the diff
   // on each of those would flicker the page and throw away a composer someone
@@ -240,7 +256,13 @@ function DiffBlock({
     [comments],
   );
   const ref = useRef<HTMLDivElement>(null);
+  // Held in a ref so that a fresh callback from a re-render never rebuilds the
+  // diff underneath the reader.
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
   const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
+  /** One per file, for the comments that are about the file and not a line. */
+  const [fileSlots, setFileSlots] = useState<{ path: string; el: HTMLElement }[]>([]);
   const [pick, setPick] = useState<LinePick | null>(null);
   const [pickSlot, setPickSlot] = useState<HTMLElement | null>(null);
 
@@ -251,6 +273,7 @@ function DiffBlock({
     highlightDiff(root);
 
     const byFile = new Map<string, HTMLElement>();
+    const fileHolders: { path: string; el: HTMLElement }[] = [];
     root.querySelectorAll<HTMLElement>(".d2h-file-wrapper").forEach((wrapper, i) => {
       const name = wrapper.querySelector(".d2h-file-name")?.textContent?.trim();
       // diff2html renders the files in the order the patch lists them, so
@@ -260,6 +283,26 @@ function DiffBlock({
       if (path) {
         byFile.set(path, wrapper);
         wrapper.dataset.path = path;
+        // Where a comment about the file rather than a line goes — under the
+        // file's own header, the way GitHub shows one. It used to float to the
+        // top of the chapter, which left a comment you had just written on a
+        // removed line apparently nowhere near the line you wrote it on.
+        const fileHolder = document.createElement("div");
+        fileHolder.className = "file-comments";
+        wrapper.querySelector(".d2h-file-header")?.after(fileHolder);
+        fileHolders.push({ path, el: fileHolder });
+        // A markdown file can be read as the document it is; the offer belongs
+        // in its own header, next to its name, not in a control somewhere else
+        // that the reader has to connect to this file.
+        if (readable.has(path)) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "btn btn-sm md-read-toggle";
+          button.dataset.readPath = path;
+          button.textContent = "read as a document";
+          button.title = "Render this markdown instead of showing it line by line";
+          wrapper.querySelector(".d2h-file-header")?.appendChild(button);
+        }
       }
     });
 
@@ -279,6 +322,24 @@ function DiffBlock({
       placed.push({ id: c.id, el: inserted.holder });
     }
     setSlots(placed);
+    setFileSlots(fileHolders);
+
+    // Registered before the read-only exit: a sent review takes no comments,
+    // but it is still something to read, so its markdown still swaps.
+    const onClick = (e: MouseEvent) => {
+      const toggle = (e.target as HTMLElement).closest<HTMLElement>(".md-read-toggle");
+      if (toggle?.dataset.readPath) {
+        onReadRef.current(toggle.dataset.readPath);
+        return;
+      }
+      const button = (e.target as HTMLElement).closest<HTMLElement>(".line-add");
+      if (!button) return;
+      const { path, line, side } = button.dataset;
+      if (!path || !line) return;
+      setPick({ path, line: Number(line), side: side === "old" ? "old" : "new" });
+    };
+    root.addEventListener("click", onClick);
+    const stopListening = () => root.removeEventListener("click", onClick);
 
     // A review that was sent while the composer was open has no more comments
     // to take. Dropping the slot alone wouldn't do it — the parking effect
@@ -286,7 +347,7 @@ function DiffBlock({
     if (readOnly) {
       setPick(null);
       setPickSlot(null);
-      return;
+      return stopListening;
     }
 
     // One button per numbered row, sitting invisibly over the line numbers
@@ -321,22 +382,14 @@ function DiffBlock({
       }
     }
 
-    const onClick = (e: MouseEvent) => {
-      const button = (e.target as HTMLElement).closest<HTMLElement>(".line-add");
-      if (!button) return;
-      const { path, line, side } = button.dataset;
-      if (!path || !line) return;
-      setPick({ path, line: Number(line), side: side === "old" ? "old" : "new" });
-    };
-    root.addEventListener("click", onClick);
     // The rendered HTML is about to be replaced, and with it every row the
     // open composer was measured against.
     setPickSlot(null);
-    return () => root.removeEventListener("click", onClick);
+    return stopListening;
     // `comments` is deliberately absent: `anchors` is the part of it this
     // effect renders, and re-running on every poll would flicker the diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rendered, anchors, paths, readOnly]);
+  }, [rendered, anchors, paths, readable, readOnly]);
 
   // Park the composer under the picked row. Separate from the render above so
   // that opening and closing it doesn't rebuild the whole diff.
@@ -367,8 +420,13 @@ function DiffBlock({
     return () => inserted.tr.remove();
   }, [pick, slots, readOnly]);
 
-  if (!rendered) return <p className="muted">No diff for this chapter.</p>;
   const unplaced = comments.filter((c) => !slots.some((s) => s.id === c.id));
+  // A comment with no row of its own still has a file. Only one that names no
+  // file in this diff has nowhere to go, and that one renders below.
+  const byFileSlot = fileSlots
+    .map((slot) => ({ ...slot, comments: unplaced.filter((c) => c.path === slot.path) }))
+    .filter((slot) => slot.comments.length > 0);
+  const homeless = unplaced.filter((c) => !fileSlots.some((s) => s.path === c.path));
   return (
     <>
       <div className="diff" ref={ref} />
@@ -376,6 +434,9 @@ function DiffBlock({
         const c = comments.find((x) => x.id === id);
         return c ? createPortal(renderComment(c), el, id) : null;
       })}
+      {byFileSlot.map(({ path, el, comments: mine }) =>
+        createPortal(<>{mine.map(renderComment)}</>, el, `file:${path}`),
+      )}
       {pick &&
         pickSlot &&
         createPortal(
@@ -395,7 +456,270 @@ function DiffBlock({
           pickSlot,
           `pick-${pick.path}-${pick.side}-${pick.line}`,
         )}
-      {unplaced.map((c) => renderComment(c))}
+      {homeless.map((c) => renderComment(c))}
+    </>
+  );
+}
+
+/** One block of a markdown file, with the affordance to say something about it. */
+function MdBlockView({
+  block,
+  path,
+  changed,
+  readOnly,
+  onPick,
+}: {
+  block: MdBlock;
+  path: string;
+  changed: boolean;
+  readOnly: boolean;
+  onPick: () => void;
+}) {
+  const rendered = useMemo(() => renderMarkdown(block.raw), [block.raw]);
+  const label = `Say something about ${path}:${block.from}`;
+  return (
+    <div className={`md-block${changed ? " md-block-changed" : ""}`}>
+      {!readOnly && (
+        // Out of the tab order for the same reason the diff's gutter button is:
+        // a document has hundreds of these, and the chapter's own form is the
+        // keyboard path to the same thing.
+        <button
+          type="button"
+          className="md-block-add"
+          title={label}
+          aria-label={label}
+          tabIndex={-1}
+          onClick={onPick}
+        >
+          <Icon name="plus" />
+        </button>
+      )}
+      <div className="md md-doc prose" dangerouslySetInnerHTML={{ __html: rendered }} />
+    </div>
+  );
+}
+
+/**
+ * A markdown file in the diff, read as the document it is.
+ *
+ * A PR that adds a spec renders as a thousand rows of `+ ## Heading` — the one
+ * form in which the document cannot be reviewed, because reviewing it means
+ * reading it. This is the same content through the same markdown renderer the
+ * rest of the cockpit uses, and it is not a detour off the review: the review's
+ * comments sit in it, under the paragraph they point at, and a paragraph you
+ * want to say something about takes a comment where it stands.
+ *
+ * What it cannot show is what a diff shows — the lines the PR took out, and
+ * which of these lines are new. So for a file the PR merely edits, the changed
+ * blocks are marked, the parts the diff never carried are marked as missing,
+ * and the diff itself is one click away.
+ */
+function MarkdownFile({
+  path,
+  doc,
+  comments,
+  renderComment,
+  readOnly,
+  chatBusy,
+  onAddLineComment,
+  onAskAboutLine,
+  onShowDiff,
+}: {
+  path: string;
+  doc: MdDocument;
+  comments: ReviewComment[];
+  renderComment: (c: ReviewComment) => ReactNode;
+  readOnly: boolean;
+  chatBusy: boolean;
+  onAddLineComment: (pick: LinePick, body: string) => void;
+  onAskAboutLine: (pick: LinePick, message: string) => void;
+  onShowDiff: () => void;
+}) {
+  const [pick, setPick] = useState<LinePick | null>(null);
+
+  // Every comment lands under the block that holds its line — or, for a line
+  // that is blank in the source, under the block it follows. None is dropped:
+  // a comment the cockpit can't place would be a comment the reader never
+  // sees, and it still posts at send time.
+  const placed = useMemo(() => {
+    const at = new Map<number, ReviewComment[]>();
+    const blocks = doc.items.flatMap((item, i) => (item.kind === "block" ? [{ item, i }] : []));
+    const rest: ReviewComment[] = [];
+    for (const c of comments) {
+      const hit =
+        c.line == null
+          ? undefined
+          : (blocks.filter((b) => b.item.from <= c.line!).pop() ?? blocks[0]);
+      if (!hit) {
+        rest.push(c);
+        continue;
+      }
+      at.set(hit.i, [...(at.get(hit.i) ?? []), c]);
+    }
+    return { at, rest };
+  }, [doc, comments]);
+
+  return (
+    <div className="md-file">
+      <div className="md-file-head">
+        <Icon name="file" />
+        <span className="md-file-name">{path}</span>
+        {doc.isNew ? (
+          <span className="tag tag-added">new file</span>
+        ) : (
+          <span className="faint" title="A diff carries the lines around a change, not the file.">
+            the diff's lines only — what the PR removed isn't here
+          </span>
+        )}
+        <span className="grow" />
+        <button className="btn btn-sm" onClick={onShowDiff} title="Back to the line-by-line diff">
+          show the diff
+        </button>
+      </div>
+      {/* About the file rather than a block of it — under the header, where
+          the diff view puts the same thing. */}
+      {placed.rest.length > 0 && (
+        <div className="file-comments">{placed.rest.map(renderComment)}</div>
+      )}
+      {doc.items.map((item, i) => (
+        <Fragment key={i}>
+          {item.kind === "gap" ? (
+            <div className="md-gap" title="These lines are in the file but not in the diff.">
+              ⋯ {item.lines.toLocaleString()} line{item.lines === 1 ? "" : "s"} the diff skips
+            </div>
+          ) : (
+            <MdBlockView
+              block={item}
+              path={path}
+              // In a file the PR creates, every line is new, so marking them
+              // all would say nothing.
+              changed={item.changed && !doc.isNew}
+              readOnly={readOnly}
+              onPick={() => setPick({ path, line: item.from, side: "new" })}
+            />
+          )}
+          {(placed.at.get(i) ?? []).map(renderComment)}
+          {item.kind === "block" && pick?.line === item.from && (
+            <LineComposer
+              pick={pick}
+              chatBusy={chatBusy}
+              onAdd={(body) => {
+                onAddLineComment(pick, body);
+                setPick(null);
+              }}
+              onAsk={(message) => {
+                onAskAboutLine(pick, message);
+                setPick(null);
+              }}
+              onClose={() => setPick(null)}
+            />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A chapter's diff: the files in the order the patch lists them, each drawn as
+ * the thing it is.
+ *
+ * Markdown files can be read as documents, and one that the PR *creates* opens
+ * that way — there, the diff markers carry nothing at all (every line is an
+ * addition) and cost the reader the document. Everything else, and every
+ * markdown file the PR merely edits, is a diff until asked otherwise.
+ */
+function DiffBlock({
+  patch,
+  comments,
+  renderComment,
+  readOnly,
+  chatBusy,
+  onAddLineComment,
+  onAskAboutLine,
+}: {
+  patch: string;
+  comments: ReviewComment[];
+  renderComment: (c: ReviewComment) => ReactNode;
+  readOnly: boolean;
+  chatBusy: boolean;
+  onAddLineComment: (pick: LinePick, body: string) => void;
+  onAskAboutLine: (pick: LinePick, message: string) => void;
+}) {
+  const files = useMemo(() => (patch.trim() ? splitDiffByFile(patch) : []), [patch]);
+  const docs = useMemo(
+    () =>
+      new Map(
+        files
+          .filter((f) => isMarkdownPath(f.path))
+          .map((f) => [f.path, readMarkdown(f.patch)] as const)
+          .filter(([, doc]) => doc.lines > 0),
+      ),
+    [files],
+  );
+  // The reader's choices, by path; absent means the default still stands. Kept
+  // for as long as they are on this review, like a chapter's fold.
+  const [choice, setChoice] = useState<Record<string, boolean>>({});
+  const isReading = (path: string) => choice[path] ?? docs.get(path)?.isNew ?? false;
+
+  const groups: { kind: "diff" | "read"; paths: string[]; patch: string }[] = [];
+  for (const file of files) {
+    const last = groups[groups.length - 1];
+    if (docs.has(file.path) && isReading(file.path)) {
+      groups.push({ kind: "read", paths: [file.path], patch: file.patch });
+      continue;
+    }
+    // Consecutive diff files stay in one diff2html render, so the chapter reads
+    // in patch order rather than in "documents first, code after".
+    if (last?.kind === "diff") {
+      last.paths.push(file.path);
+      last.patch += `\n${file.patch}`;
+    } else groups.push({ kind: "diff", paths: [file.path], patch: file.patch });
+  }
+
+  if (files.length === 0) return <p className="muted">No diff for this chapter.</p>;
+
+  const paths = new Set(files.map((f) => f.path));
+  const commentsOn = (of: (path: string) => boolean) => comments.filter((c) => of(c.path));
+
+  return (
+    <>
+      {groups.map((group) => {
+        const mine = new Set(group.paths);
+        if (group.kind === "read") {
+          const path = group.paths[0]!;
+          return (
+            <MarkdownFile
+              key={`read:${path}`}
+              path={path}
+              doc={docs.get(path)!}
+              comments={commentsOn((p) => p === path)}
+              renderComment={renderComment}
+              readOnly={readOnly}
+              chatBusy={chatBusy}
+              onAddLineComment={onAddLineComment}
+              onAskAboutLine={onAskAboutLine}
+              onShowDiff={() => setChoice((c) => ({ ...c, [path]: false }))}
+            />
+          );
+        }
+        return (
+          <DiffGroup
+            key={`diff:${group.paths[0]}`}
+            patch={group.patch}
+            comments={commentsOn((p) => mine.has(p))}
+            renderComment={renderComment}
+            readOnly={readOnly}
+            chatBusy={chatBusy}
+            onAddLineComment={onAddLineComment}
+            onAskAboutLine={onAskAboutLine}
+            onRead={(path) => setChoice((c) => ({ ...c, [path]: true }))}
+          />
+        );
+      })}
+      {/* A comment on a file this chapter's patch doesn't contain has no group
+          to sit in, and dropping it would lose it from the page entirely. */}
+      {commentsOn((p) => !paths.has(p)).map(renderComment)}
     </>
   );
 }
@@ -431,13 +755,26 @@ function CommentCard({
           {comment.line != null ? `:${comment.line}` : ""}
         </span>
         <span className={`tag tag-${comment.origin === "user" ? "yours" : tag}`}>{tag}</span>
-        {comment.drifted && (
+        {comment.drifted ? (
           <span
             className="tag tag-drift"
             title="The code this comment pointed at is gone from the diff, so it can't post inline."
           >
             drifted — posts in the body
           </span>
+        ) : (
+          comment.line == null && (
+            // Said out loud, because this is where a comment on a line the PR
+            // *removed* lands: GitHub takes inline comments on the new side
+            // only, so it became a comment about the file. Without the label
+            // it would read as an inline comment that lost its line.
+            <span
+              className="tag tag-drift"
+              title="A comment with no line — either about the file as a whole, or on a line the PR removed, which GitHub can't take inline."
+            >
+              on the file — posts in the body
+            </span>
+          )
         )}
         {!comment.drifted && comment.originalLine != null && comment.originalLine !== comment.line && (
           <span className="faint" title="This comment followed its code to a new line.">
@@ -508,12 +845,19 @@ function CommentCard({
           ))}
       </div>
       {editing ? (
-        <textarea
-          className="comment-edit"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={Math.max(3, draft.split("\n").length)}
-        />
+        <>
+          <textarea
+            className="comment-edit"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={Math.max(3, draft.split("\n").length)}
+          />
+          {/* Previewed with its grade, because that is the comment GitHub gets. */}
+          <MarkdownPreview
+            className="comment-body"
+            text={withGrade(draft, comment.severity ?? null)}
+          />
+        </>
       ) : (
         // The grade reads as the first words of the comment, exactly as it will
         // on GitHub — not as a chip that only exists here. Prefixed at render
@@ -564,6 +908,7 @@ function AddComment({
         />
       </div>
       <textarea placeholder="Your comment…" value={body} onChange={(e) => setBody(e.target.value)} rows={3} />
+      <MarkdownPreview className="comment-body" text={body} />
       <div className="add-comment-row">
         <button
           className="btn"
@@ -636,10 +981,15 @@ function ChapterSection({
 }) {
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
   // Comments that can be anchored render inline under the line they point at
-  // (like GitHub); the rest — off-diff, or drifted — render as cards above it,
-  // which is also where they will end up in the review body.
+  // (like GitHub). One that can't still belongs to its file — a comment on a
+  // line the PR removed, or about the file as a whole — so it goes to the diff
+  // too, to sit under that file's header rather than at the top of the
+  // chapter. Only a comment naming no file in this chapter's patch floats
+  // above, which is also where it will end up in the review body.
   const inline = useMemo(() => inlineComments(patch, comments), [patch, comments]);
-  const floating = comments.filter((c) => !inline.includes(c));
+  const known = useMemo(() => new Set(splitDiffByFile(patch).map((f) => f.path)), [patch]);
+  const floating = comments.filter((c) => !inline.includes(c) && !known.has(c.path));
+  const placed = comments.filter((c) => inline.includes(c) || known.has(c.path));
   const renderComment = (c: ReviewComment) => (
     <CommentCard
       key={c.id}
@@ -666,7 +1016,7 @@ function ChapterSection({
             : " · no comments"}
           {heavy != null && !open && (
             <span title="Drawing this many lines at once would leave the page too slow to scroll. Open it if you want it — nothing else on the page is affected.">
-              {` · ${heavy.toLocaleString()} diff lines, folded to keep the page quick`}
+              {` · ${heavy.toLocaleString()} lines to draw, folded to keep the page quick`}
             </span>
           )}
         </span>
@@ -690,7 +1040,7 @@ function ChapterSection({
           {floating.map(renderComment)}
           <DiffBlock
             patch={patch}
-            comments={inline}
+            comments={placed}
             renderComment={renderComment}
             readOnly={readOnly}
             chatBusy={chatBusy}
@@ -948,6 +1298,7 @@ function ChatPanel({
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
               }}
             />
+            <MarkdownPreview className="chat-turn-body" text={draft} />
             <div className="chat-actions">
               <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
                 <Icon name="send" />
@@ -1499,12 +1850,27 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       : artifact.chapters;
   }, [artifact]);
 
-  /** How many diff lines each chapter is asking the browser to draw. */
+  /**
+   * How many diff lines each chapter is asking the browser to draw.
+   *
+   * A markdown file the PR creates is not drawn as a diff at all — it opens as
+   * a document, which is a block per paragraph rather than a table row per
+   * line. Measured on a 1,028-line spec: 2,874 nodes as a document against a
+   * diff's 12.7 nodes a row, so it asks for about a quarter of the work and
+   * folding it on the diff's arithmetic would hide a page that draws fine.
+   */
   const weights = useMemo(() => {
     const counts = diffLineCounts(artifact?.diff ?? "");
-    return new Map(
-      chapters.map((ch) => [ch.id, ch.files.reduce((n, f) => n + (counts.get(f) ?? 0), 0)]),
+    const asDocument = new Set(
+      splitDiffByFile(artifact?.diff ?? "")
+        .filter((p) => isMarkdownPath(p.path) && readMarkdown(p.patch).isNew)
+        .map((p) => p.path),
     );
+    const cost = (f: string) => {
+      const lines = counts.get(f) ?? 0;
+      return asDocument.has(f) ? Math.round(lines / 4) : lines;
+    };
+    return new Map(chapters.map((ch) => [ch.id, ch.files.reduce((n, f) => n + cost(f), 0)]));
   }, [artifact?.diff, chapters]);
   /** Lines, when there are enough of them that this chapter opens folded. */
   const heavy = (id: string) => {

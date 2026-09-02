@@ -1370,6 +1370,24 @@ button {
   background: var(--surface);
 }
 
+/* Comments about the file rather than a line, under the file's own header —
+   a comment on a line the PR removed lands here, and finding it at the top of
+   the chapter instead would read as having lost it. */
+.file-comments:not(:empty) {
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--line);
+  background: #fbfbfc;
+}
+
+.file-comments .comment {
+  margin: 0 0 8px;
+}
+
+.md-file .file-comments:not(:empty) {
+  border-bottom: none;
+  background: none;
+}
+
 /* Comments injected inline under the diff row they point at (GitHub-style). */
 .inline-comment-row td {
   padding: 0;
@@ -1936,11 +1954,133 @@ button {
 
 /* ---- markdown ---- */
 
-.md > :first-child {
+/* The draft as it will read, under the box it is being typed in. It hangs off
+   the editor's left edge rather than sitting in a card of its own: it is the
+   same text once more, not a second comment. */
+.md-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 2px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--line-2);
+}
+
+.md-preview .md {
+  color: var(--fg-3);
+}
+
+/* ---- a markdown file read as a document ---- */
+
+.md-file {
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+/* Same header the diff gives a file, so the page reads as one list of files
+   whichever way each of them is drawn. */
+.md-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 11.5px;
+}
+
+.md-file-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.md-block {
+  position: relative;
+  padding: 0 16px 0 32px;
+}
+
+.md-block .md {
+  /* The document's own measure. Prose that runs the width of a 1560px console
+     is prose nobody finishes a line of. */
+  max-width: 760px;
+}
+
+/* What the PR changed, in a file it did not create. The stripe is the only
+   thing the rendered document can say that the diff says with colour. */
+.md-block-changed::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Same gesture as the diff's gutter button, in the same place: invisible until
+   the block it belongs to is under the pointer. */
+.md-block-add {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 90ms;
+}
+
+.md-block:hover .md-block-add,
+.md-block-add:focus-visible {
+  opacity: 1;
+}
+
+/* The file continues, the diff doesn't. Saying so keeps the rendered document
+   from reading as the whole of one. */
+.md-gap {
+  margin: 4px 0;
+  padding: 4px 16px;
+  border-top: 1px solid var(--line-3);
+  border-bottom: 1px solid var(--line-3);
+  background: var(--bg);
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.md-file .comment {
+  margin: 8px 16px;
+}
+
+.md-file .line-composer {
+  padding-left: 32px;
+  font-family: var(--mono);
+}
+
+/* The offer to stop reading the diff, in the diff's own file header. */
+.d2h-file-header .md-read-toggle {
+  margin-left: auto;
+}
+
+/* A card's markdown sits flush with the card's own padding. A document's does
+   not: it is cut into one `.md` per block, and zeroing the edges of each of
+   them would take away every margin the document has. */
+.md:not(.md-doc) > :first-child {
   margin-top: 0;
 }
 
-.md > :last-child {
+.md:not(.md-doc) > :last-child {
   margin-bottom: 0;
 }
 
@@ -1994,6 +2134,28 @@ button {
   letter-spacing: -0.01em;
   margin: 18px 0 2px;
   color: var(--fg);
+}
+
+/* Inside a document, headings are the structure the reader navigates by, not
+   an aside in someone else's prose — so here they carry a real hierarchy. */
+.md-doc h1 {
+  font-size: 1.5em;
+  margin-top: 4px;
+}
+
+.md-doc h2 {
+  font-size: 1.22em;
+  margin-top: 22px;
+}
+
+.md-doc h3 {
+  font-size: 1.06em;
+}
+
+.md-doc h1,
+.md-doc h2 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
 }
 
 .md h1 + p,
@@ -2179,6 +2341,13 @@ button {
 .tag-drift {
   color: var(--amber);
   background: rgba(160, 106, 0, 0.1);
+}
+
+/* The same claim diff2html's own ADDED badge makes, for a file drawn without
+   one. */
+.tag-added {
+  color: var(--green);
+  background: rgba(26, 127, 90, 0.1);
 }
 
 /* "🚨 1 blocker · 🎨 2 nits · 72% sure of the findings" beside the verdict's

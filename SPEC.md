@@ -1396,13 +1396,15 @@ on every queue fetch so no screen can leave it stale.
 ### 17.5 The Walkthrough
 
 Chapters render open — the walkthrough is the point of the page — with one
-exception: a chapter holding more than 2,000 diff lines opens folded, and its
-header MUST say so and say why ("34,961 diff lines, folded to keep the page
+exception: a chapter with more than 2,000 lines to draw opens folded, and its
+header MUST say so and say why ("34,961 lines to draw, folded to keep the page
 quick"). A rendered diff line is a table row and a dozen DOM nodes, so the
 catch-all chapter of a 368-file PR is 600,000 of them: the browser then spends
-its time on layout rather than on the review, and scrolling collapses. The
-fold MUST be decided while rendering, not corrected afterwards — folding a
-chapter that has already been drawn pays the whole cost it exists to avoid.
+its time on layout rather than on the review, and scrolling collapses. A file
+that opens as a document (§17.7) is counted at a quarter of its lines, being
+drawn a block at a time rather than a row at a time. The fold MUST be decided
+while rendering, not corrected afterwards — folding a chapter that has already
+been drawn pays the whole cost it exists to avoid.
 
 The fold is a default, not a refusal: one click opens it, and the user's
 choice stands for as long as they are on that review. It does not outlive the
@@ -1421,16 +1423,59 @@ one is reported over the next.
   or request-changes with none), the cockpit points it out and offers a
   one-click chat turn asking the reviewer to re-true the verdict. It MUST
   NOT rewrite the verdict itself.
+- A comment that cannot post inline — drifted, or with no line at all, which
+  is what a comment on a line the PR *removed* becomes, GitHub taking inline
+  comments on the new side only — MUST say so where it is read; nothing else
+  tells it apart from an inline one. It renders with its file, under that
+  file's header, whenever the chapter's patch contains the file; only a
+  comment naming no file in that patch renders loose above the diff.
 - A sent review renders read-only. Rows filed by cerber are labeled with the
   filing reason ("reviewed on GitHub"), never with a bare "reviewed" that
   would read as a click the user never made.
 - Opening a review triggers refresh (§13.2); a refresh failure is reported
   softly and the draft still reads.
+- Every box the user types markdown into (a comment being edited, a comment
+  being written, a line composer, the chat input) renders that draft as it
+  will read, below the box, with no switch and no click. The preview MUST be
+  produced by the same markdown path as the finished render, so it cannot
+  drift from it, and a comment's preview MUST carry its grade badge (§7.4) —
+  that is the body GitHub gets. It MUST be suppressed when the render reads
+  back word-for-word as the source (whitespace runs flattened): a plain note
+  is told nothing by a second copy of itself.
 - The review's history renders as a collapsed card at the foot of the review,
   newest first — it is what you open when a review is not where you expected
   it, not part of reading one — with a rail jump that opens it on the way. An
   absent history MUST read as "predates cerber keeping one", never as an
   empty log (§5.4).
+
+### 17.7 Markdown Files as Documents
+
+A markdown file in the diff can be read as the document it is, rendered
+through the same markdown path as everything else the cockpit renders. A file
+the PR **creates** MUST open that way: there every line is an addition, so the
+diff's markers carry no information and cost the reader the document. Every
+other file — including a markdown file the PR merely edits — is a diff until
+the reader asks, from a control in that file's own header, and either choice
+stands for as long as they are on the review (like a chapter's fold, §17.5).
+
+A document is not a detour off the review, so the reading view MUST keep what
+the diff view offers:
+
+- The review's comments render in it, under the block holding the line each
+  points at (nearest preceding block for a line that is blank in the source).
+  No comment may be dropped for want of a place — an unplaceable one renders
+  after the document.
+- A block takes a new comment or a question where it stands, anchored to the
+  block's first line.
+
+And it MUST NOT pass off a fragment as the whole:
+
+- A file the PR only edits carries the hunks alone, so its header says so, the
+  lines between hunks are marked as skipped and counted, and the blocks the PR
+  added are marked as changed. In a file the PR creates nothing is marked,
+  since everything is new.
+- What the PR **removed** is not in the document at all. The diff is one click
+  away and is where that question is answered.
 
 ## 18. CLI
 
@@ -1712,7 +1757,7 @@ An implementation conforms when all of the following hold:
 | §14 GitHub | `src/core/gh.ts`, `src/core/trust.ts`, `src/core/send.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
-| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts` |
+| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `Markdown.tsx`, `mdblocks.ts` |
 | §18 CLI | `src/cli/index.ts` |
 
 ## Appendix B. Known Divergences in the Reference Implementation (non-normative)
