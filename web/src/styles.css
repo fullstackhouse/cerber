@@ -1370,6 +1370,24 @@ button {
   background: var(--surface);
 }
 
+/* Comments about the file rather than a line, under the file's own header —
+   a comment on a line the PR removed lands here, and finding it at the top of
+   the chapter instead would read as having lost it. */
+.file-comments:not(:empty) {
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--line);
+  background: #fbfbfc;
+}
+
+.file-comments .comment {
+  margin: 0 0 8px;
+}
+
+.md-file .file-comments:not(:empty) {
+  border-bottom: none;
+  background: none;
+}
+
 /* Comments injected inline under the diff row they point at (GitHub-style). */
 .inline-comment-row td {
   padding: 0;

@@ -261,6 +261,8 @@ function DiffGroup({
   const onReadRef = useRef(onRead);
   onReadRef.current = onRead;
   const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
+  /** One per file, for the comments that are about the file and not a line. */
+  const [fileSlots, setFileSlots] = useState<{ path: string; el: HTMLElement }[]>([]);
   const [pick, setPick] = useState<LinePick | null>(null);
   const [pickSlot, setPickSlot] = useState<HTMLElement | null>(null);
 
@@ -271,6 +273,7 @@ function DiffGroup({
     highlightDiff(root);
 
     const byFile = new Map<string, HTMLElement>();
+    const fileHolders: { path: string; el: HTMLElement }[] = [];
     root.querySelectorAll<HTMLElement>(".d2h-file-wrapper").forEach((wrapper, i) => {
       const name = wrapper.querySelector(".d2h-file-name")?.textContent?.trim();
       // diff2html renders the files in the order the patch lists them, so
@@ -280,6 +283,14 @@ function DiffGroup({
       if (path) {
         byFile.set(path, wrapper);
         wrapper.dataset.path = path;
+        // Where a comment about the file rather than a line goes — under the
+        // file's own header, the way GitHub shows one. It used to float to the
+        // top of the chapter, which left a comment you had just written on a
+        // removed line apparently nowhere near the line you wrote it on.
+        const fileHolder = document.createElement("div");
+        fileHolder.className = "file-comments";
+        wrapper.querySelector(".d2h-file-header")?.after(fileHolder);
+        fileHolders.push({ path, el: fileHolder });
         // A markdown file can be read as the document it is; the offer belongs
         // in its own header, next to its name, not in a control somewhere else
         // that the reader has to connect to this file.
@@ -311,6 +322,7 @@ function DiffGroup({
       placed.push({ id: c.id, el: inserted.holder });
     }
     setSlots(placed);
+    setFileSlots(fileHolders);
 
     // Registered before the read-only exit: a sent review takes no comments,
     // but it is still something to read, so its markdown still swaps.
@@ -409,6 +421,12 @@ function DiffGroup({
   }, [pick, slots, readOnly]);
 
   const unplaced = comments.filter((c) => !slots.some((s) => s.id === c.id));
+  // A comment with no row of its own still has a file. Only one that names no
+  // file in this diff has nowhere to go, and that one renders below.
+  const byFileSlot = fileSlots
+    .map((slot) => ({ ...slot, comments: unplaced.filter((c) => c.path === slot.path) }))
+    .filter((slot) => slot.comments.length > 0);
+  const homeless = unplaced.filter((c) => !fileSlots.some((s) => s.path === c.path));
   return (
     <>
       <div className="diff" ref={ref} />
@@ -416,6 +434,9 @@ function DiffGroup({
         const c = comments.find((x) => x.id === id);
         return c ? createPortal(renderComment(c), el, id) : null;
       })}
+      {byFileSlot.map(({ path, el, comments: mine }) =>
+        createPortal(<>{mine.map(renderComment)}</>, el, `file:${path}`),
+      )}
       {pick &&
         pickSlot &&
         createPortal(
@@ -435,7 +456,7 @@ function DiffGroup({
           pickSlot,
           `pick-${pick.path}-${pick.side}-${pick.line}`,
         )}
-      {unplaced.map((c) => renderComment(c))}
+      {homeless.map((c) => renderComment(c))}
     </>
   );
 }
@@ -555,6 +576,11 @@ function MarkdownFile({
           show the diff
         </button>
       </div>
+      {/* About the file rather than a block of it — under the header, where
+          the diff view puts the same thing. */}
+      {placed.rest.length > 0 && (
+        <div className="file-comments">{placed.rest.map(renderComment)}</div>
+      )}
       {doc.items.map((item, i) => (
         <Fragment key={i}>
           {item.kind === "gap" ? (
@@ -590,7 +616,6 @@ function MarkdownFile({
           )}
         </Fragment>
       ))}
-      {placed.rest.map(renderComment)}
     </div>
   );
 }
@@ -730,13 +755,26 @@ function CommentCard({
           {comment.line != null ? `:${comment.line}` : ""}
         </span>
         <span className={`tag tag-${comment.origin === "user" ? "yours" : tag}`}>{tag}</span>
-        {comment.drifted && (
+        {comment.drifted ? (
           <span
             className="tag tag-drift"
             title="The code this comment pointed at is gone from the diff, so it can't post inline."
           >
             drifted — posts in the body
           </span>
+        ) : (
+          comment.line == null && (
+            // Said out loud, because this is where a comment on a line the PR
+            // *removed* lands: GitHub takes inline comments on the new side
+            // only, so it became a comment about the file. Without the label
+            // it would read as an inline comment that lost its line.
+            <span
+              className="tag tag-drift"
+              title="A comment with no line — either about the file as a whole, or on a line the PR removed, which GitHub can't take inline."
+            >
+              on the file — posts in the body
+            </span>
+          )
         )}
         {!comment.drifted && comment.originalLine != null && comment.originalLine !== comment.line && (
           <span className="faint" title="This comment followed its code to a new line.">
@@ -943,10 +981,15 @@ function ChapterSection({
 }) {
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
   // Comments that can be anchored render inline under the line they point at
-  // (like GitHub); the rest — off-diff, or drifted — render as cards above it,
-  // which is also where they will end up in the review body.
+  // (like GitHub). One that can't still belongs to its file — a comment on a
+  // line the PR removed, or about the file as a whole — so it goes to the diff
+  // too, to sit under that file's header rather than at the top of the
+  // chapter. Only a comment naming no file in this chapter's patch floats
+  // above, which is also where it will end up in the review body.
   const inline = useMemo(() => inlineComments(patch, comments), [patch, comments]);
-  const floating = comments.filter((c) => !inline.includes(c));
+  const known = useMemo(() => new Set(splitDiffByFile(patch).map((f) => f.path)), [patch]);
+  const floating = comments.filter((c) => !inline.includes(c) && !known.has(c.path));
+  const placed = comments.filter((c) => inline.includes(c) || known.has(c.path));
   const renderComment = (c: ReviewComment) => (
     <CommentCard
       key={c.id}
@@ -997,7 +1040,7 @@ function ChapterSection({
           {floating.map(renderComment)}
           <DiffBlock
             patch={patch}
-            comments={inline}
+            comments={placed}
             renderComment={renderComment}
             readOnly={readOnly}
             chatBusy={chatBusy}

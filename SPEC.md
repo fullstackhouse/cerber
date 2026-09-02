@@ -1423,6 +1423,12 @@ one is reported over the next.
   or request-changes with none), the cockpit points it out and offers a
   one-click chat turn asking the reviewer to re-true the verdict. It MUST
   NOT rewrite the verdict itself.
+- A comment that cannot post inline — drifted, or with no line at all, which
+  is what a comment on a line the PR *removed* becomes, GitHub taking inline
+  comments on the new side only — MUST say so where it is read; nothing else
+  tells it apart from an inline one. It renders with its file, under that
+  file's header, whenever the chapter's patch contains the file; only a
+  comment naming no file in that patch renders loose above the diff.
 - A sent review renders read-only. Rows filed by cerber are labeled with the
   filing reason ("reviewed on GitHub"), never with a bare "reviewed" that
   would read as a click the user never made.
