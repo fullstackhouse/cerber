@@ -1936,6 +1936,22 @@ button {
 
 /* ---- markdown ---- */
 
+/* The draft as it will read, under the box it is being typed in. It hangs off
+   the editor's left edge rather than sitting in a card of its own: it is the
+   same text once more, not a second comment. */
+.md-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 2px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--line-2);
+}
+
+.md-preview .md {
+  color: var(--fg-3);
+}
+
 .md > :first-child {
   margin-top: 0;
 }

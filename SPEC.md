@@ -1426,6 +1426,14 @@ one is reported over the next.
   would read as a click the user never made.
 - Opening a review triggers refresh (§13.2); a refresh failure is reported
   softly and the draft still reads.
+- Every box the user types markdown into (a comment being edited, a comment
+  being written, a line composer, the chat input) renders that draft as it
+  will read, below the box, with no switch and no click. The preview MUST be
+  produced by the same markdown path as the finished render, so it cannot
+  drift from it, and a comment's preview MUST carry its grade badge (§7.4) —
+  that is the body GitHub gets. It MUST be suppressed when the render reads
+  back word-for-word as the source (whitespace runs flattened): a plain note
+  is told nothing by a second copy of itself.
 - The review's history renders as a collapsed card at the foot of the review,
   newest first — it is what you open when a review is not where you expected
   it, not part of reading one — with a rail jump that opens it on the way. An
@@ -1712,7 +1720,7 @@ An implementation conforms when all of the following hold:
 | §14 GitHub | `src/core/gh.ts`, `src/core/trust.ts`, `src/core/send.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
-| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts` |
+| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `Markdown.tsx` |
 | §18 CLI | `src/cli/index.ts` |
 
 ## Appendix B. Known Divergences in the Reference Implementation (non-normative)

@@ -21,7 +21,7 @@ import {
 } from "./api";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
-import { Markdown } from "./Markdown";
+import { Markdown, MarkdownPreview } from "./Markdown";
 import { walkFrom } from "./inbox";
 import {
   EVENT_LABEL,
@@ -166,6 +166,7 @@ function LineComposer({
           }
         }}
       />
+      <MarkdownPreview className="comment-body" text={body} />
       <div className="line-composer-actions">
         <button className="btn" disabled={!text} onClick={() => onAdd(text)}>
           <Icon name="plus" />
@@ -508,12 +509,19 @@ function CommentCard({
           ))}
       </div>
       {editing ? (
-        <textarea
-          className="comment-edit"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={Math.max(3, draft.split("\n").length)}
-        />
+        <>
+          <textarea
+            className="comment-edit"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={Math.max(3, draft.split("\n").length)}
+          />
+          {/* Previewed with its grade, because that is the comment GitHub gets. */}
+          <MarkdownPreview
+            className="comment-body"
+            text={withGrade(draft, comment.severity ?? null)}
+          />
+        </>
       ) : (
         // The grade reads as the first words of the comment, exactly as it will
         // on GitHub — not as a chip that only exists here. Prefixed at render
@@ -564,6 +572,7 @@ function AddComment({
         />
       </div>
       <textarea placeholder="Your comment…" value={body} onChange={(e) => setBody(e.target.value)} rows={3} />
+      <MarkdownPreview className="comment-body" text={body} />
       <div className="add-comment-row">
         <button
           className="btn"
@@ -948,6 +957,7 @@ function ChatPanel({
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
               }}
             />
+            <MarkdownPreview className="chat-turn-body" text={draft} />
             <div className="chat-actions">
               <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
                 <Icon name="send" />
