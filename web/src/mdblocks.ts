@@ -59,7 +59,9 @@ function newSide(patch: string): Line[] {
   const out: Line[] = [];
   let n = 0;
   let inHunk = false;
-  for (const line of patch.split("\n")) {
+  const lines = patch.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunk) {
       n = Number(hunk[1]);
@@ -67,6 +69,11 @@ function newSide(patch: string): Line[] {
       continue;
     }
     if (!inHunk) continue;
+    // The empty string `split` leaves behind on a patch ending in a newline —
+    // not a line of the file. `src/core/diff.ts` drops it for the same reason,
+    // and it is the last file of a diff that gets one: counted, it would give a
+    // deleted markdown file a line to read and offer it as a document.
+    if (line === "" && i === lines.length - 1) continue;
     if (line.startsWith("\\")) continue; // "\ No newline at end of file"
     if (line.startsWith("-")) continue; // the old side isn't part of the document
     if (line.startsWith("+") || line.startsWith(" ") || line === "") {

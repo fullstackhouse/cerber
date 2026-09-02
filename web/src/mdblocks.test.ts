@@ -103,16 +103,32 @@ describe("readMarkdown of a modified file", () => {
 });
 
 describe("readMarkdown of a deleted file", () => {
+  const patch = [
+    "diff --git a/gone.md b/gone.md",
+    "deleted file mode 100644",
+    "--- a/gone.md",
+    "+++ /dev/null",
+    "@@ -1,2 +0,0 @@",
+    "-# Title",
+    "-body",
+  ].join("\n");
+
   it("has nothing to read", () => {
-    const patch = [
-      "diff --git a/gone.md b/gone.md",
-      "deleted file mode 100644",
-      "--- a/gone.md",
-      "+++ /dev/null",
-      "@@ -1,2 +0,0 @@",
-      "-# Title",
-      "-body",
-    ].join("\n");
     expect(readMarkdown(patch).lines).toBe(0);
+  });
+
+  // `splitDiffByFile` hands the last file of a diff a patch ending in a
+  // newline, so `split` leaves an empty string behind. Counted as a line, it
+  // would give this file something to read and offer it as a document.
+  it("still has nothing to read when its patch ends in a newline", () => {
+    expect(readMarkdown(`${patch}\n`).lines).toBe(0);
+  });
+});
+
+describe("the empty string at the end of a patch", () => {
+  it("is not a line of the file", () => {
+    const doc = readMarkdown(`${added("a.md", "# Hi")}\n`);
+    expect(doc.lines).toBe(1);
+    expect(doc.items).toEqual([{ kind: "block", raw: "# Hi", from: 1, to: 1, changed: true }]);
   });
 });
