@@ -1,5 +1,5 @@
 import { html } from "diff2html";
-import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
@@ -1332,32 +1332,141 @@ function ChatPanel({
 }
 
 /**
+ * A textarea that grows to its text, up to most of the window.
+ *
+ * The two long-form boxes in a review — the summary and the body that gets
+ * posted — are paragraphs that wrap, so a row count guessed from newlines
+ * opens the user's own prose on a scrollbar, with a line cut in half at the
+ * bottom edge.
+ */
+function useGrowToFit(value: string) {
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  const fit = useCallback(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.7)}px`;
+  }, []);
+  useEffect(fit, [value, fit]);
+  // The cap is a share of the window, so it has to be re-taken when the window
+  // changes: a box grown in a tall one would otherwise stay taller than the
+  // short one it now sits in. Its own effect, or the listener would be torn
+  // down and rebuilt on every keystroke.
+  useEffect(() => {
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [fit]);
+  return box;
+}
+
+/**
+ * The review's own comment — the one paragraph GitHub gets that is not attached
+ * to a line — rewritten by hand.
+ *
+ * It is seeded with the composed body and replaces it outright, footer and
+ * folded notes included: a body half-honoured is one nobody wrote. What it is
+ * not is an edit of the review — the summary, walkthrough and comments stay
+ * exactly as they read, and `build it from the review again` is always one
+ * click away.
+ */
+function BodyEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  /** Resolves once the body is written; the caller closes the editor on that. */
+  onSave: (text: string) => Promise<unknown>;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const box = useGrowToFit(draft);
+
+  // This box is the only copy of what was typed — the summary and the comments
+  // it replaces are still the review's, and nothing else holds these words. So
+  // it stays open until the write actually lands, and a failed one keeps the
+  // draft with the reason next to it rather than closing over both.
+  const save = () => {
+    // ⌘↵ can be held down, and the button is not the only way in: without this
+    // a second write goes out while the first is still in flight.
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    // Only the failure path comes back here: a save that lands closes the
+    // editor, so a `finally` would be writing state into an unmounted box.
+    // `e?.message`: a rejection is not guaranteed to be an Error, and a catch
+    // that throws leaves the failure unreported — the one outcome this whole
+    // path exists to prevent.
+    onSave(draft).catch((e) => {
+      setError(String(e?.message ?? e));
+      setSaving(false);
+    });
+  };
+
+  return (
+    <div className="body-edit-wrap">
+      <textarea
+        ref={box}
+        className="body-edit"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={10}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Or the browser types the newline into the box on the way out.
+            e.preventDefault();
+            save();
+          }
+          // Not while a write is in flight — the cancel button is disabled for
+          // the same reason, and Escape must not be the way around it.
+          if (e.key === "Escape" && !saving) onCancel();
+        }}
+      />
+      <MarkdownPreview className="body-md" text={draft} />
+      {error && <p className="error">{error}</p>}
+      <div className="card-actions">
+        <button className="btn btn-sm" onClick={save} disabled={saving}>
+          {saving ? "saving…" : "save this body"}
+          <Key>⌘↵</Key>
+        </button>
+        <button className="btn btn-sm" onClick={onCancel} disabled={saving}>
+          cancel
+        </button>
+        <span className="faint">
+          this is exactly what posts — the review above stays as it reads
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The one place anything reaches GitHub.
  *
- * One primary button, coloured by what it will do. The event follows the
- * verdict, and the switch that decouples them sits quietly underneath — a
- * review that says "request changes" but posts an approve is a thing you should
- * have to mean.
+ * One primary button, coloured by what it will do. What it does follows the
+ * verdict, with nothing in between: the verdict buttons sit directly above, so
+ * a second switch here would be two controls over one decision — and the way
+ * to post an approve is to say the review approves.
  */
 function SendPanel({
   artifact,
   reviewKey,
   event,
-  overridden,
-  onPickEvent,
   sending,
   onSend,
   error,
   footer,
   next,
   onAdvance,
+  onBody,
   anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
   event: ReviewEvent;
-  overridden: boolean;
-  onPickEvent: (e: ReviewEvent) => void;
   sending: boolean;
   onSend: () => void;
   error: string | null;
@@ -1367,22 +1476,75 @@ function SendPanel({
   /** Where the queue goes next, once this one is done with. */
   next: ReviewListItem | null;
   onAdvance: () => void;
+  /**
+   * Write the body that gets posted, or `null` to compose it from the review
+   * again. Rejects when the write failed, so the editor can keep the draft.
+   */
+  onBody: (text: string | null) => Promise<unknown>;
   anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [showBody, setShowBody] = useState(false);
-  const [eventsOpen, setEventsOpen] = useState(false);
+  // A body the user wrote themselves opens shown: it is the one thing on this
+  // panel that nothing else on the page tells them, so hiding it behind a
+  // click would hide the fact that the draft above is no longer what posts.
+  const [showBody, setShowBody] = useState(artifact.bodyOverride != null);
+  const [editingBody, setEditingBody] = useState(false);
+  const ownBody = artifact.bodyOverride != null;
+
+  // A body the user wrote opens shown — including one that arrived after this
+  // panel was drawn, from another tab or a poll tick. Only ever in that
+  // direction: clearing it must not reopen a preview you closed.
+  useEffect(() => {
+    if (ownBody) setShowBody(true);
+  }, [ownBody]);
+
+  // What the composed body is made of. The effect keys on this rather than on
+  // the artifact object, which a poll replaces wholesale every three seconds
+  // while a run or a chat turn is in flight — keyed on identity, the preview
+  // would clear and refetch on every tick of a body nothing had changed.
+  //
+  // Only while the body is on screen and the editor is closed — the two cases
+  // the effect below acts on. With the preview hidden there is nothing to keep
+  // in step, and under an open editor the effect bails anyway, so walking every
+  // comment on each of those ticks would be work for a string nobody reads.
+  // (A `useMemo` would not help — the arrays it reads are new objects on every
+  // poll, so it would recompute regardless.)
+  const bodySource =
+    showBody && !editingBody
+      ? JSON.stringify([
+          artifact.bodyOverride,
+          artifact.summary,
+          artifact.chapters.map((ch) => [ch.title, ch.explanation]),
+          artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+        ])
+      : "";
 
   useEffect(() => {
-    if (!showBody) return;
+    // The editor owns the box while it is open, and the draft in it has to
+    // outlive an artifact that moves underneath.
+    if (!showBody || editingBody) return;
+    // Cleared before the refetch rather than replaced after it: the line under
+    // the box reads from the artifact, which has already changed, so leaving
+    // the old text up pairs "you wrote this body" with the composed body it
+    // replaced — the exact confusion this panel exists to prevent. `stale`
+    // drops a slower earlier answer landing on top of a newer one.
+    let stale = false;
+    setPreview(null);
+    setPreviewError(null);
     fetchSendPreview(reviewKey, event)
       .then((p) => {
+        if (stale) return;
         setPreview(p);
         setPreviewError(null);
       })
-      .catch((e) => setPreviewError(String(e)));
-  }, [reviewKey, event, artifact, showBody]);
+      .catch((e) => {
+        if (!stale) setPreviewError(String(e));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [reviewKey, event, bodySource, showBody, editingBody]);
 
   if (artifact.sent) {
     return (
@@ -1417,7 +1579,15 @@ function SendPanel({
         <span className="lab">send to github</span>
         <span className="grow" />
         <span className="faint">{payloadSummary(artifact)}</span>
-        <button className="link" onClick={() => setShowBody(!showBody)}>
+        <button
+          className="link"
+          onClick={() => setShowBody(!showBody)}
+          // The editor owns the box until it is saved or cancelled. Hiding the
+          // section would unmount it, and the draft inside is the only copy of
+          // what was typed.
+          disabled={editingBody}
+          title={editingBody ? "save or cancel the body you are writing first" : undefined}
+        >
           <Icon name="eye" />
           {showBody ? "hide what gets posted" : "see what gets posted"}
         </button>
@@ -1432,48 +1602,67 @@ function SendPanel({
           <Icon name={event === "APPROVE" ? "approve" : event === "COMMENT" ? "comment" : "changes"} size={15} />
           {sending ? "sending…" : `${EVENT_LABEL[event]} on ${artifact.id}`} <Key>s</Key>
         </button>
-
-        <div className="send-as">
-          <button className="send-as-toggle" onClick={() => setEventsOpen(!eventsOpen)}>
-            as <b>{EVENT_LABEL[event]}</b> {eventsOpen ? "▴" : "▾"}
-          </button>
-          <div className="send-as-why">
-            {overridden
-              ? `you chose this — the verdict says ${artifact.verdict?.recommendation.replace("_", " ") ?? "nothing"}`
-              : "follows the verdict"}
-          </div>
-          {eventsOpen && (
-            <div className="menu">
-              {(["REQUEST_CHANGES", "COMMENT", "APPROVE"] as ReviewEvent[]).map((id) => (
-                <button
-                  key={id}
-                  className={`menu-item${event === id ? " menu-item-on" : ""}`}
-                  onClick={() => {
-                    onPickEvent(id);
-                    setEventsOpen(false);
-                  }}
-                >
-                  <span className={`tone-${EVENT_TONE[id]}`}>
-                    <Icon name={id === "APPROVE" ? "approve" : id === "COMMENT" ? "comment" : "changes"} />
-                  </span>
-                  <span className="grow">{EVENT_LABEL[id]}</span>
-                  <span className="menu-check">{event === id ? "✓" : ""}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {error && <p className="error">{error}</p>}
-      {showBody &&
-        (previewError ? (
-          <p className="error">{previewError}</p>
-        ) : preview ? (
-          <pre className="body-preview">{preview.body}</pre>
-        ) : (
-          <p className="faint">building the body…</p>
-        ))}
+      {showBody && (
+        <>
+          {/* Above the body rather than instead of it: a reset that failed
+              leaves the body it could not replace still standing, and taking
+              that away with the buttons would make retrying a matter of
+              closing the panel and opening it again. */}
+          {previewError && <p className="error">{previewError}</p>}
+          {preview ? (
+            editingBody ? (
+              <BodyEditor
+                initial={preview.body}
+                onSave={(text) => onBody(text).then(() => setEditingBody(false))}
+                onCancel={() => setEditingBody(false)}
+              />
+            ) : (
+              <>
+                <pre className="body-preview">{preview.body}</pre>
+                {/* Where these words came from, said every time. Without it
+                    the only honest reading of a read-only box is that the text
+                    is not yours to change — and after you have changed it, that
+                    the summary above is still what posts. */}
+                <div className="body-source">
+                  {ownBody ? (
+                    <>
+                      <span className="faint">
+                        you wrote this body — it no longer follows the summary or the comments
+                      </span>
+                      <button
+                        className="link"
+                        onClick={() =>
+                          // Reported where the body is read, not up at the top
+                          // of the page: a reset that failed leaves your own
+                          // body in the box below, still what would post.
+                          onBody(null).catch((e) => setPreviewError(String(e?.message ?? e)))
+                        }
+                      >
+                        build it from the review again
+                      </button>
+                    </>
+                  ) : (
+                    <span className="faint">
+                      built from the summary, the walkthrough and the folded comments
+                    </span>
+                  )}
+                  <button className="link" onClick={() => setEditingBody(true)}>
+                    <Icon name="edit" />
+                    {ownBody ? "keep editing it" : "write it yourself"}
+                  </button>
+                </div>
+              </>
+            )
+          ) : (
+            // Nothing to show yet — and nothing to say either when the error
+            // above is already the reason there is no body.
+            !previewError && <p className="faint">building the body…</p>
+          )}
+        </>
+      )}
 
       <div className="send-footer">{footer}</div>
     </div>
@@ -1710,7 +1899,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const historyEl = useRef<HTMLElement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const topEl = useRef<HTMLDivElement | null>(null);
-  const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // The comment the rail just sent you to, marked until you've had time to see it.
@@ -1742,7 +1930,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setError(null);
     setFreshness(null);
     setFreshnessError(null);
-    setEventOverride(null);
     setSendError(null);
     fetchReview(reviewKey)
       .then((a) => {
@@ -1918,13 +2105,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     scrollToComment(commentId);
   };
 
-  const event = eventOverride ?? eventForVerdict(artifact?.verdict);
-  // A verdict change re-points the event at it: the switch below the button is
-  // an override of the verdict, not a setting that outlives it.
-  const recommendation = artifact?.verdict?.recommendation;
-  useEffect(() => setEventOverride(null), [recommendation]);
-  // A failure belongs to the send it came from; changing what you'd send makes
-  // it history rather than a warning about the button in front of you.
+  // What Send will do, and the only thing it can do: the verdict decides it.
+  const event = eventForVerdict(artifact?.verdict);
+  // A failure belongs to the send it came from; changing the verdict makes it
+  // history rather than a warning about the button in front of you.
   useEffect(() => setSendError(null), [event]);
 
   const doSend = () => {
@@ -2425,8 +2609,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <div className="verdict-bar" ref={verdictEl}>
                 <span className="lab">verdict</span>
                 {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
-                <span className="grow" />
-                <span className="faint">what you send follows this unless you say otherwise</span>
               </div>
             )}
 
@@ -2434,13 +2616,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               artifact={artifact}
               reviewKey={reviewKey}
               event={event}
-              overridden={eventOverride != null}
-              onPickEvent={setEventOverride}
               sending={sending}
               onSend={doSend}
               error={sendError}
               next={next}
               onAdvance={advance}
+              // Not `apply`: it catches, and the panel needs the failure to
+              // reach the box that is holding the only copy of the text.
+              onBody={(text) => patchReview(reviewKey, { bodyOverride: text }).then(setArtifact)}
               anchorRef={sendEl}
               footer={
                 <>

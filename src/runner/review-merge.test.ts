@@ -82,6 +82,7 @@ function ready(comments: Comment[], headSha = "old-sha"): Artifact {
     chapters: [],
     comments,
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
     filed: null,

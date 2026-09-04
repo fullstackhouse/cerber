@@ -40,6 +40,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     chapters: [],
     comments: [],
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,

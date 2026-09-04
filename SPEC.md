@@ -182,6 +182,7 @@ absent on read and materialize with the stated value.
 | `chapters` | Chapter[] | default `[]` |
 | `comments` | Comment[] | default `[]` |
 | `verdict` | Verdict \| null | default `null` |
+| `bodyOverride` | string \| null | default `null`; the review body to post, written by hand — null means composed at send time (§14.4) |
 | `run` | RunInfo \| null | default `null` |
 | `sent` | SentInfo \| null | default `null` |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
@@ -389,9 +390,10 @@ review began at that moment.
 and next artifacts over a fixed watchlist — appearance in the inbox, status
 changes, head movement, PR state/draft flips, run start (with its shape:
 model, source, trust, who asked) and finish (reviewed SHA, cost) or failure,
-verdict set/changed, comment churn summarized as one line (added from the
-review / written by you / edited / re-graded / dropped / restored / gone),
-send, filing, refresh. A generic diff would bury the timeline under a running
+verdict set/changed, the body to post leaving the review's composition or
+returning to it, comment churn summarized as one line
+(added from the review / written by you / edited / re-graded / dropped /
+restored / gone), send, filing, refresh. A generic diff would bury the timeline under a running
 turn's narration, which is rewritten every couple of seconds.
 
 **Decision notes.** The poll's deliberate silences — the only kind of history
@@ -621,8 +623,10 @@ another look — and then a new head means a new run.
 
 ### 8.5 What a Re-Review Destroys and What Survives
 
-A re-review replaces the whole draft — summary, chapters, verdict, and **all
-comments, the user's own included**. That is a decision, not a gap:
+A re-review replaces the whole draft — summary, chapters, verdict, a
+hand-written `bodyOverride` (it described a body for a
+draft that no longer exists — the same reason the pre-chat snapshot goes), and
+**all comments, the user's own included**. That is a decision, not a gap:
 half-keeping them (carrying on success, losing on failure) costs the code and
 still loses the work, so cerber does neither and says so plainly.
 
@@ -1112,7 +1116,8 @@ folded onto the *current* artifact, three-way (`before` = at turn start,
   the first rule.
 - `status` is always `current`'s — a "mark reviewed" clicked mid-turn stands.
 - The verdict is the turn's only if the turn actually revised it; otherwise
-  `current`'s.
+  `current`'s. `bodyOverride` is always `current`'s — a turn never writes one, so writing or
+  clearing one mid-turn is the user's decision and stands.
 
 ### 12.6 Snapshot and Reset
 
@@ -1225,6 +1230,16 @@ Payload construction (pure, previewable without side effects):
 - The body is `## Summary`, then `## Walkthrough` (chapter titles and
   explanations), then the folded notes, then a fixed footer crediting cerber:
   "drafted by AI, sent by a human."
+- **Unless the user wrote one.** A non-null `bodyOverride` replaces the
+  composed body outright — footer and folded notes included. Half-honouring it
+  (keeping a footer they deleted, re-appending notes they cut) would post
+  something nobody wrote. It is posted **verbatim**: only the composed body is
+  trimmed, because a hand-written one that opens on an indented line is a
+  markdown code block, and trimming would silently repaint it as a paragraph. It changes the body alone: inline comments still
+  post, the event still applies, and the draft it replaced is untouched and
+  can compose the body again at any time. The split into inline and folded is
+  still computed, because the cockpit needs it to say which comments have no
+  line of their own to land on.
 - Grades are rendered into comment text via the one badge function (§7.4).
 - `commit_id` is the artifact's `pr.headSha` — so a review of a stale head
   fails with a 422 rather than landing inline comments on the wrong code.
@@ -1311,7 +1326,7 @@ static assets included. No CORS: same-origin only.
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
-| `PATCH /api/reviews/:key` | settle | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed` |
+| `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
 | `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
@@ -1423,6 +1438,11 @@ one is reported over the next.
   or request-changes with none), the cockpit points it out and offers a
   one-click chat turn asking the reviewer to re-true the verdict. It MUST
   NOT rewrite the verdict itself.
+- What Send posts follows the verdict, with nothing in between and no second
+  control for it: the verdict buttons sit directly above the button, so a
+  "send as…" switch beside it would be two controls over one decision — and
+  the way to post an approve is to say the review approves. (`cerber send -e`
+  keeps its own override; a terminal has no verdict buttons above it.)
 - A comment that cannot post inline — drifted, or with no line at all, which
   is what a comment on a line the PR *removed* becomes, GitHub taking inline
   comments on the new side only — MUST say so where it is read; nothing else
@@ -1442,6 +1462,19 @@ one is reported over the next.
   that is the body GitHub gets. It MUST be suppressed when the render reads
   back word-for-word as the source (whitespace runs flattened): a plain note
   is told nothing by a second copy of itself.
+- The review body — GitHub's own comment on the review, the one part of the
+  payload attached to no line — is writable by hand from the send panel, which
+  is where the user is standing when they read that it says the wrong thing.
+  The editor MUST be seeded with the composed body, so writing one starts from
+  what would otherwise post. Because this is the one place what GitHub gets
+  stops being derived from what the cockpit shows, the panel MUST say which of
+  the two is about to be posted wherever it says anything about the payload:
+  the body strip says who wrote it (never "N folded into the body" over a body
+  the user may have cut those notes out of), the note under it says the body no
+  longer follows the summary or the comments, and building it from the review
+  again is always one click away. A body the user wrote MUST open shown rather
+  than behind "see what gets posted" — it is the one fact about the payload
+  that nothing else on the page carries.
 - The review's history renders as a collapsed card at the foot of the review,
   newest first — it is what you open when a review is not where you expected
   it, not part of reading one — with a rail jump that opens it on the way. An

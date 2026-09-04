@@ -31,6 +31,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     chapters: [],
     comments: [],
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,
@@ -87,6 +88,13 @@ describe("describeChange", () => {
     expect(describeChange(before, artifact({ status: "skipped" }))).toEqual([
       "status ready → skipped",
     ]);
+  });
+
+  it("records the body that posts leaving the review, and coming back", () => {
+    const plain = artifact();
+    const own = artifact({ bodyOverride: "Ran it locally, ship it." });
+    expect(describeChange(plain, own)).toEqual(["the body to post was written by hand"]);
+    expect(describeChange(own, plain)).toEqual(["the body to post follows the review again"]);
   });
 
   it("records a push under the review", () => {

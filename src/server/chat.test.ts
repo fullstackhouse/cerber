@@ -49,6 +49,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     chapters: [],
     comments: [],
     verdict: { recommendation: "comment", confidence: 70, reasoning: "r" },
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,

@@ -192,6 +192,17 @@ left unwritten. Code and tests win when they disagree.
   rather than overwriting whatever they edited while the turn ran. The
   difference is deliberate: a re-review is asking for a new draft, a chat turn
   is asking for an edit to this one
+- Don't put a second control over one decision. What Send posts follows the
+  verdict and the verdict buttons are right above it, so the cockpit has no
+  "send as…" switch beside the button — the way to post an approve is to say
+  the review approves. The summary is cerber's own reading of the PR, not
+  something to hand-edit; the body that posts is the thing worth editing.
+- Don't let what posts drift from what the cockpit shows without saying so.
+  The GitHub body is composed from the draft (summary, walkthrough, the
+  comments that can't post inline, footer). The one exception is a body the
+  user wrote by hand in the send panel (`bodyOverride`) — it replaces the
+  composed one outright, footer included, and every line of that panel that
+  describes the payload has to say which of the two is about to post.
 - Don't add an accept step to a revision the user asked for. The chat agent
   writes the draft directly; Send is where a human vouches for what reaches
   GitHub, and one pre-chat snapshot is the way back. A per-turn undo is

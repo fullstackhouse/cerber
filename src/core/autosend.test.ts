@@ -32,6 +32,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     chapters: [],
     comments: [],
     verdict: { recommendation: "approve", confidence: 95, reasoning: "clean" },
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,

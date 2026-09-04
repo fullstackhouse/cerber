@@ -309,6 +309,7 @@ export async function buildApp(
       chapters: [],
       comments: [],
       verdict: null,
+      bodyOverride: null,
       run: {
         model: null,
         startedAt: now,
@@ -371,6 +372,15 @@ export async function buildApp(
         400,
       );
     }
+    // Coercing this one would be worse than refusing it: `String({})` is
+    // "[object Object]", and this field is posted to GitHub verbatim.
+    if (
+      body.bodyOverride !== undefined &&
+      body.bodyOverride !== null &&
+      typeof body.bodyOverride !== "string"
+    ) {
+      return c.json({ error: "bodyOverride must be a string, or null to compose it" }, 400);
+    }
     const updated = await updateArtifactByKey(c.req.param("key"), (a) => {
       const next = { ...a };
       if (body.status !== undefined) {
@@ -385,6 +395,12 @@ export async function buildApp(
         // would otherwise read as a click nobody made — which stops being true
         // the moment you click. Same rule the poll's reopen follows.
         next.filed = null;
+      }
+      // The review body as the user rewrote it — or `null` to hand the body
+      // back to the composition it came from. Only ever set from the send
+      // panel, where the text being replaced is on screen.
+      if (body.bodyOverride !== undefined) {
+        next.bodyOverride = body.bodyOverride;
       }
       if (body.verdictRecommendation !== undefined && next.verdict) {
         next.verdict = {
