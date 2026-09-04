@@ -1504,18 +1504,21 @@ function SendPanel({
   // while a run or a chat turn is in flight — keyed on identity, the preview
   // would clear and refetch on every tick of a body nothing had changed.
   //
-  // Only while the body is on screen: with the preview closed there is nothing
-  // to keep in step, and walking every comment on each of those ticks would be
-  // work for a string nobody reads. (A `useMemo` would not help — the arrays it
-  // reads are new objects on every poll, so it would recompute regardless.)
-  const bodySource = showBody
-    ? JSON.stringify([
-        artifact.bodyOverride,
-        artifact.summary,
-        artifact.chapters.map((ch) => [ch.title, ch.explanation]),
-        artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
-      ])
-    : "";
+  // Only while the body is on screen and the editor is closed — the two cases
+  // the effect below acts on. With the preview hidden there is nothing to keep
+  // in step, and under an open editor the effect bails anyway, so walking every
+  // comment on each of those ticks would be work for a string nobody reads.
+  // (A `useMemo` would not help — the arrays it reads are new objects on every
+  // poll, so it would recompute regardless.)
+  const bodySource =
+    showBody && !editingBody
+      ? JSON.stringify([
+          artifact.bodyOverride,
+          artifact.summary,
+          artifact.chapters.map((ch) => [ch.title, ch.explanation]),
+          artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+        ])
+      : "";
 
   useEffect(() => {
     // The editor owns the box while it is open, and the draft in it has to
