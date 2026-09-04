@@ -59,6 +59,7 @@ const artifact = (comments: ReviewComment[]): Artifact =>
     chapters: [],
     comments,
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
   }) as Artifact;

@@ -147,7 +147,7 @@ export interface Artifact {
    * is composed from the draft at send time (summary, walkthrough, the comments
    * that cannot post inline, footer).
    */
-  bodyOverride?: string | null;
+  bodyOverride: string | null;
   run: {
     model: string | null;
     startedAt: string;

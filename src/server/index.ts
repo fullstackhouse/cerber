@@ -372,6 +372,15 @@ export async function buildApp(
         400,
       );
     }
+    // Coercing this one would be worse than refusing it: `String({})` is
+    // "[object Object]", and this field is posted to GitHub verbatim.
+    if (
+      body.bodyOverride !== undefined &&
+      body.bodyOverride !== null &&
+      typeof body.bodyOverride !== "string"
+    ) {
+      return c.json({ error: "bodyOverride must be a string, or null to compose it" }, 400);
+    }
     const updated = await updateArtifactByKey(c.req.param("key"), (a) => {
       const next = { ...a };
       if (body.status !== undefined) {
@@ -391,7 +400,7 @@ export async function buildApp(
       // back to the composition it came from. Only ever set from the send
       // panel, where the text being replaced is on screen.
       if (body.bodyOverride !== undefined) {
-        next.bodyOverride = body.bodyOverride === null ? null : String(body.bodyOverride);
+        next.bodyOverride = body.bodyOverride;
       }
       if (body.verdictRecommendation !== undefined && next.verdict) {
         next.verdict = {

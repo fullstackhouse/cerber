@@ -228,4 +228,14 @@ describe("PATCH /api/reviews/:key — only the statuses that are your decision",
     expect(submit).not.toHaveBeenCalled();
   });
 
+  // Coercion would be worse than a refusal here: `String({})` is
+  // "[object Object]", and this field is posted to GitHub verbatim.
+  it("refuses a body that is not a string", async () => {
+    await saveArtifact(artifact("ready"));
+
+    for (const value of [{ a: 1 }, ["x"], true, 7]) {
+      expect((await patchBody({ bodyOverride: value })).status).toBe(400);
+    }
+    expect((await loadArtifact(ID))!.bodyOverride).toBeNull();
+  });
 });

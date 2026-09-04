@@ -129,13 +129,21 @@ describe("buildReviewPayload", () => {
       ],
     });
     const payload = buildReviewPayload(artifact, "APPROVE");
-    expect(payload.body).toBe("Looks good to me. I ran the migration locally.");
+    // Verbatim, trailing newline and all: the panel says this is exactly what
+    // posts, and a body that opens on an indented line is a markdown code
+    // block — trimming it would silently repaint it as a paragraph.
+    expect(payload.body).toBe("Looks good to me. I ran the migration locally.\n");
     expect(payload.body).not.toContain("## Summary");
     expect(payload.body).not.toContain("cerber");
     // Inline comments are a separate half of the payload and still post, and
     // the cockpit still needs to know which comments had no line to land on.
     expect(payload.comments).toEqual([{ path: "src/a.ts", line: 2, side: "RIGHT", body: "inline ok" }]);
     expect(payload.folded.map((c) => c.id)).toEqual(["2"]);
+  });
+
+  it("keeps a body that opens on an indented code block", () => {
+    const body = "    const a = 1;\n\nThat is all it needed.\n";
+    expect(buildReviewPayload(makeArtifact({ bodyOverride: body }), "COMMENT").body).toBe(body);
   });
 
   it("composes the body again once the override is cleared", () => {

@@ -1233,7 +1233,9 @@ Payload construction (pure, previewable without side effects):
 - **Unless the user wrote one.** A non-null `bodyOverride` replaces the
   composed body outright — footer and folded notes included. Half-honouring it
   (keeping a footer they deleted, re-appending notes they cut) would post
-  something nobody wrote. It changes the body alone: inline comments still
+  something nobody wrote. It is posted **verbatim**: only the composed body is
+  trimmed, because a hand-written one that opens on an indented line is a
+  markdown code block, and trimming would silently repaint it as a paragraph. It changes the body alone: inline comments still
   post, the event still applies, and the draft it replaced is untouched and
   can compose the body again at any time. The split into inline and folded is
   still computed, because the cockpit needs it to say which comments have no
@@ -1324,7 +1326,7 @@ static assets included. No CORS: same-origin only.
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
-| `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed) |
+| `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
 | `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
