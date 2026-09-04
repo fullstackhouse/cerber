@@ -1381,7 +1381,11 @@ function BodyEditor({
         onChange={(e) => setDraft(e.target.value)}
         rows={10}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSave(draft);
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Or the browser types the newline into the box on the way out.
+            e.preventDefault();
+            onSave(draft);
+          }
           if (e.key === "Escape") onCancel();
         }}
       />
