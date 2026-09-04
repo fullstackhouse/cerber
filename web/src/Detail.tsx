@@ -1,5 +1,5 @@
 import { html } from "diff2html";
-import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
@@ -1341,12 +1341,21 @@ function ChatPanel({
  */
 function useGrowToFit(value: string) {
   const box = useRef<HTMLTextAreaElement | null>(null);
-  useEffect(() => {
+  const fit = useCallback(() => {
     const el = box.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.7)}px`;
-  }, [value]);
+  }, []);
+  useEffect(fit, [value, fit]);
+  // The cap is a share of the window, so it has to be re-taken when the window
+  // changes: a box grown in a tall one would otherwise stay taller than the
+  // short one it now sits in. Its own effect, or the listener would be torn
+  // down and rebuilt on every keystroke.
+  useEffect(() => {
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [fit]);
   return box;
 }
 
@@ -1567,7 +1576,15 @@ function SendPanel({
         <span className="lab">send to github</span>
         <span className="grow" />
         <span className="faint">{payloadSummary(artifact)}</span>
-        <button className="link" onClick={() => setShowBody(!showBody)}>
+        <button
+          className="link"
+          onClick={() => setShowBody(!showBody)}
+          // The editor owns the box until it is saved or cancelled. Hiding the
+          // section would unmount it, and the draft inside is the only copy of
+          // what was typed.
+          disabled={editingBody}
+          title={editingBody ? "save or cancel the body you are writing first" : undefined}
+        >
           <Icon name="eye" />
           {showBody ? "hide what gets posted" : "see what gets posted"}
         </button>
