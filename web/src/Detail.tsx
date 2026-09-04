@@ -1448,15 +1448,42 @@ function SendPanel({
   const [editingBody, setEditingBody] = useState(false);
   const ownBody = artifact.bodyOverride != null;
 
+  // What the composed body is made of. The effect keys on this rather than on
+  // the artifact object, which a poll replaces wholesale every three seconds
+  // while a run or a chat turn is in flight — keyed on identity, the preview
+  // would clear and refetch on every tick of a body nothing had changed.
+  const bodySource = JSON.stringify([
+    artifact.bodyOverride,
+    artifact.summary,
+    artifact.chapters.map((ch) => [ch.title, ch.explanation]),
+    artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+  ]);
+
   useEffect(() => {
-    if (!showBody) return;
+    // The editor owns the box while it is open, and the draft in it has to
+    // outlive an artifact that moves underneath.
+    if (!showBody || editingBody) return;
+    // Cleared before the refetch rather than replaced after it: the line under
+    // the box reads from the artifact, which has already changed, so leaving
+    // the old text up pairs "you wrote this body" with the composed body it
+    // replaced — the exact confusion this panel exists to prevent. `stale`
+    // drops a slower earlier answer landing on top of a newer one.
+    let stale = false;
+    setPreview(null);
+    setPreviewError(null);
     fetchSendPreview(reviewKey, event)
       .then((p) => {
+        if (stale) return;
         setPreview(p);
         setPreviewError(null);
       })
-      .catch((e) => setPreviewError(String(e)));
-  }, [reviewKey, event, artifact, showBody]);
+      .catch((e) => {
+        if (!stale) setPreviewError(String(e));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [reviewKey, event, bodySource, showBody, editingBody]);
 
   if (artifact.sent) {
     return (
