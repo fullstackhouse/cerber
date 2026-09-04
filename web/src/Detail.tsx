@@ -1380,10 +1380,16 @@ function BodyEditor({
   // it stays open until the write actually lands, and a failed one keeps the
   // draft with the reason next to it rather than closing over both.
   const save = () => {
+    // ⌘↵ can be held down, and the button is not the only way in: without this
+    // a second write goes out while the first is still in flight.
+    if (saving) return;
     setSaving(true);
     setError(null);
     onSave(draft)
-      .catch((e) => setError(String(e.message ?? e)))
+      // `e?.message`: a rejection is not guaranteed to be an Error, and a catch
+      // that throws leaves the failure unreported — the one outcome this whole
+      // path exists to prevent.
+      .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setSaving(false));
   };
 
@@ -1589,7 +1595,7 @@ function SendPanel({
                         // Reported where the body is read, not up at the top of
                         // the page: a reset that failed leaves your own body in
                         // the box below, still the thing that would post.
-                        onBody(null).catch((e) => setPreviewError(String(e.message ?? e)))
+                        onBody(null).catch((e) => setPreviewError(String(e?.message ?? e)))
                       }
                     >
                       build it from the review again
