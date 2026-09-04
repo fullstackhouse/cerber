@@ -1385,12 +1385,15 @@ function BodyEditor({
     if (saving) return;
     setSaving(true);
     setError(null);
-    onSave(draft)
-      // `e?.message`: a rejection is not guaranteed to be an Error, and a catch
-      // that throws leaves the failure unreported — the one outcome this whole
-      // path exists to prevent.
-      .catch((e) => setError(String(e?.message ?? e)))
-      .finally(() => setSaving(false));
+    // Only the failure path comes back here: a save that lands closes the
+    // editor, so a `finally` would be writing state into an unmounted box.
+    // `e?.message`: a rejection is not guaranteed to be an Error, and a catch
+    // that throws leaves the failure unreported — the one outcome this whole
+    // path exists to prevent.
+    onSave(draft).catch((e) => {
+      setError(String(e?.message ?? e));
+      setSaving(false);
+    });
   };
 
   return (
