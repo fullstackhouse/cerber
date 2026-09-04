@@ -1366,11 +1366,27 @@ function BodyEditor({
   onCancel,
 }: {
   initial: string;
-  onSave: (text: string) => void;
+  /** Resolves once the body is written; the caller closes the editor on that. */
+  onSave: (text: string) => Promise<unknown>;
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const box = useGrowToFit(draft);
+
+  // This box is the only copy of what was typed — the summary and the comments
+  // it replaces are still the review's, and nothing else holds these words. So
+  // it stays open until the write actually lands, and a failed one keeps the
+  // draft with the reason next to it rather than closing over both.
+  const save = () => {
+    setSaving(true);
+    setError(null);
+    onSave(draft)
+      .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setSaving(false));
+  };
+
   return (
     <div className="body-edit-wrap">
       <textarea
@@ -1384,18 +1400,19 @@ function BodyEditor({
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             // Or the browser types the newline into the box on the way out.
             e.preventDefault();
-            onSave(draft);
+            save();
           }
           if (e.key === "Escape") onCancel();
         }}
       />
       <MarkdownPreview className="body-md" text={draft} />
+      {error && <p className="error">{error}</p>}
       <div className="card-actions">
-        <button className="btn btn-sm" onClick={() => onSave(draft)}>
-          save this body
+        <button className="btn btn-sm" onClick={save} disabled={saving}>
+          {saving ? "saving…" : "save this body"}
           <Key>⌘↵</Key>
         </button>
-        <button className="btn btn-sm" onClick={onCancel}>
+        <button className="btn btn-sm" onClick={onCancel} disabled={saving}>
           cancel
         </button>
         <span className="faint">
@@ -1439,8 +1456,11 @@ function SendPanel({
   /** Where the queue goes next, once this one is done with. */
   next: ReviewListItem | null;
   onAdvance: () => void;
-  /** Write the body that gets posted, or `null` to compose it from the review again. */
-  onBody: (text: string | null) => void;
+  /**
+   * Write the body that gets posted, or `null` to compose it from the review
+   * again. Rejects when the write failed, so the editor can keep the draft.
+   */
+  onBody: (text: string | null) => Promise<unknown>;
   anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
@@ -1547,10 +1567,7 @@ function SendPanel({
           editingBody ? (
             <BodyEditor
               initial={preview.body}
-              onSave={(text) => {
-                onBody(text);
-                setEditingBody(false);
-              }}
+              onSave={(text) => onBody(text).then(() => setEditingBody(false))}
               onCancel={() => setEditingBody(false)}
             />
           ) : (
@@ -1566,7 +1583,15 @@ function SendPanel({
                     <span className="faint">
                       you wrote this body — it no longer follows the summary or the comments
                     </span>
-                    <button className="link" onClick={() => onBody(null)}>
+                    <button
+                      className="link"
+                      onClick={() =>
+                        // Reported where the body is read, not up at the top of
+                        // the page: a reset that failed leaves your own body in
+                        // the box below, still the thing that would post.
+                        onBody(null).catch((e) => setPreviewError(String(e.message ?? e)))
+                      }
+                    >
                       build it from the review again
                     </button>
                   </>
@@ -2543,7 +2568,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               error={sendError}
               next={next}
               onAdvance={advance}
-              onBody={(text) => apply(patchReview(reviewKey, { bodyOverride: text }))}
+              // Not `apply`: it catches, and the panel needs the failure to
+              // reach the box that is holding the only copy of the text.
+              onBody={(text) => patchReview(reviewKey, { bodyOverride: text }).then(setArtifact)}
               anchorRef={sendEl}
               footer={
                 <>
