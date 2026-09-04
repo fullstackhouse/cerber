@@ -1480,6 +1480,13 @@ function SendPanel({
   const [editingBody, setEditingBody] = useState(false);
   const ownBody = artifact.bodyOverride != null;
 
+  // A body the user wrote opens shown — including one that arrived after this
+  // panel was drawn, from another tab or a poll tick. Only ever in that
+  // direction: clearing it must not reopen a preview you closed.
+  useEffect(() => {
+    if (ownBody) setShowBody(true);
+  }, [ownBody]);
+
   // What the composed body is made of. The effect keys on this rather than on
   // the artifact object, which a poll replaces wholesale every three seconds
   // while a run or a chat turn is in flight — keyed on identity, the preview
@@ -1575,56 +1582,64 @@ function SendPanel({
       </div>
 
       {error && <p className="error">{error}</p>}
-      {showBody &&
-        (previewError ? (
-          <p className="error">{previewError}</p>
-        ) : preview ? (
-          editingBody ? (
-            <BodyEditor
-              initial={preview.body}
-              onSave={(text) => onBody(text).then(() => setEditingBody(false))}
-              onCancel={() => setEditingBody(false)}
-            />
-          ) : (
-            <>
-              <pre className="body-preview">{preview.body}</pre>
-              {/* Where these words came from, said every time. Without it the
-                  only honest reading of a read-only box is that the text is not
-                  yours to change — and after you have changed it, that the
-                  summary above is still what posts. */}
-              <div className="body-source">
-                {ownBody ? (
-                  <>
+      {showBody && (
+        <>
+          {/* Above the body rather than instead of it: a reset that failed
+              leaves the body it could not replace still standing, and taking
+              that away with the buttons would make retrying a matter of
+              closing the panel and opening it again. */}
+          {previewError && <p className="error">{previewError}</p>}
+          {preview ? (
+            editingBody ? (
+              <BodyEditor
+                initial={preview.body}
+                onSave={(text) => onBody(text).then(() => setEditingBody(false))}
+                onCancel={() => setEditingBody(false)}
+              />
+            ) : (
+              <>
+                <pre className="body-preview">{preview.body}</pre>
+                {/* Where these words came from, said every time. Without it
+                    the only honest reading of a read-only box is that the text
+                    is not yours to change — and after you have changed it, that
+                    the summary above is still what posts. */}
+                <div className="body-source">
+                  {ownBody ? (
+                    <>
+                      <span className="faint">
+                        you wrote this body — it no longer follows the summary or the comments
+                      </span>
+                      <button
+                        className="link"
+                        onClick={() =>
+                          // Reported where the body is read, not up at the top
+                          // of the page: a reset that failed leaves your own
+                          // body in the box below, still what would post.
+                          onBody(null).catch((e) => setPreviewError(String(e?.message ?? e)))
+                        }
+                      >
+                        build it from the review again
+                      </button>
+                    </>
+                  ) : (
                     <span className="faint">
-                      you wrote this body — it no longer follows the summary or the comments
+                      built from the summary, the walkthrough and the folded comments
                     </span>
-                    <button
-                      className="link"
-                      onClick={() =>
-                        // Reported where the body is read, not up at the top of
-                        // the page: a reset that failed leaves your own body in
-                        // the box below, still the thing that would post.
-                        onBody(null).catch((e) => setPreviewError(String(e?.message ?? e)))
-                      }
-                    >
-                      build it from the review again
-                    </button>
-                  </>
-                ) : (
-                  <span className="faint">
-                    built from the summary, the walkthrough and the folded comments
-                  </span>
-                )}
-                <button className="link" onClick={() => setEditingBody(true)}>
-                  <Icon name="edit" />
-                  {ownBody ? "keep editing it" : "write it yourself"}
-                </button>
-              </div>
-            </>
-          )
-        ) : (
-          <p className="faint">building the body…</p>
-        ))}
+                  )}
+                  <button className="link" onClick={() => setEditingBody(true)}>
+                    <Icon name="edit" />
+                    {ownBody ? "keep editing it" : "write it yourself"}
+                  </button>
+                </div>
+              </>
+            )
+          ) : (
+            // Nothing to show yet — and nothing to say either when the error
+            // above is already the reason there is no body.
+            !previewError && <p className="faint">building the body…</p>
+          )}
+        </>
+      )}
 
       <div className="send-footer">{footer}</div>
     </div>
