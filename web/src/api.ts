@@ -45,7 +45,15 @@ export const fetchDaemonStatus = () => request<DaemonStatus>("/api/daemon");
 export const fetchReview = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}`);
 
-export const patchReview = (key: string, body: { status?: string; verdictRecommendation?: string }) =>
+export const patchReview = (
+  key: string,
+  body: {
+    status?: string;
+    verdictRecommendation?: string;
+    /** The review body to post, hand-written — `null` puts it back to composed. */
+    bodyOverride?: string | null;
+  },
+) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}`, {
     method: "PATCH",
     body: JSON.stringify(body),

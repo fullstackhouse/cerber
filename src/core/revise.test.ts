@@ -48,6 +48,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     chapters: [{ id: "one", title: "One", explanation: "Explains one.", files: ["src/a.ts"] }],
     comments: [comment()],
     verdict: { recommendation: "comment", confidence: 70, reasoning: "because" },
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,
@@ -329,6 +330,14 @@ describe("mergeConcurrentEdits", () => {
     const mine = { recommendation: "approve" as const, confidence: 70, reasoning: "because" };
     const merged = mergeConcurrentEdits(b, after, artifact({ ...b, verdict: mine }));
     expect(merged.verdict).toEqual(mine);
+  });
+
+  it("keeps a send body the user wrote while the turn was running", () => {
+    // A turn never writes one, so whatever the artifact says now is the user's.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [{ kind: "summary", body: "Rewritten." }]);
+    const current = artifact({ ...b, bodyOverride: "My own words." });
+    expect(mergeConcurrentEdits(b, after, current).bodyOverride).toBe("My own words.");
   });
 
   it("takes the turn's verdict when the turn did revise it", () => {

@@ -176,6 +176,15 @@ export function describeChange(before: Artifact | null, after: Artifact): string
     );
   }
 
+  // What posts stopped following the draft, or started following it again.
+  if ((before?.bodyOverride ?? null) !== (after.bodyOverride ?? null)) {
+    lines.push(
+      after.bodyOverride == null
+        ? "the body to post follows the review again"
+        : "the body to post was written by hand",
+    );
+  }
+
   const comments = describeComments(before?.comments ?? [], after.comments);
   if (comments) lines.push(comments);
 

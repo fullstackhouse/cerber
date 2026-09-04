@@ -44,15 +44,16 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     chapters: [{ id: "core", title: "Core", explanation: "Adds a const.", files: ["src/a.ts"] }],
     comments: [],
     verdict: { recommendation: "comment", confidence: 80, reasoning: "ok" },
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,
     filed: null,
     settledAt: null,
     calibration: null,
-  chat: [],
-  preChat: null,
-  pendingChat: null,
+    chat: [],
+    preChat: null,
+    pendingChat: null,
     ...overrides,
   };
 }
@@ -115,6 +116,31 @@ describe("buildReviewPayload", () => {
     expect(payload.comments).toEqual([]);
     expect(payload.folded.map((c) => c.id)).toEqual(["1"]);
     expect(payload.body).toContain("src/a.ts:~2");
+  });
+
+  it("posts the body the user wrote instead of the composed one", () => {
+    // The whole body, footer included: a body half-honoured is one nobody
+    // wrote. The draft underneath is untouched — only what posts changed.
+    const artifact = makeArtifact({
+      bodyOverride: "Looks good to me. I ran the migration locally.\n",
+      comments: [
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+      ],
+    });
+    const payload = buildReviewPayload(artifact, "APPROVE");
+    expect(payload.body).toBe("Looks good to me. I ran the migration locally.");
+    expect(payload.body).not.toContain("## Summary");
+    expect(payload.body).not.toContain("cerber");
+    // Inline comments are a separate half of the payload and still post, and
+    // the cockpit still needs to know which comments had no line to land on.
+    expect(payload.comments).toEqual([{ path: "src/a.ts", line: 2, side: "RIGHT", body: "inline ok" }]);
+    expect(payload.folded.map((c) => c.id)).toEqual(["2"]);
+  });
+
+  it("composes the body again once the override is cleared", () => {
+    const payload = buildReviewPayload(makeArtifact({ bodyOverride: null }), "COMMENT");
+    expect(payload.body).toContain("## Summary");
   });
 
   it("anchors the review to the reviewed head commit", () => {

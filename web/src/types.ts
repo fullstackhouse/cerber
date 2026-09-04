@@ -142,6 +142,12 @@ export interface Artifact {
   chapters: Chapter[];
   comments: ReviewComment[];
   verdict: Verdict | null;
+  /**
+   * The review body to post, written by hand. Null — the normal case — means it
+   * is composed from the draft at send time (summary, walkthrough, the comments
+   * that cannot post inline, footer).
+   */
+  bodyOverride?: string | null;
   run: {
     model: string | null;
     startedAt: string;

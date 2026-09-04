@@ -312,6 +312,19 @@ export const ArtifactSchema = z.object({
   chapters: z.array(ChapterSchema).default([]),
   comments: z.array(CommentSchema).default([]),
   verdict: VerdictSchema.nullable().default(null),
+  /**
+   * The review body to post, written by hand. Null — the normal case — means
+   * the body is composed from the draft at send time (§14.4: summary,
+   * walkthrough, the comments that cannot post inline, footer).
+   *
+   * Everywhere else in cerber, what GitHub gets is derived from what the
+   * cockpit shows. This is the one place the user can cut that link, so it is
+   * a field rather than a rewrite of the summary: the draft underneath stays
+   * exactly as the review wrote it, the body can always be built again, and
+   * the send panel says which of the two is about to be posted. A re-review
+   * clears it — it described a body for a draft that no longer exists.
+   */
+  bodyOverride: z.string().nullable().default(null),
   run: RunInfoSchema.nullable().default(null),
   /** Set once the review was sent to GitHub (explicitly, or via opt-in auto-send). */
   sent: SentInfoSchema.nullable().default(null),

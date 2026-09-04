@@ -1332,32 +1332,100 @@ function ChatPanel({
 }
 
 /**
+ * A textarea that grows to its text, up to most of the window.
+ *
+ * The two long-form boxes in a review — the summary and the body that gets
+ * posted — are paragraphs that wrap, so a row count guessed from newlines
+ * opens the user's own prose on a scrollbar, with a line cut in half at the
+ * bottom edge.
+ */
+function useGrowToFit(value: string) {
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.7)}px`;
+  }, [value]);
+  return box;
+}
+
+/**
+ * The review's own comment — the one paragraph GitHub gets that is not attached
+ * to a line — rewritten by hand.
+ *
+ * It is seeded with the composed body and replaces it outright, footer and
+ * folded notes included: a body half-honoured is one nobody wrote. What it is
+ * not is an edit of the review — the summary, walkthrough and comments stay
+ * exactly as they read, and `build it from the review again` is always one
+ * click away.
+ */
+function BodyEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const box = useGrowToFit(draft);
+  return (
+    <div className="body-edit-wrap">
+      <textarea
+        ref={box}
+        className="body-edit"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={10}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSave(draft);
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+      <MarkdownPreview className="body-md" text={draft} />
+      <div className="card-actions">
+        <button className="btn btn-sm" onClick={() => onSave(draft)}>
+          save this body
+          <Key>⌘↵</Key>
+        </button>
+        <button className="btn btn-sm" onClick={onCancel}>
+          cancel
+        </button>
+        <span className="faint">
+          this is exactly what posts — the review above stays as it reads
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The one place anything reaches GitHub.
  *
- * One primary button, coloured by what it will do. The event follows the
- * verdict, and the switch that decouples them sits quietly underneath — a
- * review that says "request changes" but posts an approve is a thing you should
- * have to mean.
+ * One primary button, coloured by what it will do. What it does follows the
+ * verdict, with nothing in between: the verdict buttons sit directly above, so
+ * a second switch here would be two controls over one decision — and the way
+ * to post an approve is to say the review approves.
  */
 function SendPanel({
   artifact,
   reviewKey,
   event,
-  overridden,
-  onPickEvent,
   sending,
   onSend,
   error,
   footer,
   next,
   onAdvance,
+  onBody,
   anchorRef,
 }: {
   artifact: Artifact;
   reviewKey: string;
   event: ReviewEvent;
-  overridden: boolean;
-  onPickEvent: (e: ReviewEvent) => void;
   sending: boolean;
   onSend: () => void;
   error: string | null;
@@ -1367,12 +1435,18 @@ function SendPanel({
   /** Where the queue goes next, once this one is done with. */
   next: ReviewListItem | null;
   onAdvance: () => void;
+  /** Write the body that gets posted, or `null` to compose it from the review again. */
+  onBody: (text: string | null) => void;
   anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [preview, setPreview] = useState<SendPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [showBody, setShowBody] = useState(false);
-  const [eventsOpen, setEventsOpen] = useState(false);
+  // A body the user wrote themselves opens shown: it is the one thing on this
+  // panel that nothing else on the page tells them, so hiding it behind a
+  // click would hide the fact that the draft above is no longer what posts.
+  const [showBody, setShowBody] = useState(artifact.bodyOverride != null);
+  const [editingBody, setEditingBody] = useState(false);
+  const ownBody = artifact.bodyOverride != null;
 
   useEffect(() => {
     if (!showBody) return;
@@ -1432,37 +1506,6 @@ function SendPanel({
           <Icon name={event === "APPROVE" ? "approve" : event === "COMMENT" ? "comment" : "changes"} size={15} />
           {sending ? "sending…" : `${EVENT_LABEL[event]} on ${artifact.id}`} <Key>s</Key>
         </button>
-
-        <div className="send-as">
-          <button className="send-as-toggle" onClick={() => setEventsOpen(!eventsOpen)}>
-            as <b>{EVENT_LABEL[event]}</b> {eventsOpen ? "▴" : "▾"}
-          </button>
-          <div className="send-as-why">
-            {overridden
-              ? `you chose this — the verdict says ${artifact.verdict?.recommendation.replace("_", " ") ?? "nothing"}`
-              : "follows the verdict"}
-          </div>
-          {eventsOpen && (
-            <div className="menu">
-              {(["REQUEST_CHANGES", "COMMENT", "APPROVE"] as ReviewEvent[]).map((id) => (
-                <button
-                  key={id}
-                  className={`menu-item${event === id ? " menu-item-on" : ""}`}
-                  onClick={() => {
-                    onPickEvent(id);
-                    setEventsOpen(false);
-                  }}
-                >
-                  <span className={`tone-${EVENT_TONE[id]}`}>
-                    <Icon name={id === "APPROVE" ? "approve" : id === "COMMENT" ? "comment" : "changes"} />
-                  </span>
-                  <span className="grow">{EVENT_LABEL[id]}</span>
-                  <span className="menu-check">{event === id ? "✓" : ""}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {error && <p className="error">{error}</p>}
@@ -1470,7 +1513,44 @@ function SendPanel({
         (previewError ? (
           <p className="error">{previewError}</p>
         ) : preview ? (
-          <pre className="body-preview">{preview.body}</pre>
+          editingBody ? (
+            <BodyEditor
+              initial={preview.body}
+              onSave={(text) => {
+                onBody(text);
+                setEditingBody(false);
+              }}
+              onCancel={() => setEditingBody(false)}
+            />
+          ) : (
+            <>
+              <pre className="body-preview">{preview.body}</pre>
+              {/* Where these words came from, said every time. Without it the
+                  only honest reading of a read-only box is that the text is not
+                  yours to change — and after you have changed it, that the
+                  summary above is still what posts. */}
+              <div className="body-source">
+                {ownBody ? (
+                  <>
+                    <span className="faint">
+                      you wrote this body — it no longer follows the summary or the comments
+                    </span>
+                    <button className="link" onClick={() => onBody(null)}>
+                      build it from the review again
+                    </button>
+                  </>
+                ) : (
+                  <span className="faint">
+                    built from the summary, the walkthrough and the folded comments
+                  </span>
+                )}
+                <button className="link" onClick={() => setEditingBody(true)}>
+                  <Icon name="edit" />
+                  {ownBody ? "keep editing it" : "write it yourself"}
+                </button>
+              </div>
+            </>
+          )
         ) : (
           <p className="faint">building the body…</p>
         ))}
@@ -1710,7 +1790,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const historyEl = useRef<HTMLElement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const topEl = useRef<HTMLDivElement | null>(null);
-  const [eventOverride, setEventOverride] = useState<ReviewEvent | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // The comment the rail just sent you to, marked until you've had time to see it.
@@ -1742,7 +1821,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setError(null);
     setFreshness(null);
     setFreshnessError(null);
-    setEventOverride(null);
     setSendError(null);
     fetchReview(reviewKey)
       .then((a) => {
@@ -1918,13 +1996,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     scrollToComment(commentId);
   };
 
-  const event = eventOverride ?? eventForVerdict(artifact?.verdict);
-  // A verdict change re-points the event at it: the switch below the button is
-  // an override of the verdict, not a setting that outlives it.
-  const recommendation = artifact?.verdict?.recommendation;
-  useEffect(() => setEventOverride(null), [recommendation]);
-  // A failure belongs to the send it came from; changing what you'd send makes
-  // it history rather than a warning about the button in front of you.
+  // What Send will do, and the only thing it can do: the verdict decides it.
+  const event = eventForVerdict(artifact?.verdict);
+  // A failure belongs to the send it came from; changing the verdict makes it
+  // history rather than a warning about the button in front of you.
   useEffect(() => setSendError(null), [event]);
 
   const doSend = () => {
@@ -2425,8 +2500,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <div className="verdict-bar" ref={verdictEl}>
                 <span className="lab">verdict</span>
                 {(["approve", "comment", "request_changes"] as const).map(verdictButton)}
-                <span className="grow" />
-                <span className="faint">what you send follows this unless you say otherwise</span>
               </div>
             )}
 
@@ -2434,13 +2507,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               artifact={artifact}
               reviewKey={reviewKey}
               event={event}
-              overridden={eventOverride != null}
-              onPickEvent={setEventOverride}
               sending={sending}
               onSend={doSend}
               error={sendError}
               next={next}
               onAdvance={advance}
+              onBody={(text) => apply(patchReview(reviewKey, { bodyOverride: text }))}
               anchorRef={sendEl}
               footer={
                 <>

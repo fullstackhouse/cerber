@@ -66,6 +66,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     chapters: [],
     comments: [],
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,

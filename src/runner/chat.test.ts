@@ -54,6 +54,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     chapters: [{ id: "one", title: "One", explanation: "Explains one.", files: ["src/a.ts"] }],
     comments: [comment()],
     verdict: { recommendation: "comment", confidence: 70, reasoning: "because" },
+    bodyOverride: null,
     run: {
       model: "opus",
       startedAt: "2026-08-19T00:00:00Z",

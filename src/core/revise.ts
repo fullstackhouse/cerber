@@ -91,6 +91,9 @@ export function mergeConcurrentEdits(
     // there only when it actually revised one.
     status: current.status,
     verdict: after.verdict === before.verdict ? current.verdict : after.verdict,
+    // A turn never writes a send body, so one written while it ran is the
+    // user's and stands — as does clearing one.
+    bodyOverride: current.bodyOverride,
   };
 }
 

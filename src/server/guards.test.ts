@@ -58,6 +58,7 @@ function artifact(status: ArtifactStatus): Artifact {
     chapters: [],
     comments: [],
     verdict: { recommendation: "approve", confidence: 90, reasoning: "fine" },
+    bodyOverride: null,
     run: null,
     sent: null,
     filed: null,
@@ -85,6 +86,15 @@ const patchStatus = async (status: string) => {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status }),
+  });
+};
+
+const patchBody = async (body: Record<string, unknown>) => {
+  const app = await buildApp({});
+  return app.request(`/api/reviews/${KEY}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
 };
 
@@ -198,4 +208,24 @@ describe("PATCH /api/reviews/:key — only the statuses that are your decision",
       expect((await patchStatus(status)).status).toBe(400);
     }
   });
+
+  // The review's own comment, written by hand. It is the one thing GitHub gets
+  // that is not derived from the draft, so it is stored rather than composed —
+  // and `null` is how the user hands the body back to the composition.
+  it("takes a body the user wrote, and gives it back on null", async () => {
+    await saveArtifact(artifact("ready"));
+
+    expect((await patchBody({ bodyOverride: "Ran it locally, ship it." })).status).toBe(200);
+    expect((await loadArtifact(ID))!.bodyOverride).toBe("Ran it locally, ship it.");
+    // The draft it replaces is untouched — this changes what posts, not the review.
+    expect((await loadArtifact(ID))!.summary).toBe("a draft");
+
+    expect((await patchBody({ bodyOverride: null })).status).toBe(200);
+    expect((await loadArtifact(ID))!.bodyOverride).toBeNull();
+    // Settling is the other half of this route; writing a body is not a settle.
+    expect((await loadArtifact(ID))!.status).toBe("ready");
+    expect((await loadArtifact(ID))!.settledAt).toBeNull();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
 });

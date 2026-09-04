@@ -131,6 +131,13 @@ export function verdictMismatch(artifact: Artifact): string | null {
 /** "5 inline · 1 folded into the body" — what send is about to put on the PR. */
 export function payloadSummary(artifact: Artifact): string {
   const { inline, folded } = splitComments(artifact);
+  // A hand-written body carries whatever the user left in it. "2 folded into
+  // the body" is a claim about the composed one, and repeating it over a body
+  // they may have cut those notes out of would be a lie in the one place the
+  // panel exists to tell the truth.
+  if (artifact.bodyOverride != null) {
+    return `${inline.length === 0 ? "no inline comments" : `${inline.length} inline`} · body you wrote`;
+  }
   if (inline.length === 0 && folded.length === 0) return "no inline comments · body only";
   const parts = [`${inline.length} inline`];
   if (folded.length > 0) {

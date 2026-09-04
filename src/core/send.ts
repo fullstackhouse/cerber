@@ -76,7 +76,13 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
 
   return {
     event,
-    body: parts.join("\n").trim(),
+    // A body the user wrote by hand replaces the composed one outright,
+    // footer and folded notes included: it is the review's own comment, and
+    // half-honouring it — keeping a footer they deleted, re-appending notes
+    // they cut — would post something nobody wrote. The composition above
+    // still runs, because `folded` is what the cockpit uses to say which
+    // comments have no line of their own to land on.
+    body: (artifact.bodyOverride ?? parts.join("\n")).trim(),
     comments: inline,
     folded,
     commitId: artifact.pr.headSha || undefined,

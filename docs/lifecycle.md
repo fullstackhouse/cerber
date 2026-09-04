@@ -194,8 +194,8 @@ push convinced the guard the draft was current and the poll never re-reviewed
 that PR again. An artifact written before `reviewedSha` existed has none, and
 falls back to the old comparison.
 
-**A re-review replaces the whole draft, including comments you wrote.** They
-are dropped when the run starts and they do not come back — not on success, not
+**A re-review replaces the whole draft, including comments you wrote and a send
+body you wrote yourself.** They are dropped when the run starts and they do not come back — not on success, not
 if the run fails. This is a decision rather than an oversight, and it is stated
 here rather than left to be discovered: if you have written comments you want
 to keep, send the review or copy them out before pressing re-review.
@@ -414,6 +414,12 @@ Written by other paths:
 - Every comment edit, add and drop is saved immediately (`editedByUser` is set
   when you rewrite an AI comment — it is the calibration signal *and* what
   makes the comment survive a re-review).
+- A review body you write yourself (`bodyOverride`, from the send panel) is
+  stored beside the draft rather than replacing it: the summary, walkthrough and
+  comments stay as they read, and clearing the field composes the body again.
+  While it is set, that text is what posts — the folded comments included in the
+  composed body are only sent if the body you wrote kept them, which is why the
+  panel stops claiming them. A re-review clears it.
 - A chat turn writes `pendingChat` **before** it starts (so a reload mid-turn
   still shows it), streams `pendingChat.progress`, then folds its result onto
   whatever the artifact says now (`mergeConcurrentEdits`) and appends a

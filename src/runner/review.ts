@@ -234,6 +234,9 @@ async function performReview(
     chapters: [],
     comments: [],
     verdict: null,
+    // Not carried over. A hand-written send body described the draft this run
+    // is replacing — the same reason the pre-chat snapshot goes.
+    bodyOverride: null,
     run: {
       model: opts.model ?? null,
       startedAt: now(),

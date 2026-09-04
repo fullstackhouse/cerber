@@ -1254,6 +1254,14 @@ button {
   margin-top: 12px;
 }
 
+/* Two ways to change the same paragraph — your own hands, or the reviewer's. */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .card-why {
   margin-bottom: 8px;
 }
@@ -1330,6 +1338,7 @@ button {
 }
 
 .comment-edit,
+.body-edit,
 .add-comment textarea,
 .chat-input {
   width: 100%;
@@ -1790,74 +1799,7 @@ button {
   background: transparent;
 }
 
-.send-as {
-  position: relative;
-}
-
-.send-as-toggle {
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--fg-3);
-  background: none;
-  border: none;
-  padding: 0;
-}
-
-.send-as-toggle b {
-  color: var(--fg);
-  font-weight: 500;
-  border-bottom: 1px dotted var(--fainter);
-}
-
-.send-as-why {
-  font-size: 10.5px;
-  color: var(--faint);
-  margin-top: 3px;
-}
-
-.menu {
-  position: absolute;
-  top: 34px;
-  left: 0;
-  z-index: 10;
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
-  box-shadow: 0 6px 18px rgba(20, 23, 26, 0.09);
-  padding: 4px;
-  min-width: 190px;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  font: inherit;
-  font-size: 11.5px;
-  text-align: left;
-  padding: 7px 9px;
-  border: none;
-  border-radius: 3px;
-  background: none;
-  color: var(--fg-3);
-}
-
-.menu-item:hover {
-  background: #f7f8fa;
-}
-
-.menu-item-on {
-  background: #f4f5f7;
-  color: var(--fg);
-}
-
-.menu-check {
-  font-size: 10px;
-  color: var(--green);
-}
-
-/* The verdict, decided where you decide to send — the event below follows it. */
+/* The verdict, decided where you decide to send — Send does exactly this. */
 .verdict-bar {
   display: flex;
   align-items: center;
@@ -1906,6 +1848,28 @@ button {
   max-width: 760px;
   max-height: 420px;
   overflow: auto;
+}
+
+/* Editing the body that posts: the box takes the preview's place, so it keeps
+   the preview's own width rather than running the width of the panel. */
+.body-edit-wrap {
+  margin-top: 14px;
+  max-width: 760px;
+}
+
+.body-edit-wrap .body-md {
+  margin-top: 4px;
+}
+
+/* Under the read-only body: what it is made of, and the way into it. */
+.body-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  max-width: 760px;
+  font-size: 11px;
 }
 
 .sent-strip {

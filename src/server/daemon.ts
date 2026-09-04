@@ -151,6 +151,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     chapters: [],
     comments: [],
     verdict: null,
+    bodyOverride: null,
     run: null,
     sent: null,
     refresh: null,

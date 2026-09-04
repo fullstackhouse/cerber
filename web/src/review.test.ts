@@ -189,6 +189,16 @@ describe("payloadSummary", () => {
       "1 inline · 1 folded into the body",
     );
   });
+
+  it("stops claiming the folded comments once the body is the user's own", () => {
+    // The composed body carries them; a hand-written one carries whatever was
+    // left in it, and this strip is where the panel is meant to tell the truth.
+    const own = { ...artifact([comment(), comment({ id: "c2", line: null })]), bodyOverride: "Mine." };
+    expect(payloadSummary(own)).toBe("1 inline · body you wrote");
+    expect(payloadSummary({ ...artifact([]), bodyOverride: "Mine." })).toBe(
+      "no inline comments · body you wrote",
+    );
+  });
 });
 
 describe("rowLine", () => {
