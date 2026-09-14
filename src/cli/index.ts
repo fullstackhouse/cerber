@@ -20,7 +20,7 @@ import {
 import { pool, reviewPr } from "../runner/review.js";
 import { isReviewRunning } from "../runner/inflight.js";
 import { startDaemon } from "../server/daemon.js";
-import { startServer } from "../server/index.js";
+import { cockpitUrl, startServer } from "../server/index.js";
 
 const program = new Command();
 
@@ -533,6 +533,13 @@ program
             trust: opts.trust ? undefined : false,
             autoReview: opts.autoReview,
             notify: opts.notify,
+            // The address as asked for, which the server corrects to the one it
+            // bound (`cockpitAt`) a moment later. Both, because neither alone
+            // is enough: the daemon's first poll runs while the port is still
+            // being bound, and a PR discovered on it would otherwise be
+            // announced with nowhere to click — while `--port 0` has no
+            // answer here at all, since the OS has not chosen yet.
+            cockpitUrl: cockpitUrl({ host: opts.host, port: Number(opts.port), token }) ?? undefined,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })

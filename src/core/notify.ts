@@ -157,7 +157,7 @@ export function notifyCommand(
 export const BUNDLE_ID = "house.fullstack.cerber";
 
 /** Bumped whenever the applet or its plist changes, so an installed app is replaced. */
-const APP_BUILD = "2";
+const APP_BUILD = "3";
 
 const ICON = fileURLToPath(new URL("../../assets/cerber.icns", import.meta.url));
 
@@ -222,7 +222,9 @@ on tap()
 	if (count of parts) < 2 then return
 	set target to ""
 	if (count of parts) > 2 then set target to item 3 of parts
-	do shell script "printf %s " & quoted form of target & " > " & quoted form of urlFile
+	-- umask, because the target carries the cockpit's token: nothing here is
+	-- another account's business to read.
+	do shell script "umask 077; printf %s " & quoted form of target & " > " & quoted form of urlFile
 	display notification (item 2 of parts) with title (item 1 of parts)
 end tap
 `;
@@ -293,7 +295,8 @@ async function setPlistValue(plist: string, key: string, type: string, value: st
  *    first notification rather than after it.
  */
 async function buildNotifierApp(app: string, dir: string): Promise<void> {
-  await fs.mkdir(dir, { recursive: true });
+  // 0700: the notices left here hold the cockpit's URL, token and all.
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const source = path.join(dir, "applet.applescript");
   await fs.writeFile(source, appletSource(dir));
 
@@ -308,7 +311,18 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
   // the extension, and anything else gets a bare script file with no bundle
   // around it — no Info.plist, nothing to sign, nothing to post.
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-notifier-"));
-  const staged = path.join(stagingDir, "Cerber.app");
+  try {
+    await assemble(path.join(stagingDir, "Cerber.app"), app, source);
+  } finally {
+    // Every attempt, not just the ones that worked: a machine with no
+    // osacompile fails here once per process, and each failure would otherwise
+    // leave its half-built bundle behind for good.
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
+}
+
+/** Everything between an empty staging directory and an installed, signed app. */
+async function assemble(staged: string, app: string, source: string): Promise<void> {
   await run("osacompile", ["-o", staged, source]);
 
   const plist = path.join(staged, "Contents", "Info.plist");
@@ -339,7 +353,6 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
     // carries the signature with it — it lives in the bundle's own files.
     await fs.cp(staged, app, { recursive: true });
   }
-  await fs.rm(stagingDir, { recursive: true, force: true });
   await run(LSREGISTER, ["-f", app]).catch(() => {
     // Best effort: `open` registers the bundle too, just later than we'd like.
   });
@@ -405,7 +418,11 @@ async function postThroughApp(n: Notice): Promise<boolean> {
     // tmp+rename, so the app can never read half a notice: it reads the file
     // the instant `open` wakes it, and a partial one would post a PR title cut
     // in two or a URL that leads nowhere.
-    await fs.writeFile(tmp, pendingPayload({ ...n, url: clickTarget(n.url, outstanding) }));
+    // 0600 for the same reason the app's own write is: this line is the
+    // cockpit URL, and the cockpit URL carries the token that gets in.
+    await fs.writeFile(tmp, pendingPayload({ ...n, url: clickTarget(n.url, outstanding) }), {
+      mode: 0o600,
+    });
     await fs.rename(tmp, file);
     // -g, so a PR landing doesn't pull focus out of whatever you're doing.
     await run("open", ["-g", app]);
