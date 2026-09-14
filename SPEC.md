@@ -191,6 +191,7 @@ absent on read and materialize with the stated value.
 | `sent` | SentInfo \| null | default `null` |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
+| `notified` | `{ at, drafted }` \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a record = already announced and *what* was said, absent = never meant to be announced |
 | `refresh` | RefreshInfo \| null | default `null` |
 | `calibration` | Calibration \| null | default `null` |
 | `chat` | ChatTurn[] | default `[]`; never sent to GitHub |
@@ -446,7 +447,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `trust` | string[] | `[]` | trust rules, §14.2; each line validated at load |
 | `daemon.poll` | boolean | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | boolean | `true` | draft a review for what the poll finds |
-| `daemon.notify` | boolean | `true` | desktop announcements on this machine |
+| `daemon.notify` | boolean | `true` | desktop announcements on this machine (§9.8) |
 | `daemon.intervalMinutes` | positive int | `5` | |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
 | `daemon.repos` | string[] | `[]` | `owner/repo` filters; empty = everything `gh` can see |
@@ -669,11 +670,12 @@ Each tick, in order:
 4. **Sync the queue** (§9.3–9.6): create stubs for new arrivals, archive
    merged/closed PRs, reap dead stubs, file drafts GitHub moved past, and
    reopen settled rows someone has asked about again.
-5. **Announce** new arrivals on this machine (§9.8) — before drafting, because
-   the arrival is the news and drafting takes minutes.
-6. If auto-review is on: run a review for every awaiting PR (bounded by
+5. If auto-review is on: run a review for every awaiting PR (bounded by
    `parallel`; the freshness guard makes already-current drafts free), and
    evaluate auto-send for each *fresh* result (§15).
+6. **Announce** on this machine whatever has become worth coming back for
+   (§9.8) — after the drafting, because with auto-review on the draft is the
+   news and the arrival is not.
 
 A failed poll keeps the last good awaiting list on display, with the error
 published beside it — a network blip must not make the cockpit claim "nothing
@@ -682,8 +684,8 @@ awaits you".
 ### 9.2 Discovery Stubs
 
 A newly discovered PR gets a stub artifact: `status: "awaiting"`, the search
-result's PR fields, everything else empty. The stub is schema-valid and is
-also the announcement ledger (§9.8).
+result's PR fields, everything else empty. The stub is schema-valid, and its
+`notified: null` opens the announcement ledger (§9.8).
 
 ### 9.3 Pure Stubs and Reaping
 
@@ -859,17 +861,55 @@ the same classification so they can never disagree about who spoke last.
 
 ### 9.8 Desktop Announcements
 
-Each new PR is announced on the machine as it lands — quiet only where the
-platform offers nothing — because the cockpit's own bell needs a live,
+Each *piece of news* about a PR is announced once on the machine — quiet only
+where the platform offers nothing — because the cockpit's own bell needs a live,
 permitted tab, which is exactly what is missing when the user is away from
-cerber.
+cerber. A PR has at most two: "nobody is drafting this" and "here is the draft",
+the second reachable only from the first (the ledger rule below).
 
-- **The stub artifact is the ledger**: a PR is announced only on the poll that
-  first writes its stub. Repeat polls announce nothing; a restart re-announces
-  nothing; a PR that arrived while cerber was down is still news on the next
-  run.
-- One poll = at most one notification: a batch of arrivals is one interruption
-  ("N PRs await your review", first three named).
+**When.** At the moment the row is worth coming back for, which is not the
+moment it arrives. A row cerber is about to draft, or is drafting, MUST be held
+back: with auto-review on, a tap on arrival lands on a row that says "no run
+yet", and the moment there is finally something to read would then pass in
+silence. The rule (`isNews`) is that a row is news when its draft is written
+(`ready`), when its run failed, or when it is `awaiting` and **nothing is
+coming** — auto-review off. A settled row, and a PR that is no longer open, are
+never news. A run that falls over *before it owns the artifact* (the PR read,
+the diff fetch) MUST be recorded on the row as `failed` by the caller, so that
+"no draft is coming" is a fact on disk rather than one the poll alone knows —
+otherwise the cockpit's bell, which has only the row to go on, holds that row
+back forever. Such a rewrite applies only to a row still at `awaiting` with no
+run on it: a settle that landed while the run worked is a decision, and a
+failure does not overrule it.
+
+- **`notified` is the ledger**, in three states: `null` means the poll found
+  this PR and owes a tap; a record means already told; **absent** means nobody
+  ever meant to announce it (a PR pasted into the cockpit, or a row written
+  before the field existed), so an upgrade announces nothing. Only the
+  discovery stub writes the `null`, and a review run MUST carry the field
+  across rather than dropping it — re-reading it from disk at each write, not
+  from the snapshot the run started minutes earlier.
+- **The ledger records *what* was said** (`drafted`), because the two things
+  cerber can say about a row are different news. A failed run is announced as
+  an arrival and is retried on the next poll — `failed` is not head-sensitive —
+  so a ledger that only remembered "told" would swallow the draft-ready tap
+  when the retry succeeded, leaving the user with the one notification that had
+  nothing behind it. Hence `pendingNews`: an unannounced row is news, and a row
+  announced *without* a draft is news again once it has one. The reverse is
+  not — a row already announced as drafted says nothing further, however its
+  next re-review ends, because a PR the user has been told about is not news
+  for getting worse. The browser bell mirrors this with a second seen-key per
+  row (§17.4).
+- The stamp is written whether or not the notifier worked, **and whether or not
+  the notify toggle was even on** — otherwise a machine with no notifier
+  retries every row every poll, and a toggle switched on after a quiet week
+  arrives as one popup for that whole week. It is written *after* the tap: a
+  crash in between costs a repeat, and the other order costs the only
+  notification there was going to be.
+- One poll = at most one notification: a batch is one interruption ("N drafts
+  ready" when every one of them is drafted, "N PRs await your review"
+  otherwise, first three named). A single drafted PR leads with what the review
+  found — "requests changes · 2 blockers".
 - Notification text contains PR titles — attacker-controlled strings — and
   MUST be passed safely: escaped into the AppleScript literal on macOS;
   behind `--` on Linux so a title like `--help me` cannot be parsed as a flag.
@@ -1206,6 +1246,14 @@ it replaces `pr` wholesale and `diff`, re-anchors every comment, and records
 cockpit says so. It MUST no-op on `sent` (a record) and `running` (the
 runner's) artifacts, reporting "not changed" rather than an error.
 
+That check is made twice, and the second time is the one that binds: the fetches
+above take seconds, so the row is re-examined *at the write*, and a refresh is
+applied only to the row it was computed from. Settled, sent, running, or simply
+moved (`updatedAt` differs from the snapshot — every write through the store
+bumps it) all mean the same thing here: somebody else owns this row now, so the
+refresh reports "not changed" rather than writing a pre-fetch snapshot over a
+run that started and finished inside its own window.
+
 ### 13.3 Re-Anchoring Algorithm
 
 Matching is exact and deterministic — no fuzzy distance, no AI. Per comment,
@@ -1455,9 +1503,27 @@ read from it.
 ### 17.4 The Arrival Bell and Favicon
 
 The browser bell polls the queue from every screen and notifies once per new
-key this *browser* has seen — the seen-set and the on/off switch live in
-localStorage beside the permission they depend on, because the permission is
-the browser's. Normative behaviors: a fresh browser MUST NOT announce the
+key this *browser* has seen, on the same `isNews` timing the daemon uses (§9.8)
+— a row held back for its draft is deliberately **not** recorded in the
+seen-set — and keeps whatever was already recorded for it, so a re-review
+passing back through `running` cannot re-announce a draft. A row is recorded
+under a draft-specific key once it has a draft, which is how the browser
+distinguishes the same two kinds of news the daemon's ledger does. That format
+is versioned in localStorage (`cerber.notify.seen.v2`): a record written before
+it cannot say *what* it announced, so on upgrade each of its keys MUST be read
+as covering both kinds — otherwise the first poll replays a draft-ready popup
+for every row already sitting in the queue.
+
+A row the ledger records as *absent* — a review pulled in by hand — MUST NOT be
+announced by the browser either; the list carries `announceable` so the bell can
+apply the same rule the machine's own tap does (§9.8).
+
+A daemon-status read that *fails* answers nothing and MUST NOT be taken for
+"auto-review off": the last answer that worked stands, or one hiccup announces
+a row that is being drafted and the real draft-ready tap then arrives second.
+
+The seen-set and the on/off switch live in localStorage beside the permission
+they depend on, because the permission is the browser's. Normative behaviors: a fresh browser MUST NOT announce the
 whole backlog (first poll only records); keys are recorded even while quiet,
 so enabling later announces only what arrives next; a visible, focused queue
 suppresses the popup (the row appearing is the notice); one poll is at most
@@ -1656,11 +1722,11 @@ tick():
   refs = dedupe(search_awaiting(each repo filter))
   publish awaiting = classify_whose_move(refs)     # unknown on failure
   discovered = sync_queue(refs)           # stubs, reopen, archive, reap, file
-  if notify_on and discovered: announce(discovered)
   if auto_review:
       for ref in refs, parallelism P:
           r = review(ref, trigger=daemon)          # freshness guard inside
           if fresh(r): evaluate_auto_send(r)       # §15
+  announce(rows owed a tap that are news now, tell=notify_on)   # §9.8
   finally: schedule(tick, interval)       # end-to-start
 ```
 

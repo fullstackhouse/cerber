@@ -18,7 +18,7 @@ import {
   submitReview,
 } from "../core/gh.js";
 import { withWriter } from "../core/history.js";
-import { notice, notify } from "../core/notify.js";
+import { isNews, pendingNews, notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   appendAutoSendLog,
@@ -50,9 +50,9 @@ export interface DaemonOptions {
    */
   autoReview: boolean;
   /**
-   * Tap this machine's notification centre when a PR lands in the queue. This
-   * is the per-run cap (--no-notify); the config's daemon.notify is consulted
-   * live on every poll, so the cockpit toggle needs no restart.
+   * Tap this machine's notification centre when a PR is worth coming back for.
+   * This is the per-run cap (--no-notify); the config's daemon.notify is
+   * consulted live on every poll, so the cockpit toggle needs no restart.
    */
   notify: boolean;
   /**
@@ -91,9 +91,9 @@ export interface DaemonStatus {
   /** False when the config's daemon.poll toggle idles the loop. */
   pollEnabled: boolean;
   /**
-   * Whether this machine gets a notification of its own when a PR lands. The
-   * cockpit reads it to know whether its own bell would be a second popup
-   * about one PR — see `web/src/notify.ts`.
+   * Whether this machine gets a notification of its own. The cockpit reads it
+   * to know whether its own bell would be a second popup about one PR — see
+   * `web/src/notify.ts`.
    */
   notify: boolean;
   autoReview: boolean;
@@ -172,6 +172,9 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     refresh: null,
     filed: null,
     settledAt: null,
+    // Null, not absent: the poll found this PR, so it owes the machine a tap
+    // for it — once there is something to tap you about (§9.8).
+    notified: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -716,19 +719,47 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   let notifierWorks: boolean | null = null;
 
   /**
-   * Tap this machine when a PR lands in the queue.
+   * Tap this machine about every row that has become worth walking back to,
+   * once each.
    *
-   * An artifact is the ledger this rides on: a PR is announced on the poll that
-   * first writes a stub for it, so a restart re-announces nothing, and a PR
-   * that arrived while `serve` was down is still news the next time it runs.
-   * The cockpit's bell announces the same arrival, off the same stub — which is
-   * why it stands down when this is on and both are on one machine.
+   * `notified` on the artifact is the ledger this rides on: the poll writes it
+   * null when it first stubs a PR ("owed a tap"), and stamps it here. So a
+   * restart re-announces nothing, a PR that arrived while `serve` was down is
+   * still news the next time it runs — and, unlike announcing straight off the
+   * discovery, a tap the daemon is holding back survives the wait. The cockpit's
+   * bell works off the same rule (`isNews`), which is why it stands down when
+   * this is on and both are on one machine.
+   *
+   * Stamped whether or not the notifier worked, and whether or not it was even
+   * asked (`tell` is the notify toggle). A machine with no notifier would
+   * otherwise re-try every row every poll, and a toggle switched on after a
+   * quiet week would announce that whole week at once — the same reason the
+   * browser bell records what it stays quiet about.
    */
-  async function announce(arrivals: DiscoveredPr[]): Promise<void> {
-    const n = notice(arrivals, cockpitUrl);
+  async function announce(autoReview: boolean, tell: boolean): Promise<void> {
+    const owed = (await listArtifacts()).flatMap((a) => {
+      const news = pendingNews(a, autoReview);
+      return news ? [{ id: a.id, news }] : [];
+    });
+    // `cockpitUrl` is where a click lands, and it is read here rather than
+    // captured: `serve` hands it over once its port is bound, which can be
+    // after the first poll has already started.
+    const n = notice(owed.map((o) => o.news), cockpitUrl);
     if (!n) return;
-    notifierWorks = await notify(n);
-    if (notifierWorks) return;
+    if (tell) notifierWorks = await notify(n);
+    const at = new Date().toISOString();
+    // Stamped after the tap, not before: a crash in between costs a repeated
+    // notification, and the other order costs the only one there was going
+    // to be. What was said is stamped along with it, because "told you it
+    // failed" and "told you about the draft" are different news.
+    for (const { id, news } of owed) {
+      await updateArtifactByKey(artifactKey(id), (current) =>
+        // Absent means the row was replaced mid-poll by one nobody meant to
+        // announce (a hand-pulled review) — don't re-open a ledger for it.
+        current.notified === undefined ? current : { ...current, notified: { at, drafted: Boolean(news.draft) } },
+      );
+    }
+    if (!tell || notifierWorks) return;
     if (notifierMissing) return;
     notifierMissing = true;
     log("no desktop notifier here — arrivals will only show in the cockpit");
@@ -761,7 +792,55 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     });
   }
 
-  async function reviewAll(refs: DiscoveredPr[]): Promise<{ reviewed: number; skipped: number; failed: number }> {
+  /**
+   * Write a run's failure onto the row when the runner never got far enough to
+   * do it itself.
+   *
+   * A review that falls over before it owns the artifact — the PR read, the
+   * diff fetch — leaves the row sitting at `awaiting`, which reads as "a draft
+   * is coming" to everything downstream: the tap waits for one that will never
+   * be written, and the cockpit's own bell, which has only the row to go on,
+   * waits forever. Recording it is what keeps the two halves telling one story;
+   * the alternative, a set of ids the poll passes to its own notifier, is a
+   * fact the daemon knows and nobody else can see.
+   *
+   * Only a row still sitting at `awaiting` with nothing in flight on it is
+   * rewritten. A settle that landed while the run worked is a decision, and a
+   * failure is no reason to overrule it — the same line `mergeRunResult` holds.
+   * The run test is "not in flight" rather than "absent" because a row that was
+   * settled and then reopened keeps the run it had (`reopenedStatus`): reading
+   * that leftover as a live run would refuse to record the new failure, and the
+   * row would sit at `awaiting` forever waiting on a draft nobody is writing —
+   * the exact silence this function exists to break.
+   */
+  async function recordEarlyFailure(id: string, error: string): Promise<void> {
+    await updateArtifactByKey(artifactKey(id), (a) =>
+      a.status === "awaiting" && (a.run === null || a.run.finishedAt !== null)
+        ? {
+            ...a,
+            status: "failed" as const,
+            run: {
+              model: opts.model ?? null,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              costUsd: null,
+              error,
+              withSource: opts.withSource !== false,
+              trusted: false,
+              sessionId: null,
+              trigger: "daemon" as const,
+              reviewedSha: null,
+            },
+          }
+        : a,
+    ).catch(() => {
+      // Book-keeping: a row we could not write is one the next poll retries.
+    });
+  }
+
+  async function reviewAll(
+    refs: DiscoveredPr[],
+  ): Promise<{ reviewed: number; skipped: number; failed: number }> {
     let reviewed = 0;
     let skipped = 0;
     let failed = 0;
@@ -788,7 +867,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         }
         failed++;
         status.errors++;
-        log(`[${label}] failed: ${err instanceof Error ? err.message : err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        await recordEarlyFailure(label, message);
+        log(`[${label}] failed: ${message}`);
       }
     });
     return { reviewed, skipped, failed };
@@ -840,16 +921,6 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
-      // Before the reviews, not after: the arrival is the news, and drafting it
-      // takes minutes. This is the same moment the cockpit's bell would ring.
-      if (notifyOn && discovered.length > 0) {
-        await announce(discovered);
-        // Recomputed on the spot rather than left to the next poll: that is
-        // minutes away, and the cockpit would spend them deferring to a tap
-        // that never came. Recomputed rather than only cleared, so a machine
-        // whose notifier comes back takes the job back with it.
-        status.notify = announcing();
-      }
 
       if (autoReview) {
         const { reviewed, skipped, failed } = await reviewAll(refs);
@@ -859,6 +930,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       } else {
         status.lastSummary = `${refs.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""} (auto-review off)`;
       }
+
+      // After the drafting, not before it. The arrival is not the news when
+      // cerber is about to write the review itself: a tap that lands on "no run
+      // yet" makes the walk back to the cockpit for nothing, and by the time
+      // there *is* something to read the PR is no longer new. So the tap waits
+      // for the draft — and for a PR nobody is drafting (auto-review off, or a
+      // run that failed) it goes out here all the same. `isNews` is the rule,
+      // and the cockpit's bell reads the same one.
+      await announce(autoReview, notifyOn);
+      // Recomputed on the spot rather than left to the next poll: that is
+      // minutes away, and the cockpit would spend them deferring to a tap that
+      // never came. Recomputed rather than only cleared, so a machine whose
+      // notifier comes back takes the job back with it.
+      status.notify = announcing();
       log(status.lastSummary);
     } catch (err: unknown) {
       status.errors++;

@@ -138,6 +138,66 @@ describe("what a re-review does to the previous draft", () => {
     expect(artifact.comments.map((c) => c.body)).toEqual(["the AI's finding"]);
   });
 
+  // The run knows nothing about the desktop tap, and a draft nobody announces
+  // is the whole bug the timing rule (§9.8) exists to fix.
+  it("carries the tap the poll still owes this row through the run", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.status).toBe("ready");
+    expect(artifact.notified).toBeNull();
+    expect((await loadArtifact(ID))!.notified).toBeNull();
+  });
+
+  it("carries it through a run that fails, too", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    claudeThat(async () => {}, new Error("model unavailable"));
+
+    await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
+    expect((await loadArtifact(ID))!.notified).toBeNull();
+  });
+
+  // `existing` is read before the diff fetch and the checkout, which take
+  // minutes — long enough for a poll to announce the row. Writing that stale
+  // snapshot back would spend the same tap twice.
+  it("takes the ledger from disk, not from the snapshot it started with", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    const told = { at: "2026-08-21T10:05:00.000Z", drafted: false };
+    // The poll announces the row while the run is between its two writes.
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, notified: told }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.notified).toEqual(told);
+  });
+
+  // The claim that marks a row `running` is a write like any other, and the
+  // fetch before it takes minutes — long enough for the user to have settled
+  // the row. Marking it running would erase that decision before
+  // `mergeRunResult` ever got to defend it.
+  it("does not claim a row you settled while it was fetching", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    claudeThat(async () => {});
+    // The settle lands between loading `existing` and the claim: the fetch
+    // mocks are what the run is waiting on here.
+    diff.mockImplementationOnce(async () => {
+      await updateArtifactByKey(KEY, (a) => ({
+        ...a,
+        status: "skipped" as const,
+        settledAt: "2026-08-21T10:02:00.000Z",
+      }));
+      return DIFF;
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    // The draft still lands underneath — it is the decision that survives.
+    expect(artifact.status).toBe("skipped");
+    expect(artifact.summary).toBe("the new draft");
+    expect((await loadArtifact(ID))!.status).toBe("skipped");
+  });
+
   it("leaves nothing behind when it fails", async () => {
     // The failure path holds the same line as the success path: no half-kept
     // draft, so what a reader is told about re-review is true either way.

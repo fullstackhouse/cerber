@@ -88,13 +88,20 @@ who did is the one mistake worth designing against.
 
 ### It taps you on the shoulder
 
-When a PR lands in the queue you get a desktop notification naming it, folded
-into one popup when several arrive at once. The tap comes from the poll that
-found the PR, so it reaches you with the cockpit closed, in another Space, or
-after a browser restart — `cerber serve` is the only thing that has to be
-running. It goes to whatever this machine already has (Notification Centre on
-macOS, `notify-send` on Linux) and stays quiet where there is neither. Off with
-`daemon.notify` in `~/.cerber/config.json`, or the checkbox in Settings.
+When a PR is ready for you, you get a desktop notification naming it, folded
+into one popup when several land at once. Ready means *there is something to
+read*: cerber drafts the review itself, so the tap waits for the draft and says
+what it found — "widgets#7 draft ready · requests changes · 2 blockers" — rather
+than walking you back to a row that says "no run yet". A PR nobody is going to
+draft (auto-review off, or a run that failed) is announced as it arrives, since
+that is all the news there will be — and if a retry drafts it after all, that is
+new news and you are told. Nothing else is: a PR whose draft you have been told
+about stays quiet however its next re-review ends. The tap comes from the poll, so it reaches
+you with the cockpit closed, in another Space, or after a browser restart —
+`cerber serve` is the only thing that has to be running. It goes to whatever
+this machine already has (Notification Centre on macOS, `notify-send` on Linux)
+and stays quiet where there is neither. Off with `daemon.notify` in
+`~/.cerber/config.json`, or the checkbox in Settings.
 
 **On macOS, clicking it opens that review** in the cockpit. It takes a small app
 cerber builds once under `~/.cerber` — the first tap asks you to allow

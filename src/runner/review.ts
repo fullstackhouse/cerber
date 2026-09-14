@@ -228,6 +228,13 @@ async function performReview(
     status: "running",
     createdAt: existing?.createdAt ?? now(),
     updatedAt: now(),
+    // The announcement ledger belongs to the row, not to the run: a PR the poll
+    // found and has not told you about yet is still owed that tap when this
+    // draft lands (`notified` in artifact.ts). Seeded from the row this run
+    // starts on, and re-read from disk on the way out of both writes below —
+    // `existing` was loaded minutes ago, and a poll may have announced the row
+    // since.
+    notified: existing?.notified,
     pr,
     diff,
     summary: "",
@@ -262,7 +269,30 @@ async function performReview(
     preChat: null,
     pendingChat: null,
   };
-  await saveArtifact(artifact);
+  // Not a plain save. The fetch and checkout above take minutes, and the row on
+  // disk may have moved twice over in that window:
+  //
+  //   - a poll may have announced it, writing a ledger entry `existing` cannot
+  //     know about. Writing the stale one back would spend the tap twice.
+  //   - the user may have settled or sent it, which is a decision this run does
+  //     not get to overwrite by marking the row `running`. The run goes on and
+  //     folds its draft underneath at the end (`mergeRunResult`) — the same
+  //     line that function already holds, now held by the claim as well.
+  //
+  // Which settle it is matters, and `existing` is what tells them apart: a row
+  // already settled when this run *started* is one you took back deliberately
+  // (the guard above only lets a forced re-review that far), and claiming it is
+  // how the reopen happens at all. A settle that appeared since is the one this
+  // must not touch.
+  const decided = existing ? userOwnsStatus(existing) : false;
+  const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
+    !decided && userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+  );
+  const held = claimed !== null && !decided && userOwnsStatus(claimed);
+  if (!held) {
+    if (claimed) artifact = claimed;
+    else await saveArtifact(artifact);
+  }
 
   const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null, trusted });
   if (truncated) log("Warning: diff exceeds the context budget and was truncated.");

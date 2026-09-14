@@ -94,6 +94,9 @@ export function mergeConcurrentEdits(
     // A turn never writes a send body, so one written while it ran is the
     // user's and stands — as does clearing one.
     bodyOverride: current.bodyOverride,
+    // Nor does a turn announce anything: the ledger is the poll's, and a turn
+    // takes minutes, which is long enough for a poll to have stamped it.
+    notified: current.notified,
   };
 }
 

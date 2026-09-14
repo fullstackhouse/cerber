@@ -24,9 +24,10 @@ export const DaemonConfigSchema = z.object({
   /** Draft an AI review for whatever lands in the queue. Never sends. */
   autoReview: z.boolean().default(true),
   /**
-   * Tap this machine's notification centre when a PR lands in the queue. The
-   * cockpit's bell needs a tab open and permitted; this one only needs `serve`
-   * running, which is the point of it.
+   * Tap this machine's notification centre when a PR is worth coming back for
+   * — the draft landing, or the arrival itself when nothing is going to be
+   * drafted (`isNews` in `core/notify.ts`). The cockpit's bell needs a tab open
+   * and permitted; this one only needs `serve` running, which is the point.
    */
   notify: z.boolean().default(true),
   intervalMinutes: z.number().int().positive().default(5),

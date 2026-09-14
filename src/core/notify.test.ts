@@ -2,17 +2,21 @@ import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Artifact } from "./artifact.js";
 import {
   Arrival,
   BUNDLE_ID,
   NOTIFY_TIMEOUT_MS,
   appleScriptLiteral,
   appletSource,
-  ensureNotifierApp,
   clickTarget,
+  ensureNotifierApp,
+  isNews,
+  newsOf,
   notice,
   notify,
   notifyCommand,
+  pendingNews,
   pendingPayload,
 } from "./notify.js";
 
@@ -60,6 +64,155 @@ describe("what one poll's arrivals say", () => {
     expect(notice([pr(1), pr(2), pr(3), pr(4), pr(5)])?.body).toBe(
       "widgets#1, widgets#2, widgets#3 and 2 more",
     );
+  });
+});
+
+describe("what a finished draft says", () => {
+  const ready = (over: Partial<Arrival["draft"] & object> = {}): Arrival => ({
+    ...pr(7),
+    draft: { recommendation: "request_changes", blockers: 2, ...over },
+  });
+
+  it("leads with the verdict and the count it rests on", () => {
+    expect(notice([ready()])).toEqual({
+      title: "widgets#7 draft ready",
+      body: "requests changes · 2 blockers — feat: add sprockets",
+      url: null,
+    });
+  });
+
+  // The click target is the same either way: which news it is changes what the
+  // popup says, not where it sends you.
+  it("still opens the review it is about", () => {
+    expect(notice([ready()], "http://127.0.0.1:7777")?.url).toBe(
+      "http://127.0.0.1:7777#/r/acme__widgets__7",
+    );
+  });
+
+  it("counts one blocker as one", () => {
+    expect(notice([ready({ blockers: 1 })])?.body).toBe(
+      "requests changes · 1 blocker — feat: add sprockets",
+    );
+  });
+
+  it("has no count to give when nothing blocks", () => {
+    expect(notice([ready({ recommendation: "approve", blockers: 0 })])?.body).toBe(
+      "approves — feat: add sprockets",
+    );
+  });
+
+  it("still says something about a draft that took no position", () => {
+    expect(notice([ready({ recommendation: null, blockers: 0 })])?.body).toBe(
+      "drafted — feat: add sprockets",
+    );
+  });
+
+  it("calls a batch of drafts what it is", () => {
+    expect(notice([ready(), { ...pr(8), draft: { recommendation: "approve", blockers: 0 } }])?.title).toBe(
+      "2 drafts ready",
+    );
+  });
+
+  // A drafted PR awaits you too, so the wording true of both is the one used.
+  it("falls back to the general headline when only some are drafted", () => {
+    expect(notice([ready(), pr(8)])?.title).toBe("2 PRs await your review");
+  });
+});
+
+describe("whether a row is news yet", () => {
+  const artifact = (over: Partial<Artifact> = {}): Artifact =>
+    ({
+      status: "awaiting",
+      pr: { repo: "widgets", number: 7, title: "feat: add sprockets", author: "mira", state: "OPEN" },
+      comments: [],
+      verdict: null,
+      ...over,
+    }) as Artifact;
+
+  // The whole point: with cerber drafting, a tap on arrival lands on "no run
+  // yet" — and the moment there is something to read would pass in silence.
+  it("holds back a PR cerber is about to draft, or is drafting", () => {
+    expect(isNews(artifact({ status: "awaiting" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "running" }), true)).toBe(false);
+  });
+
+  it("announces the arrival when nobody is going to draft it", () => {
+    expect(isNews(artifact({ status: "awaiting" }), false)).toBe(true);
+  });
+
+  it("announces the draft the moment it exists", () => {
+    expect(isNews(artifact({ status: "ready" }), true)).toBe(true);
+  });
+
+  // Nothing more is coming for it, so this is the only tap there will be.
+  it("announces a run that failed", () => {
+    expect(isNews(artifact({ status: "failed" }), true)).toBe(true);
+  });
+
+  it("says nothing about a row you already answered, or a PR that is gone", () => {
+    expect(isNews(artifact({ status: "reviewed" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "skipped" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "sent" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "ready", pr: { ...artifact().pr, state: "MERGED" } }), true)).toBe(
+      false,
+    );
+  });
+
+  it("reads the draft off the artifact, blockers and all", () => {
+    const a = artifact({
+      status: "ready",
+      verdict: { recommendation: "request_changes", confidence: 70, reasoning: "" },
+      comments: [
+        { severity: "blocker", status: "draft" },
+        { severity: "blocker", status: "dropped" },
+        { severity: "nit", status: "draft" },
+      ],
+    } as Partial<Artifact>);
+    expect(newsOf(a).draft).toEqual({ recommendation: "request_changes", blockers: 1 });
+  });
+
+  it("carries no draft for a row that has none", () => {
+    expect(newsOf(artifact({ status: "awaiting" })).draft).toBeNull();
+    expect(newsOf(artifact({ status: "failed" })).draft).toBeNull();
+  });
+});
+
+describe("what a row still has to say, given what it has said already", () => {
+  const artifact = (over: Partial<Artifact> = {}): Artifact =>
+    ({
+      status: "failed",
+      pr: { repo: "widgets", number: 7, title: "feat: add sprockets", author: "mira", state: "OPEN" },
+      comments: [],
+      verdict: null,
+      notified: null,
+      ...over,
+    }) as Artifact;
+
+  it("says nothing about a row nobody meant to announce", () => {
+    expect(pendingNews(artifact({ notified: undefined }), true)).toBeNull();
+  });
+
+  it("owes a tap on a row it has never told you about", () => {
+    expect(pendingNews(artifact(), true)?.draft).toBeNull();
+  });
+
+  // The hole this shape of ledger exists to close: a failed run is retried on
+  // the next poll, and a ledger that only remembered "told" would swallow the
+  // draft — leaving the user with the one tap that had nothing to read.
+  it("announces the draft to someone it told five minutes ago that the run failed", () => {
+    const told = { at: "2026-08-21T10:00:00.000Z", drafted: false };
+    expect(pendingNews(artifact({ notified: told }), true)).toBeNull();
+    expect(pendingNews(artifact({ status: "ready", notified: told }), true)?.draft).toEqual({
+      recommendation: null,
+      blockers: 0,
+    });
+  });
+
+  // A PR you have been told about is not news for getting worse.
+  it("stays quiet when a row it announced as drafted breaks again", () => {
+    const told = { at: "2026-08-21T10:00:00.000Z", drafted: true };
+    expect(pendingNews(artifact({ status: "ready", notified: told }), true)).toBeNull();
+    expect(pendingNews(artifact({ status: "failed", notified: told }), true)).toBeNull();
   });
 });
 
@@ -188,6 +341,17 @@ describe("the notice the app reads back", () => {
 
   it("flattens a PR title that would otherwise shift every line after it", () => {
     expect(pendingPayload({ title: "wob\nble", body: "b\nc", url: null })).toBe("wob ble\nb c\n\n");
+  });
+
+  // A draft-ready notice carries the PR title inside its *body*, one field over
+  // from where an arrival carries it — so the flattening has to hold for both
+  // shapes, not just the one that existed when it was written.
+  it("flattens the title a drafted notice carries in its body", () => {
+    const n = notice([
+      { ...pr(7, { title: "fix: the\nwobble" }), draft: { recommendation: "approve", blockers: 0 } },
+    ])!;
+    expect(pendingPayload(n).split("\n")).toHaveLength(4);
+    expect(pendingPayload(n)).toContain("approves — fix: the wobble");
   });
 });
 

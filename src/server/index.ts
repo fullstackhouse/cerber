@@ -20,7 +20,7 @@ import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.js";
 import { z } from "zod";
 import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
-import { refreshArtifact } from "../core/refresh.js";
+import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
@@ -222,6 +222,12 @@ export async function buildApp(
         blockerCount: a.comments.filter((cm) => cm.status !== "dropped" && cm.severity === "blocker")
           .length,
         gradedCount: a.comments.filter((cm) => cm.severity != null).length,
+        // Whether the machine ever meant to announce this row (§9.8's ledger:
+        // absent means nobody did — a review pulled in by hand). The browser
+        // bell has only the list to go on, so without this it would announce
+        // rows the daemon deliberately stays silent about, and the two bells
+        // would stop telling one story.
+        announceable: a.notified !== undefined,
         costUsd: a.run?.costUsd ?? null,
         withSource: a.run?.withSource ?? null,
         trusted: a.run?.trusted ?? null,
@@ -303,6 +309,12 @@ export async function buildApp(
       status: "running",
       createdAt: now,
       updatedAt: now,
+      // Kept from the stub this replaces, when there is one: the poll found
+      // that PR and owes the machine a tap for it once the draft lands. Absent
+      // on a PR pasted into the cockpit — nobody asked to be told about that
+      // one, and it is on screen already. Re-read from disk at the write below,
+      // since `fetchPrInfo` gave a poll time to announce the stub.
+      notified: existing?.notified,
       pr,
       diff: "",
       summary: "",
@@ -331,7 +343,20 @@ export async function buildApp(
       preChat: null,
       pendingChat: null,
     };
-    await saveArtifact(artifact);
+    // A settle or a send that landed while `fetchPrInfo` was in flight is a
+    // decision, and claiming the row for a run would erase it — the detached
+    // run below folds its draft under whatever the row says instead
+    // (`mergeRunResult`), which is the same line every other writer holds.
+    const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
+      userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+    );
+    // Declining the claim is only half the job: the run below forces, and a
+    // forced run reopens a settled row on purpose. So the decision ends the
+    // request — hand it back and start nothing.
+    if (claimed && userOwnsStatus(claimed)) {
+      return c.json({ ...claimed, key: artifactKey(claimed.id) }, 200);
+    }
+    if (!claimed) await saveArtifact(artifact);
 
     void reviewPr(ref, {
       force: true,
@@ -501,13 +526,33 @@ export async function buildApp(
     try {
       const diff = await fetchPrDiff(ref);
       const result = refreshArtifact(artifact, pr, diff);
-      const saved = await updateArtifactByKey(c.req.param("key"), () => result.artifact);
+      // `result` was built from a snapshot taken before the PR read and the
+      // diff fetch, so it is written back only onto a row that is still the one
+      // it describes. The guard above asked the same question minutes ago; a
+      // settle, a send or a run that started since would be undone by writing
+      // this over them, and the ledger is the poll's in either case.
+      // Taken over, in any of the three ways that matter: a decision was made,
+      // a run owns the row now, or it simply is not the row this refresh was
+      // computed from any more. The last test is what catches a run that both
+      // started *and* finished inside this handler's own fetches — it leaves
+      // `ready`, which neither of the other two tests would refuse, and writing
+      // the pre-fetch snapshot over it would drop a whole finished draft.
+      // `updatedAt` is the version: every write through the store bumps it.
+      const taken = (a: Artifact) =>
+        userOwnsStatus(a) || a.status === "running" || a.updatedAt !== artifact.updatedAt;
+      // Read inside the mutation rather than from its result: the store stamps
+      // `updatedAt` on the way out, so the saved row always looks "moved".
+      let applied = false;
+      const saved = await updateArtifactByKey(c.req.param("key"), (current) => {
+        applied = !taken(current);
+        return applied ? { ...result.artifact, notified: current.notified } : current;
+      });
       return c.json({
         stale: true,
-        changed: result.changed,
+        changed: applied && result.changed,
         prState: pr.state,
-        moved: result.moved,
-        drifted: result.drifted,
+        moved: applied ? result.moved : 0,
+        drifted: applied ? result.drifted : 0,
         artifact: saved,
       });
     } catch (err: unknown) {

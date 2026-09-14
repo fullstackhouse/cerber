@@ -18,15 +18,15 @@ const BELL_TITLE: Record<NotifyState, string> = {
   unsupported: "",
   blocked:
     "This browser blocked notifications for cerber. Turn them back on in its site settings — the padlock next to the address bar.",
-  off: "Notifications off. Click to be told when a PR lands in the queue.",
-  ask: "Click to be told when a PR lands in the queue — the browser will ask you first.",
-  on: "Telling you when a PR lands in the queue. Click to stop.",
+  off: "Notifications off. Click to be told when a review is ready for you.",
+  ask: "Click to be told when a review is ready for you — the browser will ask you first.",
+  on: "Telling you when a review is ready for you. Click to stop.",
 };
 
 const DAEMON_BELL_TITLE =
-  "cerber taps this machine itself when a PR lands — no tab required. The browser's own bell " +
-  "would be a second popup about one PR, so it stands down. Turn the machine one off in " +
-  "Settings to have this browser announce arrivals instead.";
+  "cerber taps this machine itself when a PR is worth coming back for — no tab required. The browser's own " +
+  "bell would be a second popup about one PR, so it stands down. Turn the machine one off in " +
+  "Settings to have this browser announce them instead.";
 
 /**
  * The one switch for arrival notifications. Cerber wants them on, but only the

@@ -17,9 +17,9 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const NOTIFY_LABEL: Record<NotifyState, string> = {
   unsupported: "this browser has no notifications to give",
   blocked: "this browser has blocked notifications for cerber",
-  off: "tell me when a PR lands in the queue",
-  ask: "tell me when a PR lands in the queue (the browser will ask first)",
-  on: "tell me when a PR lands in the queue",
+  off: "tell me when a review is ready for me",
+  ask: "tell me when a review is ready for me (the browser will ask first)",
+  on: "tell me when a review is ready for me",
 };
 
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
@@ -80,9 +80,14 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
 
       <h1>Notifications</h1>
       <p>
-        When a PR lands in the queue, cerber says so: one desktop notification per poll. A single
-        arrival names the PR; several landing at once fold into one notification. A PR that has
-        already been announced never arrives twice.
+        When a PR is worth coming back for, cerber says so: one desktop notification per poll. With
+        auto-review on that moment is the draft landing, not the PR arriving — a tap that leads to
+        "no run yet" costs you the walk back and gives you nothing — and the notification names
+        what the review found. A PR nobody is drafting (auto-review off, or a run that failed) is
+        announced as it lands, since that is all the news there will be — and if a retry then
+        drafts it after all, that is new news and you are told. Several at once fold into one
+        notification, and a PR whose draft has been announced never arrives twice, however its
+        next re-review ends.
       </p>
       <label className="inbox-toggle">
         <input
@@ -91,11 +96,11 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           disabled={busy || !config.daemon.poll}
           onChange={(e) => apply(updateDaemonConfig({ notify: e.target.checked }))}
         />{" "}
-        tell this machine when a PR lands (no cockpit tab required)
+        tell this machine when a review is ready for you (no cockpit tab required)
       </label>
       <p className="muted">
-        This is the one that works while you're somewhere else: it rides the poll that finds the
-        PR, so it needs nothing open but <code>serve</code> itself. It hands the notification to
+        This is the one that works while you're somewhere else: it rides the poll, so it needs
+        nothing open but <code>serve</code> itself. It hands the notification to
         whatever this machine already has — Notification Centre on macOS,{" "}
         <code>notify-send</code> on Linux — and stays quiet where there is neither. On macOS it{" "}
         <strong>opens that review when you click it</strong>, through a small app cerber builds

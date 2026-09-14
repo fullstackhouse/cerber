@@ -4,17 +4,34 @@
 // one thing that should reach through it. Everything here is browser state:
 // the permission belongs to this browser, so the switch and the record of what
 // has already been announced live in localStorage rather than in config.json.
+//
+// One popup per piece of news, at the moment it is worth coming back for: with
+// auto-review on that is the draft landing, not the PR arriving — see
+// `isNews`, the same rule the daemon's own tap applies in
+// `src/core/notify.ts`. A PR has at most two such moments, and only ever gets
+// the second when the first was "nobody is drafting this".
 
 import { useEffect, useRef, useState } from "react";
 import { fetchDaemonStatus, fetchReviews } from "./api";
 import { walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
-const SEEN = "cerber.notify.seen";
+/**
+ * The record of what this browser has announced, v2: keyed by *news* rather
+ * than by PR (see `newsKey`). The name is versioned because v1 cannot be read
+ * as v2 — a bare key meant "this PR has been announced", whatever it was
+ * announced as, and reading those as arrival-news would replay a draft-ready
+ * popup for every row already sitting in the queue the moment cerber upgraded.
+ */
+const SEEN = "cerber.notify.seen.v2";
+const SEEN_V1 = "cerber.notify.seen";
 const PREF = "cerber.notify";
 
 /** Same cadence as the queue's own refresh — a PR is news within ten seconds. */
 const POLL_MS = 10_000;
+
+/** A finished draft is news about what it found, not about the PR arriving. */
+const drafted = (r: ReviewListItem) => r.status === "ready";
 
 const read = (key: string): string | null => {
   try {
@@ -34,22 +51,105 @@ const write = (key: string, value: string) => {
 };
 
 /**
- * New to this browser: a PR the queue wants you to look at whose key has never
- * been announced here. Settled, sent and archived reviews are not arrivals —
- * `walkable` is the same list the ‹ › arrows walk.
+ * Whether the daemon is drafting for you, which is what decides whether an
+ * undrafted row's arrival is the news or its draft will be.
+ *
+ * `null` is a status read that failed, and it answers nothing: taken for a no,
+ * it announces a row the daemon is drafting at that moment, records it as seen,
+ * and leaves the real draft-ready tap to arrive second — an early popup and a
+ * duplicate, from one hiccup. So the last answer that worked stands.
  */
-export function arrivals(list: ReviewListItem[], seen: string[]): ReviewListItem[] {
+export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: boolean): boolean {
+  if (!daemon) return lastKnown;
+  return Boolean(daemon.enabled && daemon.pollEnabled && daemon.autoReview);
+}
+
+/**
+ * Whether this row is news *yet* — the browser half of the rule the daemon
+ * applies in `src/core/notify.ts`, kept deliberately identical so one PR never
+ * gets announced at two different moments by two different bells.
+ *
+ * A row cerber is about to draft, or is drafting, is held back: a popup that
+ * leads to "no run yet" is a walk back to the cockpit for nothing, and the
+ * moment worth being told about — the draft landing — would then pass in
+ * silence. Nothing is coming when auto-review is off, or when the run failed,
+ * and then the arrival is the news after all.
+ */
+export function isNews(r: ReviewListItem, autoReview: boolean): boolean {
+  // The daemon's ledger, as far as the list can carry it: a row nobody meant to
+  // announce (a review pulled in by hand) is not news here either, or this bell
+  // would announce rows the machine's own tap deliberately skips. Undefined is
+  // announceable — a server too old to send the field must not go quiet.
+  if (r.announceable === false) return false;
+  if (r.status === "running") return false;
+  if (r.status === "awaiting") return !autoReview;
+  return true;
+}
+
+/**
+ * What the seen-set records for a row, by the news it currently carries.
+ *
+ * Two things can be announced about one PR — "nobody is drafting this" and
+ * "here is the draft" — and the daemon's ledger distinguishes them, because a
+ * run that failed is retried and may then succeed. A bare key cannot say which
+ * one was told, so a drafted row gets a key of its own; anything else records
+ * the plain one.
+ */
+const DRAFT_SUFFIX = ":draft";
+const draftKey = (r: ReviewListItem) => `${r.key}${DRAFT_SUFFIX}`;
+const newsKey = (r: ReviewListItem) => (drafted(r) ? draftKey(r) : r.key);
+
+/**
+ * New to this browser: a PR the queue wants you to look at whose *current news*
+ * has never been announced here. Settled, sent and archived reviews are not
+ * arrivals — `walkable` is the same list the ‹ › arrows walk.
+ */
+export function arrivals(
+  list: ReviewListItem[],
+  seen: string[],
+  autoReview: boolean,
+): ReviewListItem[] {
   const known = new Set(seen);
-  return walkable(list).filter((r) => !known.has(r.key));
+  return walkable(list).filter((r) => isNews(r, autoReview) && !known.has(newsKey(r)));
 }
 
 /**
  * What to remember after a poll: every key the server knows, not just the ones
  * in the queue. A review you send or skip leaves the queue but stays on disk,
  * and forgetting it would announce it again the day it comes back.
+ *
+ * Two rows are treated specially, and both mirror the daemon's ledger:
+ *
+ *   - one being held back for its draft (`isNews`) keeps only what was already
+ *     recorded for it. Recording it afresh would spend its announcement on the
+ *     silence; dropping what it had would re-announce a draft it already
+ *     announced, every time a re-review passes back through `running`.
+ *   - one that has a draft records both keys, so what it says next — a broken
+ *     re-review, a row reopened — is not announced a second time. A PR you have
+ *     been told about is not news for getting worse.
  */
-export function announced(list: ReviewListItem[]): string[] {
-  return list.map((r) => r.key);
+export function announced(
+  list: ReviewListItem[],
+  autoReview: boolean,
+  before: string[] = [],
+): string[] {
+  const known = new Set(before);
+  const inQueue = new Set(walkable(list).map((r) => r.key));
+  const out: string[] = [];
+  for (const r of list) {
+    if (inQueue.has(r.key) && !isNews(r, autoReview)) {
+      for (const k of [r.key, draftKey(r)]) if (known.has(k)) out.push(k);
+      continue;
+    }
+    out.push(r.key);
+    // Kept once earned: a row whose draft was announced stays quiet through a
+    // re-review that breaks and one that then succeeds. Without the last
+    // clause, `failed` would drop the draft key and the next success would
+    // read as a draft nobody had been told about. A settled row is done being
+    // news whatever happens to it next.
+    if (drafted(r) || !inQueue.has(r.key) || known.has(draftKey(r))) out.push(draftKey(r));
+  }
+  return out;
 }
 
 export interface Notice {
@@ -63,15 +163,34 @@ export interface Notice {
 
 const slug = (r: ReviewListItem) => `${r.pr.repo}#${r.pr.number}`;
 
-/** One popup for one poll's arrivals — a batch is one interruption, not five. */
+const VERDICT_WORDS = {
+  approve: "approves",
+  comment: "comments",
+  request_changes: "requests changes",
+} as const;
+
+/** What that draft says, in the few words a popup gets. */
+function draftLine(r: ReviewListItem): string {
+  const verdict = r.verdict ? VERDICT_WORDS[r.verdict.recommendation] : "drafted";
+  const blockers = r.blockerCount ?? 0;
+  if (blockers === 0) return verdict;
+  return `${verdict} · ${blockers} blocker${blockers === 1 ? "" : "s"}`;
+}
+
+/** One popup for one poll's news — a batch is one interruption, not five. */
 export function notice(arrived: ReviewListItem[]): Notice | null {
   if (arrived.length === 0) return null;
-  const tag = `cerber:${arrived.map((r) => r.key).sort().join("|")}`;
+  // Keyed by the *news*, not the PR: a draft-ready popup arriving while the
+  // "run failed" one is still on screen must be a new alert, and a tag it
+  // shares would quietly replace that one instead (`renotify` defaults false).
+  // Two tabs seeing the same news still tag it identically, which is the job
+  // the tag was added for.
+  const tag = `cerber:${arrived.map(newsKey).sort().join("|")}`;
   if (arrived.length === 1) {
     const r = arrived[0]!;
     return {
-      title: `${slug(r)} awaits your review`,
-      body: `${r.pr.title} — ${r.pr.author}`,
+      title: drafted(r) ? `${slug(r)} draft ready` : `${slug(r)} awaits your review`,
+      body: drafted(r) ? `${draftLine(r)} — ${r.pr.title}` : `${r.pr.title} — ${r.pr.author}`,
       tag,
       key: r.key,
     };
@@ -79,7 +198,9 @@ export function notice(arrived: ReviewListItem[]): Notice | null {
   const named = arrived.slice(0, 3).map(slug);
   const rest = arrived.length - named.length;
   return {
-    title: `${arrived.length} PRs await your review`,
+    // A drafted PR awaits you too, so the general wording is true of any batch;
+    // the better headline is only claimed when every one of them is drafted.
+    title: arrived.every(drafted) ? `${arrived.length} drafts ready` : `${arrived.length} PRs await your review`,
     body: rest > 0 ? `${named.join(", ")} and ${rest} more` : named.join(", "),
     tag,
     key: null,
@@ -152,6 +273,35 @@ function show(n: Notice) {
 }
 
 /**
+ * The seen-set as it stands after an upgrade, or null for a browser that has
+ * never announced anything (which must record before it announces, or it would
+ * tap you about the whole backlog).
+ *
+ * A v1 record says only "this PR was announced", never *what* it was announced
+ * as — the distinction did not exist. Read as arrival-news, every row already
+ * drafted would look never-told-about and be announced again on the first poll
+ * after the upgrade: exactly the backlog storm the daemon's ledger goes out of
+ * its way to avoid. So each v1 key is taken to cover both kinds. The cost is
+ * the opposite mistake, once: a row announced as an arrival before the upgrade
+ * and drafted after it stays quiet. A notification missed beats a backlog
+ * delivered.
+ */
+export function restoreSeen(v2: string | null, v1: string | null): string[] | null {
+  const raw = v2 ?? v1;
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Hand-mangled — start the record over rather than announcing a backlog.
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const keys = parsed.filter((k): k is string => typeof k === "string");
+  return v2 ? keys : keys.flatMap((k) => [k, `${k}${DRAFT_SUFFIX}`]);
+}
+
+/**
  * Watch the queue for arrivals from wherever in the cockpit you are. It polls
  * on its own rather than riding the queue screen's poll: that one stops the
  * moment you open a review, and a notification you only get on one screen is a
@@ -165,19 +315,18 @@ export function useArrivalNotifications(): boolean {
   // Null until the first response lands. A browser that has never seen this
   // queue must not announce the whole backlog, so the first poll only records.
   const seen = useRef<string[] | null>(null);
+  /**
+   * What the last status read that worked said about drafting. It starts at
+   * "drafting", the conservative end: holding a row back only ever delays its
+   * notice, since a held-back row is not recorded as seen either, so the first
+   * successful read announces it properly.
+   */
+  const drafting = useRef(true);
   const [daemonAnnounces, setDaemonAnnounces] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    const stored = read(SEEN);
-    if (stored) {
-      try {
-        const parsed: unknown = JSON.parse(stored);
-        if (Array.isArray(parsed)) seen.current = parsed.filter((k): k is string => typeof k === "string");
-      } catch {
-        // Hand-mangled or from an older shape — start the record over.
-      }
-    }
+    seen.current = restoreSeen(read(SEEN), read(SEEN_V1));
 
     const tick = () =>
       Promise.all([fetchReviews(), fetchDaemonStatus().catch(() => null)])
@@ -185,10 +334,14 @@ export function useArrivalNotifications(): boolean {
           if (!alive) return;
           const machineHasIt = daemonAnnouncesHere(daemon);
           setDaemonAnnounces(machineHasIt);
+          // Whether anything is coming for an undrafted row, which is what says
+          // if its arrival is the news or the draft is.
+          drafting.current = daemonDrafts(daemon, drafting.current);
+          const autoReview = drafting.current;
           const before = seen.current;
           // Recorded even when we stay quiet, so turning the bell on later
           // announces what arrives next rather than everything already here.
-          seen.current = announced(list);
+          seen.current = announced(list, autoReview, before ?? []);
           write(SEEN, JSON.stringify(seen.current));
           if (!before) return;
           if (notifyState() !== "on") return;
@@ -197,7 +350,7 @@ export function useArrivalNotifications(): boolean {
           if (machineHasIt) return;
           // Looking straight at the queue? The row appearing is the notice.
           if (document.visibilityState === "visible" && document.hasFocus()) return;
-          const n = notice(arrivals(list, before));
+          const n = notice(arrivals(list, before, autoReview));
           if (n) show(n);
         })
         .catch(() => {
