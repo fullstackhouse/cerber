@@ -5,7 +5,7 @@ import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, SCHEMA_VERSION, PrInfo } from "../core/artifact.js";
 import { fetchPrInfo } from "../core/gh.js";
 import { beginReview, endReview } from "../runner/inflight.js";
-import { saveArtifact } from "../core/state.js";
+import { saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { reviewPr } from "../runner/review.js";
 import { isPureStub, stubArtifact } from "./daemon.js";
 import { buildApp } from "./index.js";
@@ -25,6 +25,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), "cerber-create-api-"));
 process.env.CERBER_HOME = home;
 
 const URL = "https://github.com/acme/widgets/pull/42";
+const REF = { owner: "acme", repo: "widgets", number: 42 };
 
 function pr(over: Partial<PrInfo> = {}): PrInfo {
   return {
@@ -105,6 +106,26 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
     const saved = await app.request("/api/reviews/acme__widgets__42");
     expect(saved.status).toBe(200);
     expect(isPureStub((await saved.json()) as Artifact)).toBe(false);
+  });
+
+  // The endpoint forces, and a forced run reopens a settled row on purpose —
+  // so a settle landing during `fetchPrInfo` has to end the request, not just
+  // survive the claim write it was about to be overwritten by.
+  it("does not start a forced run over a decision made while it fetched", async () => {
+    await saveArtifact(stubArtifact({ ...REF, title: "Add a thing", url: URL, author: "someone", isDraft: false, updatedAt: "2026-08-21T09:00:00.000Z" }));
+    prInfo.mockImplementationOnce(async () => {
+      await updateArtifactByKey("acme__widgets__42", (a) => ({
+        ...a,
+        status: "skipped" as const,
+        settledAt: "2026-08-21T10:02:00.000Z",
+      }));
+      return pr();
+    });
+
+    const res = await post({ input: URL });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("skipped");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("hands back a PR already in the queue instead of reviewing it twice", async () => {

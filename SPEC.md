@@ -1440,13 +1440,14 @@ key this *browser* has seen, on the same `isNews` timing the daemon uses (§9.8)
 seen-set — and keeps whatever was already recorded for it, so a re-review
 passing back through `running` cannot re-announce a draft. A row is recorded
 under a draft-specific key once it has a draft, which is how the browser
-distinguishes the same two kinds of news the daemon's ledger does. A
-daemon-status
-read that *fails* answers nothing and MUST NOT be taken for "auto-review off":
-the last answer that worked stands, or one hiccup announces a row that is being
-drafted and the real draft-ready tap arrives second — the seen-set and the on/off switch live in
-localStorage beside the permission they depend on, because the permission is
-the browser's. Normative behaviors: a fresh browser MUST NOT announce the
+distinguishes the same two kinds of news the daemon's ledger does.
+
+A daemon-status read that *fails* answers nothing and MUST NOT be taken for
+"auto-review off": the last answer that worked stands, or one hiccup announces
+a row that is being drafted and the real draft-ready tap then arrives second.
+
+The seen-set and the on/off switch live in localStorage beside the permission
+they depend on, because the permission is the browser's. Normative behaviors: a fresh browser MUST NOT announce the
 whole backlog (first poll only records); keys are recorded even while quiet,
 so enabling later announces only what arrives next; a visible, focused queue
 suppresses the popup (the row appearing is the notice); one poll is at most

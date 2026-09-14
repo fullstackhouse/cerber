@@ -344,6 +344,12 @@ export async function buildApp(
     const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
       userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
     );
+    // Declining the claim is only half the job: the run below forces, and a
+    // forced run reopens a settled row on purpose. So the decision ends the
+    // request — hand it back and start nothing.
+    if (claimed && userOwnsStatus(claimed)) {
+      return c.json({ ...claimed, key: artifactKey(claimed.id) }, 200);
+    }
     if (!claimed) await saveArtifact(artifact);
 
     void reviewPr(ref, {
@@ -515,17 +521,21 @@ export async function buildApp(
       const diff = await fetchPrDiff(ref);
       const result = refreshArtifact(artifact, pr, diff);
       // `result` was built from a snapshot taken before the PR read and the
-      // diff fetch; the ledger is the poll's and may have been stamped since.
-      const saved = await updateArtifactByKey(c.req.param("key"), (current) => ({
-        ...result.artifact,
-        notified: current.notified,
-      }));
+      // diff fetch, so it is written back only onto a row that is still the one
+      // it describes. The guard above asked the same question minutes ago; a
+      // settle, a send or a run that started since would be undone by writing
+      // this over them, and the ledger is the poll's in either case.
+      const taken = (a: Artifact) => userOwnsStatus(a) || a.status === "running";
+      const saved = await updateArtifactByKey(c.req.param("key"), (current) =>
+        taken(current) ? current : { ...result.artifact, notified: current.notified },
+      );
+      const applied = saved !== null && !taken(saved);
       return c.json({
         stale: true,
-        changed: result.changed,
+        changed: applied && result.changed,
         prState: pr.state,
-        moved: result.moved,
-        drifted: result.drifted,
+        moved: applied ? result.moved : 0,
+        drifted: applied ? result.drifted : 0,
         artifact: saved,
       });
     } catch (err: unknown) {
