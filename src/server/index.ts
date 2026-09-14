@@ -824,6 +824,9 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
     const tokenHint = opts.token ? `/?token=${opts.token}` : "";
     console.log(`cerber cockpit: http://${opts.host}:${info.port}${tokenHint}`);
+    // The bound port, not the asked-for one: `--port 0` is the OS's to choose,
+    // and this callback is the first moment anyone knows what it chose.
+    opts.daemon?.cockpitAt(cockpitUrl({ ...opts, port: info.port }));
     if (opts.daemon) {
       const s = opts.daemon.status();
       console.log(

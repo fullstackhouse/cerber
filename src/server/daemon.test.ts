@@ -771,6 +771,23 @@ describe("the tap on the machine when a PR lands", () => {
     });
   });
 
+  // `--port 0` asks the OS to choose, and the daemon is started before the
+  // server binds — so the address arrives after the first poll, not with the
+  // options, and a tap raised later still has to carry it.
+  it("takes the cockpit's address from serve once the port is bound", async () => {
+    search.mockResolvedValue([]);
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+      handle.cockpitAt("http://127.0.0.1:41234/");
+      search.mockResolvedValue([DISCOVERED]);
+      await vi.waitFor(() => expect(notified).toHaveBeenCalled());
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(notified.mock.calls[0]![0].url).toBe("http://127.0.0.1:41234/#/r/acme__widgets__7");
+  });
+
   // What the tap is for: the PR it names is one click away, not a popup you
   // then go and find the review for yourself.
   it("points the tap at the review, through the cockpit it was given", async () => {

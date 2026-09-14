@@ -263,6 +263,20 @@ async function run(file: string, args: string[]): Promise<void> {
 }
 
 /**
+ * Set a key in the applet's Info.plist whether or not it is already there.
+ *
+ * `plutil -replace` is documented as overwriting an *existing* value — it does
+ * create a missing key in practice, but on undocumented behaviour, and every
+ * key this sets is one `osacompile` may or may not have written. A failure
+ * here fails the build and silently costs the click, so the documented
+ * inserting form is the fallback rather than the assumption.
+ */
+async function setPlistValue(plist: string, key: string, type: string, value: string) {
+  const flags = [key, type, value, plist];
+  await run("plutil", ["-replace", ...flags]).catch(() => run("plutil", ["-insert", ...flags]));
+}
+
+/**
  * Build the app cerber posts through, into `~/.cerber/Cerber.app`.
  *
  * Three things here are load-bearing, each learned the way macOS teaches them —
@@ -298,10 +312,10 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
   await run("osacompile", ["-o", staged, source]);
 
   const plist = path.join(staged, "Contents", "Info.plist");
-  await run("plutil", ["-replace", "CFBundleIdentifier", "-string", BUNDLE_ID, plist]);
+  await setPlistValue(plist, "CFBundleIdentifier", "-string", BUNDLE_ID);
   // An agent, not an app: cerber's notifier has no window and no business in
   // the Dock or the app switcher for the second it spends posting.
-  await run("plutil", ["-replace", "LSUIElement", "-bool", "true", plist]);
+  await setPlistValue(plist, "LSUIElement", "-bool", "true");
 
   // The applet ships an asset catalogue holding the generic script icon, and a
   // catalogue wins over anything in Resources/ — so the paw only lands once the
@@ -341,7 +355,10 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
 const builds = new Map<string, Promise<string | null>>();
 
 export function ensureNotifierApp(): Promise<string | null> {
-  const home = cerberHome();
+  // Resolved, because the paths go *into* the app: CERBER_HOME may be
+  // relative, and an app LaunchServices launches on a click inherits none of
+  // the daemon's working directory to resolve it against.
+  const home = path.resolve(cerberHome());
   let building = builds.get(home);
   if (!building) {
     building = installNotifierApp(home).catch(() => null);

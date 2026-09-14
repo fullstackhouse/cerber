@@ -287,7 +287,7 @@ describe.skipIf(process.platform !== "darwin")("building that app", () => {
     }
   }, 30_000);
 
-  it("does not build it again once it is there", async () => {
+  it("does not try the build again once it has failed", async () => {
     // One build per process, so a machine that cannot build one doesn't spend a
     // timeout on it every time a PR lands.
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-notify-"));

@@ -880,7 +880,8 @@ cerber.
   cockpit's browser bell can stand down when the machine tap works and take
   over the moment it does not (§17.4).
 - **Clicking one MUST open the review it is about** (the queue, for a batch),
-  at the cockpit address reached from the machine `serve` runs on — token
+  at the cockpit address reached from the machine `serve` runs on — the port it
+  actually bound, since `--port 0` is the OS's to choose, and the token
   included, or the click lands on a 401. Only the wildcard binds are translated
   to an address (`0.0.0.0` → `127.0.0.1`, `::` → `[::1]`); a bind to `::1`,
   `localhost` or one interface already names an address that answers there, and

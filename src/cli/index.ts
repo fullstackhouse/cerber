@@ -20,7 +20,7 @@ import {
 import { pool, reviewPr } from "../runner/review.js";
 import { isReviewRunning } from "../runner/inflight.js";
 import { startDaemon } from "../server/daemon.js";
-import { cockpitUrl, startServer } from "../server/index.js";
+import { startServer } from "../server/index.js";
 
 const program = new Command();
 
@@ -533,10 +533,6 @@ program
             trust: opts.trust ? undefined : false,
             autoReview: opts.autoReview,
             notify: opts.notify,
-            // Where this machine's notifications land when clicked. Computed
-            // here rather than inside the daemon because the address is the
-            // server's, and the daemon is started first.
-            cockpitUrl: cockpitUrl({ host: opts.host, port: Number(opts.port), token }) ?? undefined,
             autoSend: opts.autoSend ? "on" : "shadow",
             autoSendThreshold: threshold,
           })
