@@ -767,7 +767,21 @@ describe("the tap on the machine when a PR lands", () => {
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 awaits your review",
       body: "feat: add sprockets — someone",
+      url: null,
     });
+  });
+
+  // What the tap is for: the PR it names is one click away, not a popup you
+  // then go and find the review for yourself.
+  it("points the tap at the review, through the cockpit it was given", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const handle = startDaemon({ ...options, cockpitUrl: "http://127.0.0.1:4820/" });
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(notified.mock.calls[0]![0].url).toBe("http://127.0.0.1:4820/#/r/acme__widgets__7");
   });
 
   it("folds one poll's arrivals into one interruption", async () => {

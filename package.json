@@ -16,6 +16,7 @@
   "files": [
     "dist",
     "web/dist",
+    "assets",
     "README.md",
     "LICENSE"
   ],

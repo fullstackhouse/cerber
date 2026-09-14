@@ -56,6 +56,12 @@ export interface DaemonOptions {
    */
   notify: boolean;
   /**
+   * Where a click on one of those notifications lands: the cockpit this `serve`
+   * is about to put up, deep-linked to the review when the notice is about one
+   * PR. Undefined leaves the tap unclickable — it still says what arrived.
+   */
+  cockpitUrl?: string;
+  /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
    * the user opted in explicitly via --auto-send.
@@ -707,7 +713,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * why it stands down when this is on and both are on one machine.
    */
   async function announce(arrivals: DiscoveredPr[]): Promise<void> {
-    const n = notice(arrivals);
+    const n = notice(arrivals, opts.cockpitUrl);
     if (!n) return;
     notifierWorks = await notify(n);
     if (notifierWorks) return;

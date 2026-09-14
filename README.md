@@ -96,9 +96,14 @@ running. It goes to whatever this machine already has (Notification Centre on
 macOS, `notify-send` on Linux) and stays quiet where there is neither. Off with
 `daemon.notify` in `~/.cerber/config.json`, or the checkbox in Settings.
 
-The cockpit has a bell of its own, and it is the better one where it can ring:
-its notification **opens that review when you click it**. But it is a page
-notification — it needs a tab that is open, alive and permitted, which is
+**Clicking it opens that review** in the cockpit. On macOS that takes a small
+app cerber builds once under `~/.cerber` — the first tap asks you to allow
+notifications from "Cerber" — because a notification can only open the app that
+posted it, and one posted the usual way belongs to Script Editor, which is
+where the click would otherwise land.
+
+The cockpit has a bell of its own, which does the same from the page. But it is
+a page notification — it needs a tab that is open, alive and permitted, which is
 exactly what you don't have on the afternoons this feature is for. So it stands
 down while the machine's own tap is on, rather than making one PR two popups,
 and the bell in the top bar says so. Untick the machine one and this browser

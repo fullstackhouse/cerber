@@ -111,7 +111,9 @@ read-only.
 - **`git`** — REQUIRED for checkouts; a checkout failure MUST degrade to a
   diff-only review, never fail the run (§10.4).
 - A POSIX-ish filesystem with atomic same-directory rename.
-- OPTIONAL: a desktop notifier (`osascript` on macOS, `notify-send` on Linux).
+- OPTIONAL: a desktop notifier. On macOS cerber builds its own (`osacompile`,
+  `plutil`, `codesign` — all base-system tools), falling back to `osascript`;
+  on Linux, `notify-send`.
 
 ### 3.3 The State Directory
 
@@ -125,6 +127,8 @@ variable is set, else `~/.cerber`:
 | `autosend.ndjson` | append-only auto-send decision log (§15.3) |
 | `src/<owner>__<repo>__<number>/` | PR checkouts, LRU cache of 8 (§10) |
 | `run/run-*/` | per-run scratch directories, swept after 24 h (§11.4) |
+| `Cerber.app` | macOS only: the notifier cerber posts through (§9.8) |
+| `notify/` | that app's source, build stamp, and the notice it has yet to post |
 
 ## 4. Core Domain Model
 
@@ -855,10 +859,10 @@ the same classification so they can never disagree about who spoke last.
 
 ### 9.8 Desktop Announcements
 
-Each new PR is announced on the machine as it lands — `osascript` on macOS,
-`notify-send` on Linux, quiet elsewhere — because the cockpit's own bell needs
-a live, permitted tab, which is exactly what is missing when the user is away
-from cerber.
+Each new PR is announced on the machine as it lands — quiet only where the
+platform offers nothing — because the cockpit's own bell needs a live,
+permitted tab, which is exactly what is missing when the user is away from
+cerber.
 
 - **The stub artifact is the ledger**: a PR is announced only on the poll that
   first writes its stub. Repeat polls announce nothing; a restart re-announces
@@ -875,6 +879,40 @@ from cerber.
   (`status.notify`), recomputed immediately after each attempt, so the
   cockpit's browser bell can stand down when the machine tap works and take
   over the moment it does not (§17.4).
+- **Clicking one MUST open the review it is about** (the queue, for a batch),
+  at the cockpit address reached from the machine `serve` runs on — token
+  included, or the click lands on a 401. A notification can only open the app
+  that posted it, so on macOS this REQUIRES cerber to post as an app of its
+  own rather than through `osascript`, whose notifications belong to Script
+  Editor and open it (§9.9).
+
+### 9.9 The macOS Notifier App
+
+Built once into `<CERBER_HOME>/Cerber.app` from an AppleScript applet, and
+rebuilt when the build stamp in `notify/` no longer matches. macOS drops a
+notification, silently and without asking the user, unless all of:
+
+1. **The bundle has a `CFBundleIdentifier`.** `osacompile` writes none. It MUST
+   be stable (`house.fullstack.cerber`) — notification permission is granted to
+   the identifier, and changing it makes every upgrade ask again as a stranger.
+2. **Its signature matches its contents.** Editing `Info.plist` invalidates the
+   ad-hoc signature `osacompile` leaves, so the bundle MUST be re-signed
+   (`codesign --force --sign -`) after the edits.
+3. **It sits where LaunchServices will register it.** A bundle under `/tmp` is
+   never resolved to an app and its permission request is never even raised;
+   `<CERBER_HOME>` is fine.
+
+The app is launched twice per notification and distinguishes the two with no
+arguments, because a click supplies none: a launch that finds a pending notice
+in `notify/pending.txt` posts it (consuming the file, recording its click
+target), and a launch that finds none is the click on the last one, which it
+answers by opening that target. A notice MUST be written by atomic rename, or
+the app can read half of one.
+
+Any failure of the above — no `osacompile`, a refused write, a timeout — MUST
+fall back to the plain `osascript` notification, which cannot be clicked
+usefully but still says what arrived. The build is attempted at most once per
+process, so a machine that cannot build one does not pay a timeout per arrival.
 
 ## 10. Checkout Management
 

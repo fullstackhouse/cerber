@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildApp } from "./index.js";
+import { buildApp, cockpitUrl } from "./index.js";
 
 beforeAll(() => {
   // Point state at an empty temp dir so tests never touch ~/.cerber.
@@ -63,5 +63,34 @@ describe("token auth", () => {
     const app = await buildApp({});
     const res = await app.request("/api/daemon");
     expect(await res.json()).toEqual({ enabled: false });
+  });
+});
+
+// Where a desktop notification lands when clicked. The daemon taps the machine
+// `serve` runs on, so the address has to be the one that answers from there.
+describe("the cockpit's own address", () => {
+  it("is loopback when the bind is every interface", () => {
+    expect(cockpitUrl({ host: "0.0.0.0", port: 4820 })).toBe("http://127.0.0.1:4820/");
+    expect(cockpitUrl({ host: "127.0.0.1", port: 4820 })).toBe("http://127.0.0.1:4820/");
+  });
+
+  it("is the interface itself when only one was bound", () => {
+    expect(cockpitUrl({ host: "10.0.0.4", port: 80 })).toBe("http://10.0.0.4:80/");
+  });
+
+  it("brackets an IPv6 host, so the port is still a port", () => {
+    expect(cockpitUrl({ host: "fd00::1", port: 4820 })).toBe("http://[fd00::1]:4820/");
+  });
+
+  // Otherwise the click lands on a 401 — the token is the same one `serve`
+  // prints on startup, and the query is where the cockpit already takes it.
+  it("carries the token, so the click gets in", () => {
+    expect(cockpitUrl({ host: "127.0.0.1", port: 4820, token: "hunter 2" })).toBe(
+      "http://127.0.0.1:4820/?token=hunter%202",
+    );
+  });
+
+  it("names nothing while the port is still the OS's to choose", () => {
+    expect(cockpitUrl({ host: "127.0.0.1", port: 0 })).toBeNull();
   });
 });

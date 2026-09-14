@@ -131,10 +131,16 @@ left unwritten. Code and tests win when they disagree.
   anyone is blocked on you. Bots are excluded, and a read that fails reports
   `unknown` rather than guessing silence at someone who did reply.
   Each new PR is also announced on this machine as it lands (`core/notify.ts` —
-  `osascript` on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's
+  `notify-send` on Linux, quiet where there is neither): the cockpit's
   own bell needs a live, permitted tab, so it is silent exactly when the user is
   furthest from cerber. The stub artifact is the ledger — a PR is announced on
-  the poll that first writes one for it, so a restart re-announces nothing
+  the poll that first writes one for it, so a restart re-announces nothing.
+  Clicking the tap opens the review, which on macOS is why cerber builds its own
+  `Cerber.app` under `~/.cerber` and posts through that: a notification can only
+  open the app that posted it, and `osascript`'s belong to Script Editor. macOS
+  drops one silently unless the bundle has a stable identifier, a signature that
+  survived the plist edits, and a home LaunchServices will register — the
+  fallback for any of that failing is the plain `osascript` tap
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and

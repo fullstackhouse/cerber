@@ -779,6 +779,28 @@ export async function buildApp(
   return app;
 }
 
+/** Hosts that mean "everything here", so the way back in is the loopback one. */
+const WILDCARD = new Set(["0.0.0.0", "::", "localhost", "127.0.0.1", "::1"]);
+
+/**
+ * The cockpit's own address, as reached from the machine `serve` runs on — what
+ * a desktop notification opens when you click it.
+ *
+ * It is the bound host only when that host is a particular interface; a
+ * wildcard bind is every interface, and the one that always answers from here
+ * is loopback. The token rides along because a click has to land on the review
+ * rather than on a 401, and it is the same token `serve` already prints to the
+ * console on startup. Null where there is no address to name yet — port 0 is
+ * whatever the OS picks, which isn't known until it has picked it.
+ */
+export function cockpitUrl(opts: Pick<ServeOptions, "host" | "port" | "token">): string | null {
+  if (!Number.isInteger(opts.port) || opts.port <= 0) return null;
+  const host = WILDCARD.has(opts.host) ? "127.0.0.1" : opts.host;
+  const authority = host.includes(":") ? `[${host}]` : host;
+  const query = opts.token ? `?token=${encodeURIComponent(opts.token)}` : "";
+  return `http://${authority}:${opts.port}/${query}`;
+}
+
 /**
  * Serve the cockpit. `reconcileRunning` is deliberately *not* called here: the
  * caller must have done it before starting the daemon, because the daemon polls
