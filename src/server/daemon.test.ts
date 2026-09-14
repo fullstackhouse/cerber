@@ -1294,6 +1294,42 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified.mock.calls[1]![0].title).toBe("widgets#7 draft ready");
   });
 
+  // A row that was settled and reopened keeps the run it had, so "no run on it"
+  // is not the same question as "nothing in flight" — and getting that wrong
+  // leaves the row at `awaiting` with a draft nobody is writing, which is the
+  // one state the tap waits on forever.
+  it("records a failure on a reopened row that still carries an old run", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const id = artifactId({ owner: "acme", repo: "widgets", number: 7 });
+    reviewed.mockRejectedValue(new Error("gh timed out"));
+    // A stub as the reopen leaves one: awaiting again, with the finished run
+    // from the review that settled it still attached.
+    await saveArtifact({
+      ...stubArtifact(DISCOVERED),
+      run: {
+        model: null,
+        startedAt: "2026-08-20T10:00:00.000Z",
+        finishedAt: "2026-08-20T10:01:00.000Z",
+        costUsd: null,
+        error: "an older failure",
+        withSource: false,
+        trusted: false,
+        sessionId: null,
+        trigger: "daemon",
+        reviewedSha: null,
+      },
+    });
+
+    await pollTimes(1);
+    const after = (await loadArtifact(id))!;
+    expect(after.status).toBe("failed");
+    expect(after.run?.error).toBe("gh timed out");
+    expect(notified).toHaveBeenCalledWith({
+      title: "widgets#7 awaits your review",
+      body: "feat: add sprockets — someone",
+    });
+  });
+
   it("does not re-announce a run that keeps failing", async () => {
     search.mockResolvedValue([DISCOVERED]);
     reviewed.mockRejectedValue(new Error("gh timed out"));

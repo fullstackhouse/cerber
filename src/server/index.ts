@@ -20,7 +20,7 @@ import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.js";
 import { z } from "zod";
 import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
-import { refreshArtifact } from "../core/refresh.js";
+import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
@@ -337,10 +337,13 @@ export async function buildApp(
       preChat: null,
       pendingChat: null,
     };
-    const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) => ({
-      ...artifact,
-      notified: current.notified,
-    }));
+    // A settle or a send that landed while `fetchPrInfo` was in flight is a
+    // decision, and claiming the row for a run would erase it — the detached
+    // run below folds its draft under whatever the row says instead
+    // (`mergeRunResult`), which is the same line every other writer holds.
+    const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
+      userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+    );
     if (!claimed) await saveArtifact(artifact);
 
     void reviewPr(ref, {
@@ -511,7 +514,12 @@ export async function buildApp(
     try {
       const diff = await fetchPrDiff(ref);
       const result = refreshArtifact(artifact, pr, diff);
-      const saved = await updateArtifactByKey(c.req.param("key"), () => result.artifact);
+      // `result` was built from a snapshot taken before the PR read and the
+      // diff fetch; the ledger is the poll's and may have been stamped since.
+      const saved = await updateArtifactByKey(c.req.param("key"), (current) => ({
+        ...result.artifact,
+        notified: current.notified,
+      }));
       return c.json({
         stale: true,
         changed: result.changed,

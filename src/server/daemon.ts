@@ -783,13 +783,18 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * the alternative, a set of ids the poll passes to its own notifier, is a
    * fact the daemon knows and nobody else can see.
    *
-   * Only a row still sitting at `awaiting` with no run on it is rewritten. A
-   * settle that landed while the run worked is a decision, and a failure is no
-   * reason to overrule it — the same line `mergeRunResult` holds.
+   * Only a row still sitting at `awaiting` with nothing in flight on it is
+   * rewritten. A settle that landed while the run worked is a decision, and a
+   * failure is no reason to overrule it — the same line `mergeRunResult` holds.
+   * The run test is "not in flight" rather than "absent" because a row that was
+   * settled and then reopened keeps the run it had (`reopenedStatus`): reading
+   * that leftover as a live run would refuse to record the new failure, and the
+   * row would sit at `awaiting` forever waiting on a draft nobody is writing —
+   * the exact silence this function exists to break.
    */
   async function recordEarlyFailure(id: string, error: string): Promise<void> {
     await updateArtifactByKey(artifactKey(id), (a) =>
-      a.status === "awaiting" && a.run === null
+      a.status === "awaiting" && (a.run === null || a.run.finishedAt !== null)
         ? {
             ...a,
             status: "failed" as const,

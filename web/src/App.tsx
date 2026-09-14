@@ -24,7 +24,7 @@ const BELL_TITLE: Record<NotifyState, string> = {
 };
 
 const DAEMON_BELL_TITLE =
-  "cerber taps this machine itself when a review is ready — no tab required. The browser's own " +
+  "cerber taps this machine itself when a PR is worth coming back for — no tab required. The browser's own " +
   "bell would be a second popup about one PR, so it stands down. Turn the machine one off in " +
   "Settings to have this browser announce them instead.";
 
