@@ -1273,6 +1273,34 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified.mock.calls[0]![0].title).toBe("widgets#7 draft ready");
   });
 
+  // The failure tap said "nobody drafted this". The retry succeeding says
+  // something else, to someone who was told the opposite a poll ago.
+  it("announces the draft after a failed run is retried and succeeds", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    // Flag rather than `mockRejectedValueOnce`: the test interval is 10ms, so
+    // the poll count a `pollTimes` waits for is a floor, not an exact number.
+    let failing = true;
+    reviewed.mockImplementation(async () => {
+      if (failing) throw new Error("gh timed out");
+      return draftReady();
+    });
+    await pollTimes(1);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(notified.mock.calls[0]![0].title).toBe("widgets#7 awaits your review");
+
+    failing = false;
+    await pollTimes(2);
+    expect(notified).toHaveBeenCalledTimes(2);
+    expect(notified.mock.calls[1]![0].title).toBe("widgets#7 draft ready");
+  });
+
+  it("does not re-announce a run that keeps failing", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    reviewed.mockRejectedValue(new Error("gh timed out"));
+    await pollTimes(3);
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
   it("taps once, not on every poll that finds the same draft", async () => {
     search.mockResolvedValue([DISCOVERED]);
     await pollTimes(3);

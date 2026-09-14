@@ -141,21 +141,36 @@ describe("what a re-review does to the previous draft", () => {
   // The run knows nothing about the desktop tap, and a draft nobody announces
   // is the whole bug the timing rule (§9.8) exists to fix.
   it("carries the tap the poll still owes this row through the run", async () => {
-    await saveArtifact({ ...ready([]), status: "awaiting", notifiedAt: null });
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
     claudeThat(async () => {});
 
     const { artifact } = await reviewPr(REF, { withSource: false });
     expect(artifact.status).toBe("ready");
-    expect(artifact.notifiedAt).toBeNull();
-    expect((await loadArtifact(ID))!.notifiedAt).toBeNull();
+    expect(artifact.notified).toBeNull();
+    expect((await loadArtifact(ID))!.notified).toBeNull();
   });
 
   it("carries it through a run that fails, too", async () => {
-    await saveArtifact({ ...ready([]), status: "awaiting", notifiedAt: null });
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
     claudeThat(async () => {}, new Error("model unavailable"));
 
     await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
-    expect((await loadArtifact(ID))!.notifiedAt).toBeNull();
+    expect((await loadArtifact(ID))!.notified).toBeNull();
+  });
+
+  // `existing` is read before the diff fetch and the checkout, which take
+  // minutes — long enough for a poll to announce the row. Writing that stale
+  // snapshot back would spend the same tap twice.
+  it("takes the ledger from disk, not from the snapshot it started with", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    const told = { at: "2026-08-21T10:05:00.000Z", drafted: false };
+    // The poll announces the row while the run is between its two writes.
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, notified: told }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.notified).toEqual(told);
   });
 
   it("leaves nothing behind when it fails", async () => {

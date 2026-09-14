@@ -187,7 +187,7 @@ absent on read and materialize with the stated value.
 | `sent` | SentInfo \| null | default `null` |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
-| `notifiedAt` | ISO-8601 string \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a string = already announced, absent = never meant to be announced |
+| `notified` | `{ at, drafted }` \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a record = already announced and *what* was said, absent = never meant to be announced |
 | `refresh` | RefreshInfo \| null | default `null` |
 | `calibration` | Calibration \| null | default `null` |
 | `chat` | ChatTurn[] | default `[]`; never sent to GitHub |
@@ -877,12 +877,24 @@ back forever. Such a rewrite applies only to a row still at `awaiting` with no
 run on it: a settle that landed while the run worked is a decision, and a
 failure does not overrule it.
 
-- **`notifiedAt` is the ledger**, in three states: `null` means the poll found
-  this PR and owes a tap; a timestamp means already told; **absent** means
-  nobody ever meant to announce it (a PR pasted into the cockpit, or a row
-  written before the field existed), so an upgrade announces nothing. Only the
+- **`notified` is the ledger**, in three states: `null` means the poll found
+  this PR and owes a tap; a record means already told; **absent** means nobody
+  ever meant to announce it (a PR pasted into the cockpit, or a row written
+  before the field existed), so an upgrade announces nothing. Only the
   discovery stub writes the `null`, and a review run MUST carry the field
-  across rather than dropping it.
+  across rather than dropping it — re-reading it from disk at each write, not
+  from the snapshot the run started minutes earlier.
+- **The ledger records *what* was said** (`drafted`), because the two things
+  cerber can say about a row are different news. A failed run is announced as
+  an arrival and is retried on the next poll — `failed` is not head-sensitive —
+  so a ledger that only remembered "told" would swallow the draft-ready tap
+  when the retry succeeded, leaving the user with the one notification that had
+  nothing behind it. Hence `pendingNews`: an unannounced row is news, and a row
+  announced *without* a draft is news again once it has one. The reverse is
+  not — a row already announced as drafted says nothing further, however its
+  next re-review ends, because a PR the user has been told about is not news
+  for getting worse. The browser bell mirrors this with a second seen-key per
+  row (§17.4).
 - The stamp is written whether or not the notifier worked, **and whether or not
   the notify toggle was even on** — otherwise a machine with no notifier
   retries every row every poll, and a toggle switched on after a quiet week
@@ -1424,7 +1436,11 @@ read from it.
 The browser bell polls the queue from every screen and notifies once per new
 key this *browser* has seen, on the same `isNews` timing the daemon uses (§9.8)
 — a row held back for its draft is deliberately **not** recorded in the
-seen-set, or its announcement would be spent on the silence. A daemon-status
+seen-set — and keeps whatever was already recorded for it, so a re-review
+passing back through `running` cannot re-announce a draft. A row is recorded
+under a draft-specific key once it has a draft, which is how the browser
+distinguishes the same two kinds of news the daemon's ledger does. A
+daemon-status
 read that *fails* answers nothing and MUST NOT be taken for "auto-review off":
 the last answer that worked stands, or one hiccup announces a row that is being
 drafted and the real draft-ready tap arrives second — the seen-set and the on/off switch live in

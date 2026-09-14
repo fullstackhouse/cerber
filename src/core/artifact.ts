@@ -343,17 +343,31 @@ export const ArtifactSchema = z.object({
    */
   settledAt: z.string().nullable().default(null),
   /**
-   * When this row was announced on this machine, and the announcement ledger
-   * itself — see `isNews` in `src/core/notify.ts` for what is worth announcing.
+   * The announcement ledger: what this machine has already told you about this
+   * row — see `pendingNews` in `src/core/notify.ts` for what is worth telling.
    *
    * Three states, not two. `null` is "the poll found this and owes you a tap";
-   * a timestamp is "already told". **Absent** is neither: nobody ever meant to
+   * a record is "already told". **Absent** is neither: nobody ever meant to
    * announce this row — a review you pulled in by hand, or one written before
    * the ledger existed — so it is never news, and an upgrade doesn't announce
    * a queue the user has been looking at for weeks. Only `stubArtifact` writes
    * the null.
+   *
+   * It records *what* was said, not just that something was, because the two
+   * things cerber can say about a row are different news: "nobody is drafting
+   * this" and "here is the draft". A run that fails is announced as the first,
+   * is retried on the next poll, and may then succeed — and a ledger that only
+   * remembered "told" would swallow the draft-ready tap, leaving the user with
+   * the one notification that had nothing to read behind it.
    */
-  notifiedAt: z.string().nullable().optional(),
+  notified: z
+    .object({
+      at: z.string(),
+      /** True when what was announced was a finished draft. */
+      drafted: z.boolean(),
+    })
+    .nullable()
+    .optional(),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),

@@ -18,7 +18,7 @@ import {
   submitReview,
 } from "../core/gh.js";
 import { withWriter } from "../core/history.js";
-import { isNews, newsOf, notice, notify } from "../core/notify.js";
+import { isNews, pendingNews, notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   appendAutoSendLog,
@@ -159,7 +159,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     settledAt: null,
     // Null, not absent: the poll found this PR, so it owes the machine a tap
     // for it — once there is something to tap you about (§9.8).
-    notifiedAt: null,
+    notified: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -704,8 +704,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * Tap this machine about every row that has become worth walking back to,
    * once each.
    *
-   * `notifiedAt` on the artifact is the ledger this rides on: the poll writes
-   * it null when it first stubs a PR ("owed a tap"), and stamps it here. So a
+   * `notified` on the artifact is the ledger this rides on: the poll writes it
+   * null when it first stubs a PR ("owed a tap"), and stamps it here. So a
    * restart re-announces nothing, a PR that arrived while `serve` was down is
    * still news the next time it runs — and, unlike announcing straight off the
    * discovery, a tap the daemon is holding back survives the wait. The cockpit's
@@ -719,17 +719,23 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * browser bell records what it stays quiet about.
    */
   async function announce(autoReview: boolean, tell: boolean): Promise<void> {
-    const owed = (await listArtifacts()).filter((a) => a.notifiedAt === null && isNews(a, autoReview));
-    const n = notice(owed.map(newsOf));
+    const owed = (await listArtifacts()).flatMap((a) => {
+      const news = pendingNews(a, autoReview);
+      return news ? [{ id: a.id, news }] : [];
+    });
+    const n = notice(owed.map((o) => o.news));
     if (!n) return;
     if (tell) notifierWorks = await notify(n);
     const at = new Date().toISOString();
     // Stamped after the tap, not before: a crash in between costs a repeated
     // notification, and the other order costs the only one there was going
-    // to be.
-    for (const a of owed) {
-      await updateArtifactByKey(artifactKey(a.id), (current) =>
-        current.notifiedAt === null ? { ...current, notifiedAt: at } : current,
+    // to be. What was said is stamped along with it, because "told you it
+    // failed" and "told you about the draft" are different news.
+    for (const { id, news } of owed) {
+      await updateArtifactByKey(artifactKey(id), (current) =>
+        // Absent means the row was replaced mid-poll by one nobody meant to
+        // announce (a hand-pulled review) — don't re-open a ledger for it.
+        current.notified === undefined ? current : { ...current, notified: { at, drafted: Boolean(news.draft) } },
       );
     }
     if (!tell || notifierWorks) return;

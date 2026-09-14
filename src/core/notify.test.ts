@@ -9,6 +9,7 @@ import {
   notice,
   notify,
   notifyCommand,
+  pendingNews,
 } from "./notify.js";
 
 // Callback-shaped on purpose: notify.ts promisifies execFile at import, so the
@@ -153,6 +154,45 @@ describe("whether a row is news yet", () => {
   it("carries no draft for a row that has none", () => {
     expect(newsOf(artifact({ status: "awaiting" })).draft).toBeNull();
     expect(newsOf(artifact({ status: "failed" })).draft).toBeNull();
+  });
+});
+
+describe("what a row still has to say, given what it has said already", () => {
+  const artifact = (over: Partial<Artifact> = {}): Artifact =>
+    ({
+      status: "failed",
+      pr: { repo: "widgets", number: 7, title: "feat: add sprockets", author: "mira", state: "OPEN" },
+      comments: [],
+      verdict: null,
+      notified: null,
+      ...over,
+    }) as Artifact;
+
+  it("says nothing about a row nobody meant to announce", () => {
+    expect(pendingNews(artifact({ notified: undefined }), true)).toBeNull();
+  });
+
+  it("owes a tap on a row it has never told you about", () => {
+    expect(pendingNews(artifact(), true)?.draft).toBeNull();
+  });
+
+  // The hole this shape of ledger exists to close: a failed run is retried on
+  // the next poll, and a ledger that only remembered "told" would swallow the
+  // draft — leaving the user with the one tap that had nothing to read.
+  it("announces the draft to someone it told five minutes ago that the run failed", () => {
+    const told = { at: "2026-08-21T10:00:00.000Z", drafted: false };
+    expect(pendingNews(artifact({ notified: told }), true)).toBeNull();
+    expect(pendingNews(artifact({ status: "ready", notified: told }), true)?.draft).toEqual({
+      recommendation: null,
+      blockers: 0,
+    });
+  });
+
+  // A PR you have been told about is not news for getting worse.
+  it("stays quiet when a row it announced as drafted breaks again", () => {
+    const told = { at: "2026-08-21T10:00:00.000Z", drafted: true };
+    expect(pendingNews(artifact({ status: "ready", notified: told }), true)).toBeNull();
+    expect(pendingNews(artifact({ status: "failed", notified: told }), true)).toBeNull();
   });
 });
 

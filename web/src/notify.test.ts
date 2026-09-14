@@ -82,14 +82,40 @@ describe("arrivals", () => {
 describe("announced", () => {
   it("remembers reviews that left the queue, so they never arrive twice", () => {
     const list = [pr(1, { status: "sent" }), pr(2, { status: "awaiting" })];
-    expect(announced(list, BY_HAND)).toEqual(["acme-web-1", "acme-web-2"]);
     expect(arrivals(list, announced(list, BY_HAND), BY_HAND)).toEqual([]);
   });
 
   // Recording one would spend its announcement on the silence.
   it("does not remember a row it is still holding back", () => {
     const list = [pr(1, { status: "awaiting" }), pr(2, { status: "sent" })];
-    expect(announced(list, DRAFTING)).toEqual(["acme-web-2"]);
+    expect(announced(list, DRAFTING)).not.toContain("acme-web-1");
+    expect(announced(list, DRAFTING)).toContain("acme-web-2");
+  });
+
+  // The daemon's ledger records *what* it said, because "nobody is drafting
+  // this" and "here is the draft" are different news. The seen-set says it
+  // with a key of its own, or the two channels tell different stories.
+  it("announces the draft to a browser it already told the run had failed", () => {
+    const failed = [pr(1, { status: "failed" })];
+    const seenOnce = announced(failed, DRAFTING, []);
+    expect(arrivals(failed, seenOnce, DRAFTING)).toEqual([]);
+
+    const running = [pr(1, { status: "running" })];
+    const kept = announced(running, DRAFTING, seenOnce);
+    const readyAgain = [pr(1, { status: "ready" })];
+    expect(arrivals(readyAgain, kept, DRAFTING).map((r) => r.key)).toEqual(["acme-web-1"]);
+  });
+
+  // The other direction is not news: a PR you were told about is not worth a
+  // second popup for a re-review that broke, or for one that drafted again.
+  it("stays quiet about a row whose draft it has already announced", () => {
+    const ready = [pr(1, { status: "ready" })];
+    const seenOnce = announced(ready, DRAFTING, []);
+    expect(arrivals(ready, seenOnce, DRAFTING)).toEqual([]);
+
+    const kept = announced([pr(1, { status: "running" })], DRAFTING, seenOnce);
+    expect(arrivals(ready, kept, DRAFTING)).toEqual([]);
+    expect(arrivals([pr(1, { status: "failed" })], kept, DRAFTING)).toEqual([]);
   });
 });
 

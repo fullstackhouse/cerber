@@ -20,6 +20,9 @@ const PREF = "cerber.notify";
 /** Same cadence as the queue's own refresh — a PR is news within ten seconds. */
 const POLL_MS = 10_000;
 
+/** A finished draft is news about what it found, not about the PR arriving. */
+const drafted = (r: ReviewListItem) => r.status === "ready";
+
 const read = (key: string): string | null => {
   try {
     return localStorage.getItem(key);
@@ -69,9 +72,21 @@ export function isNews(r: ReviewListItem, autoReview: boolean): boolean {
 }
 
 /**
- * New to this browser: a PR the queue wants you to look at whose key has never
- * been announced here, and which is news yet. Settled, sent and archived
- * reviews are not arrivals — `walkable` is the same list the ‹ › arrows walk.
+ * What the seen-set records for a row, by the news it currently carries.
+ *
+ * Two things can be announced about one PR — "nobody is drafting this" and
+ * "here is the draft" — and the daemon's ledger distinguishes them, because a
+ * run that failed is retried and may then succeed. A bare key cannot say which
+ * one was told, so a drafted row gets a key of its own; anything else records
+ * the plain one.
+ */
+const draftKey = (r: ReviewListItem) => `${r.key}:draft`;
+const newsKey = (r: ReviewListItem) => (drafted(r) ? draftKey(r) : r.key);
+
+/**
+ * New to this browser: a PR the queue wants you to look at whose *current news*
+ * has never been announced here. Settled, sent and archived reviews are not
+ * arrivals — `walkable` is the same list the ‹ › arrows walk.
  */
 export function arrivals(
   list: ReviewListItem[],
@@ -79,7 +94,7 @@ export function arrivals(
   autoReview: boolean,
 ): ReviewListItem[] {
   const known = new Set(seen);
-  return walkable(list).filter((r) => !known.has(r.key) && isNews(r, autoReview));
+  return walkable(list).filter((r) => isNews(r, autoReview) && !known.has(newsKey(r)));
 }
 
 /**
@@ -87,16 +102,34 @@ export function arrivals(
  * in the queue. A review you send or skip leaves the queue but stays on disk,
  * and forgetting it would announce it again the day it comes back.
  *
- * The exception is a row being held back (`isNews`): recording that one would
- * spend its announcement on the silence, and the draft would land unannounced.
+ * Two rows are treated specially, and both mirror the daemon's ledger:
+ *
+ *   - one being held back for its draft (`isNews`) keeps only what was already
+ *     recorded for it. Recording it afresh would spend its announcement on the
+ *     silence; dropping what it had would re-announce a draft it already
+ *     announced, every time a re-review passes back through `running`.
+ *   - one that has a draft records both keys, so what it says next — a broken
+ *     re-review, a row reopened — is not announced a second time. A PR you have
+ *     been told about is not news for getting worse.
  */
-export function announced(list: ReviewListItem[], autoReview: boolean): string[] {
-  const held = new Set(
-    walkable(list)
-      .filter((r) => !isNews(r, autoReview))
-      .map((r) => r.key),
-  );
-  return list.filter((r) => !held.has(r.key)).map((r) => r.key);
+export function announced(
+  list: ReviewListItem[],
+  autoReview: boolean,
+  before: string[] = [],
+): string[] {
+  const known = new Set(before);
+  const inQueue = new Set(walkable(list).map((r) => r.key));
+  const out: string[] = [];
+  for (const r of list) {
+    if (inQueue.has(r.key) && !isNews(r, autoReview)) {
+      for (const k of [r.key, draftKey(r)]) if (known.has(k)) out.push(k);
+      continue;
+    }
+    out.push(r.key);
+    // A settled row is done being news whatever happens to it next.
+    if (drafted(r) || !inQueue.has(r.key)) out.push(draftKey(r));
+  }
+  return out;
 }
 
 export interface Notice {
@@ -115,9 +148,6 @@ const VERDICT_WORDS = {
   comment: "comments",
   request_changes: "requests changes",
 } as const;
-
-/** A finished draft is news about what it found, not about the PR arriving. */
-const drafted = (r: ReviewListItem) => r.status === "ready";
 
 /** What that draft says, in the few words a popup gets. */
 function draftLine(r: ReviewListItem): string {
@@ -265,7 +295,7 @@ export function useArrivalNotifications(): boolean {
           const before = seen.current;
           // Recorded even when we stay quiet, so turning the bell on later
           // announces what arrives next rather than everything already here.
-          seen.current = announced(list, autoReview);
+          seen.current = announced(list, autoReview, before ?? []);
           write(SEEN, JSON.stringify(seen.current));
           if (!before) return;
           if (notifyState() !== "on") return;

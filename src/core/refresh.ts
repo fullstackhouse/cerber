@@ -92,7 +92,7 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
     settledAt: userOwnsStatus(current) ? current.settledAt : fresh.settledAt,
     sent: current.sent,
     // Disk wins: the ledger is the poll's, and the run knows nothing about it.
-    notifiedAt: current.notifiedAt,
+    notified: current.notified,
     calibration: current.calibration,
     filed: current.filed,
     chat: current.chat,

@@ -180,8 +180,8 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
   // The run knows nothing about the announcement ledger, and dropping it here
   // would mean the machine never taps you about the draft it just wrote.
   it("keeps the tap this row is still owed", () => {
-    expect(mergeRunResult(fresh, makeArtifact({ notifiedAt: null })).notifiedAt).toBeNull();
-    const told = "2026-08-21T10:00:00.000Z";
-    expect(mergeRunResult(fresh, makeArtifact({ notifiedAt: told })).notifiedAt).toBe(told);
+    expect(mergeRunResult(fresh, makeArtifact({ notified: null })).notified).toBeNull();
+    const told = { at: "2026-08-21T10:00:00.000Z", drafted: true };
+    expect(mergeRunResult(fresh, makeArtifact({ notified: told })).notified).toEqual(told);
   });
 });

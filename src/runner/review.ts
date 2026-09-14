@@ -230,8 +230,11 @@ async function performReview(
     updatedAt: now(),
     // The announcement ledger belongs to the row, not to the run: a PR the poll
     // found and has not told you about yet is still owed that tap when this
-    // draft lands (`notifiedAt` in artifact.ts).
-    notifiedAt: existing?.notifiedAt,
+    // draft lands (`notified` in artifact.ts). Seeded from the row this run
+    // starts on, and re-read from disk on the way out of both writes below —
+    // `existing` was loaded minutes ago, and a poll may have announced the row
+    // since.
+    notified: existing?.notified,
     pr,
     diff,
     summary: "",
@@ -266,7 +269,15 @@ async function performReview(
     preChat: null,
     pendingChat: null,
   };
-  await saveArtifact(artifact);
+  // Not a plain save: the fetch and checkout above take minutes, and a poll
+  // that announced this row in that window wrote a ledger entry `existing`
+  // cannot know about. Writing the stale one back would spend the tap twice.
+  const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) => ({
+    ...artifact,
+    notified: current.notified,
+  }));
+  if (claimed) artifact = claimed;
+  else await saveArtifact(artifact);
 
   const { prompt, truncated } = buildReviewPrompt(pr, diff, { source: source !== null, trusted });
   if (truncated) log("Warning: diff exceeds the context budget and was truncated.");

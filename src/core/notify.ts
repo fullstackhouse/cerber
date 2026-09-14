@@ -121,6 +121,26 @@ export function isNews(a: Artifact, autoReview: boolean): boolean {
   return a.status === "ready" || a.status === "failed";
 }
 
+/**
+ * What this row has to say that it has not said already, or null for silence.
+ *
+ * `isNews` answers "is there news at all"; this one also weighs it against the
+ * ledger, which is where the two things cerber can say about a row stop being
+ * interchangeable. A run that failed is announced as "nobody is drafting this",
+ * is retried on the next poll, and may then succeed — so the draft is news
+ * *again*, to someone who was told the opposite five minutes ago. The reverse
+ * is not: a row that had a draft and now has a broken re-review is a PR the
+ * user already knows about, and a second tap there is noise.
+ */
+export function pendingNews(a: Artifact, autoReview: boolean): Arrival | null {
+  // Absent, not null: nobody ever meant to announce this row.
+  if (a.notified === undefined) return null;
+  if (!isNews(a, autoReview)) return null;
+  const news = newsOf(a);
+  if (a.notified === null) return news;
+  return news.draft && !a.notified.drafted ? news : null;
+}
+
 /** What that row would say, for the one notice a poll sends. */
 export function newsOf(a: Artifact): Arrival {
   return {

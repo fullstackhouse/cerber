@@ -306,8 +306,9 @@ export async function buildApp(
       // Kept from the stub this replaces, when there is one: the poll found
       // that PR and owes the machine a tap for it once the draft lands. Absent
       // on a PR pasted into the cockpit — nobody asked to be told about that
-      // one, and it is on screen already.
-      notifiedAt: existing?.notifiedAt,
+      // one, and it is on screen already. Re-read from disk at the write below,
+      // since `fetchPrInfo` gave a poll time to announce the stub.
+      notified: existing?.notified,
       pr,
       diff: "",
       summary: "",
@@ -336,7 +337,11 @@ export async function buildApp(
       preChat: null,
       pendingChat: null,
     };
-    await saveArtifact(artifact);
+    const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) => ({
+      ...artifact,
+      notified: current.notified,
+    }));
+    if (!claimed) await saveArtifact(artifact);
 
     void reviewPr(ref, {
       force: true,
