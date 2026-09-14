@@ -72,6 +72,22 @@ describe("arrivals", () => {
     expect(arrivals(readies, seen, DRAFTING).map((r) => r.key)).toEqual(["acme-web-1", "acme-web-2"]);
   });
 
+  // The machine's own tap stays silent on a review pulled in by hand — the
+  // ledger records it as absent, "nobody meant to announce this". The bell has
+  // only the list to go on, so the server tells it, or the two stop agreeing.
+  it("stays quiet about a review the machine never meant to announce", () => {
+    const pasted = pr(1, { status: "ready", announceable: false });
+    expect(arrivals([pasted], [], DRAFTING)).toEqual([]);
+    expect(arrivals([pr(1, { status: "ready", announceable: true })], [], DRAFTING).map((r) => r.key)).toEqual([
+      "acme-web-1",
+    ]);
+  });
+
+  // A server that predates the field must not silence the bell entirely.
+  it("treats an unstated ledger as announceable", () => {
+    expect(arrivals([pr(1, { status: "ready" })], [], DRAFTING).map((r) => r.key)).toEqual(["acme-web-1"]);
+  });
+
   it("announces the arrival itself when nobody is going to draft it", () => {
     expect(arrivals([pr(1, { status: "awaiting" })], [], BY_HAND).map((r) => r.key)).toEqual([
       "acme-web-1",

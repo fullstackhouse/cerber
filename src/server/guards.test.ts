@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, ArtifactStatus, PrInfo, SCHEMA_VERSION } from "../core/artifact.js";
-import { submitReview } from "../core/gh.js";
-import { loadArtifact, saveArtifact } from "../core/state.js";
+import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { beginReview, endReview } from "../runner/inflight.js";
 import { buildApp } from "./index.js";
 
@@ -13,10 +13,14 @@ import { buildApp } from "./index.js";
 vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
   submitReview: vi.fn(),
+  fetchPrInfo: vi.fn(),
+  fetchPrDiff: vi.fn(),
 }));
 vi.mock("../runner/review.js", () => ({ reviewPr: vi.fn(), pool: vi.fn() }));
 
 const submit = submitReview as Mock;
+const prInfo = fetchPrInfo as Mock;
+const prDiff = fetchPrDiff as Mock;
 
 const home = mkdtempSync(path.join(os.tmpdir(), "cerber-guards-"));
 process.env.CERBER_HOME = home;
@@ -237,5 +241,43 @@ describe("PATCH /api/reviews/:key — only the statuses that are your decision",
       expect((await patchBody({ bodyOverride: value })).status).toBe(400);
     }
     expect((await loadArtifact(ID))!.bodyOverride).toBeNull();
+  });
+});
+
+// The refresh handler reads the row, then spends seconds on GitHub before
+// writing what it computed. Anything that touched the row in between owns it.
+describe("POST /api/reviews/:key/refresh — not over a row that moved underneath", () => {
+  const refresh = async () => {
+    const app = await buildApp({});
+    return app.request(`/api/reviews/${KEY}/refresh`, { method: "POST" });
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // A moved head, so the handler considers the row stale and goes on to fetch.
+    prInfo.mockResolvedValue({ ...pr(), headSha: "def" });
+    await saveArtifact(artifact("ready"));
+  });
+
+  it("declines when a run finished while it was fetching, keeping that draft", async () => {
+    prDiff.mockImplementation(async () => {
+      // A whole run: started after the snapshot above, done before the write.
+      await updateArtifactByKey(KEY, (a) => ({ ...a, summary: "a fresher draft" }));
+      return "--- a\n+++ b\n";
+    });
+
+    const res = await refresh();
+    expect(res.status).toBe(200);
+    expect((await res.json()).changed).toBe(false);
+    expect((await loadArtifact(ID))!.summary).toBe("a fresher draft");
+  });
+
+  it("still refreshes a row nothing else touched", async () => {
+    prDiff.mockResolvedValue("--- a\n+++ b\n");
+
+    const res = await refresh();
+    expect(res.status).toBe(200);
+    expect((await res.json()).stale).toBe(true);
+    expect((await loadArtifact(ID))!.pr.headSha).toBe("def");
   });
 });

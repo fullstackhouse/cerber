@@ -222,6 +222,12 @@ export async function buildApp(
         blockerCount: a.comments.filter((cm) => cm.status !== "dropped" && cm.severity === "blocker")
           .length,
         gradedCount: a.comments.filter((cm) => cm.severity != null).length,
+        // Whether the machine ever meant to announce this row (§9.8's ledger:
+        // absent means nobody did — a review pulled in by hand). The browser
+        // bell has only the list to go on, so without this it would announce
+        // rows the daemon deliberately stays silent about, and the two bells
+        // would stop telling one story.
+        announceable: a.notified !== undefined,
         costUsd: a.run?.costUsd ?? null,
         withSource: a.run?.withSource ?? null,
         trusted: a.run?.trusted ?? null,
@@ -525,11 +531,22 @@ export async function buildApp(
       // it describes. The guard above asked the same question minutes ago; a
       // settle, a send or a run that started since would be undone by writing
       // this over them, and the ledger is the poll's in either case.
-      const taken = (a: Artifact) => userOwnsStatus(a) || a.status === "running";
-      const saved = await updateArtifactByKey(c.req.param("key"), (current) =>
-        taken(current) ? current : { ...result.artifact, notified: current.notified },
-      );
-      const applied = saved !== null && !taken(saved);
+      // Taken over, in any of the three ways that matter: a decision was made,
+      // a run owns the row now, or it simply is not the row this refresh was
+      // computed from any more. The last test is what catches a run that both
+      // started *and* finished inside this handler's own fetches — it leaves
+      // `ready`, which neither of the other two tests would refuse, and writing
+      // the pre-fetch snapshot over it would drop a whole finished draft.
+      // `updatedAt` is the version: every write through the store bumps it.
+      const taken = (a: Artifact) =>
+        userOwnsStatus(a) || a.status === "running" || a.updatedAt !== artifact.updatedAt;
+      // Read inside the mutation rather than from its result: the store stamps
+      // `updatedAt` on the way out, so the saved row always looks "moved".
+      let applied = false;
+      const saved = await updateArtifactByKey(c.req.param("key"), (current) => {
+        applied = !taken(current);
+        return applied ? { ...result.artifact, notified: current.notified } : current;
+      });
       return c.json({
         stale: true,
         changed: applied && result.changed,

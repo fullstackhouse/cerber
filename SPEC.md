@@ -1246,6 +1246,14 @@ it replaces `pr` wholesale and `diff`, re-anchors every comment, and records
 cockpit says so. It MUST no-op on `sent` (a record) and `running` (the
 runner's) artifacts, reporting "not changed" rather than an error.
 
+That check is made twice, and the second time is the one that binds: the fetches
+above take seconds, so the row is re-examined *at the write*, and a refresh is
+applied only to the row it was computed from. Settled, sent, running, or simply
+moved (`updatedAt` differs from the snapshot — every write through the store
+bumps it) all mean the same thing here: somebody else owns this row now, so the
+refresh reports "not changed" rather than writing a pre-fetch snapshot over a
+run that started and finished inside its own window.
+
 ### 13.3 Re-Anchoring Algorithm
 
 Matching is exact and deterministic — no fuzzy distance, no AI. Per comment,
@@ -1501,6 +1509,10 @@ seen-set — and keeps whatever was already recorded for it, so a re-review
 passing back through `running` cannot re-announce a draft. A row is recorded
 under a draft-specific key once it has a draft, which is how the browser
 distinguishes the same two kinds of news the daemon's ledger does.
+
+A A row the ledger records as *absent* — a review pulled in by hand — MUST NOT be
+announced by the browser either; the list carries `announceable` so the bell can
+apply the same rule the machine's own tap does (§9.8).
 
 A daemon-status read that *fails* answers nothing and MUST NOT be taken for
 "auto-review off": the last answer that worked stands, or one hiccup announces

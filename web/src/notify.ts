@@ -68,6 +68,11 @@ export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: boolean): b
  * and then the arrival is the news after all.
  */
 export function isNews(r: ReviewListItem, autoReview: boolean): boolean {
+  // The daemon's ledger, as far as the list can carry it: a row nobody meant to
+  // announce (a review pulled in by hand) is not news here either, or this bell
+  // would announce what the machine's own deliberately does not. Undefined is
+  // announceable — a server too old to send the field must not go quiet.
+  if (r.announceable === false) return false;
   if (r.status === "running") return false;
   if (r.status === "awaiting") return !autoReview;
   return true;

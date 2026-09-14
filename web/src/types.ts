@@ -30,6 +30,13 @@ export interface ReviewListItem {
   blockerCount?: number;
   /** How many comments carry a grade at all; 0 means the review makes no claim. */
   gradedCount?: number;
+  /**
+   * Whether this row is one the machine ever meant to announce — false for a
+   * review pulled in by hand, which the daemon's ledger records as absent.
+   * Optional, and undefined counts as announceable: a server too old to send it
+   * must not silence the bell.
+   */
+  announceable?: boolean;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;
