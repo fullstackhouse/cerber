@@ -681,7 +681,7 @@ awaits you".
 
 A newly discovered PR gets a stub artifact: `status: "awaiting"`, the search
 result's PR fields, everything else empty. The stub is schema-valid, and its
-`notifiedAt: null` opens the announcement ledger (§9.8).
+`notified: null` opens the announcement ledger (§9.8).
 
 ### 9.3 Pure Stubs and Reaping
 

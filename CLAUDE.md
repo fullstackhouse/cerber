@@ -141,11 +141,17 @@ left unwritten. Code and tests win when they disagree.
   off, a run that failed) is announced as it lands, since that is all the news
   there will be — and a run that dies before it owns the artifact is written
   onto the row as `failed`, so "nothing is coming" is a fact both bells can
-  read rather than one the poll keeps to itself. `notifiedAt` on the artifact is the ledger, and absent ≠ null:
-  null is "owed a tap", a string is "told", absent is a row nobody meant to
-  announce — so a restart re-announces nothing and an upgrade announces no
-  backlog. It is stamped even when the toggle is off, so switching it on
-  doesn't deliver a quiet week all at once
+  read rather than one the poll keeps to itself. `notified` on the artifact is
+  the ledger, and absent ≠ null: null is "owed a tap", a record is "told, and
+  what was said", absent is a row nobody meant to announce — so a restart
+  re-announces nothing and an upgrade announces no backlog. It is stamped even
+  when the toggle is off, so switching it on doesn't deliver a quiet week all
+  at once. It records *what* was said because a failed run is retried on the
+  next poll: a row told "nobody drafted this" is news again once a draft
+  exists (`pendingNews`), while one already announced as drafted stays quiet
+  however its next re-review ends — a PR you were told about is not news for
+  getting worse. The cockpit's bell says the same with a draft-specific
+  seen-key
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and
