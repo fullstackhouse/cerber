@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-Cerber: AI code-review cockpit. Claude reviews PRs into local JSON artifacts;
+Cerber: AI code-review cockpit. Codex reviews PRs into local JSON artifacts;
 the user walks through them in a local React cockpit. **Hard rule: cerber never
 writes to GitHub except (a) an explicit, user-confirmed Send, or (b) daemon
 auto-send that the user explicitly enabled with --auto-send — approve-only,
@@ -88,13 +88,13 @@ left unwritten. Code and tests win when they disagree.
   nothing) and settings
   (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
   the cockpit's settings screen)
-- `src/runner/` — review prompt + headless `claude -p --output-format
+- `src/runner/` — review prompt + headless `Codex -p --output-format
   stream-json` runner (rides the user's login; prompt on stdin; validate output
   with zod, retry once on bad JSON; `progress.ts` turns the run's own events
   into the plain-English lines the cockpit and the logs show while it works). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
   only; `--no-source` reviews the diff alone, with every tool off and an empty cwd.
   `chat.ts` is one turn of a conversation about a finished draft: it resumes the
-  review's own session (`run.sessionId`, captured from `claude -p`), re-clones an
+  review's own session (`run.sessionId`, captured from `Codex -p`), re-clones an
   evicted checkout so resume is whole, and revises the artifact directly
 - `src/server/` — Hono API + static cockpit serving, plus the inbox loop
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
@@ -165,7 +165,7 @@ left unwritten. Code and tests win when they disagree.
 
 - TypeScript strict, ESM (NodeNext in src/, bundler in web/)
 - State files are user-editable: read defensively, write atomically (tmp+rename)
-- Zero config: ride existing `gh`/`claude` logins, degrade gracefully
+- Zero config: ride existing `gh`/`Codex` logins, degrade gracefully
 - `pnpm typecheck && pnpm test` must pass before commit
 - Conventional commits — they drive the release: every green merge to `main`
   runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
@@ -177,7 +177,7 @@ left unwritten. Code and tests win when they disagree.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
-- Don't handle API keys — `gh` and `claude` own auth
+- Don't handle API keys — `gh` and `Codex` own auth
 - A re-review replaces the whole draft, comments included — the user's own
   along with the AI's. That is a decision, not a gap to fix: half-keeping them
   (carrying on success, losing on failure) costs the code and still loses the
