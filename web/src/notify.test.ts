@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { announced, arrivals, daemonAnnouncesHere, daemonDrafts, notice } from "./notify";
+import {
+  announced,
+  arrivals,
+  daemonAnnouncesHere,
+  daemonDrafts,
+  notice,
+  restoreSeen,
+} from "./notify";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
@@ -272,5 +279,37 @@ describe("who announces an arrival when both could", () => {
       expect(daemonDrafts(null, true)).toBe(true);
       expect(daemonDrafts(null, false)).toBe(false);
     });
+  });
+});
+
+// The seen-set changed shape in this release: it used to say "this PR was
+// announced", it now says which of the two kinds of news was announced. Read
+// the old one as the new one and every drafted row in the queue looks
+// never-told-about — a popup storm on the first poll after an upgrade.
+describe("the record an upgrade inherits", () => {
+  it("reads a v1 key as covering both kinds of news", () => {
+    expect(restoreSeen(null, JSON.stringify(["acme-web-1"]))).toEqual([
+      "acme-web-1",
+      "acme-web-1:draft",
+    ]);
+  });
+
+  it("leaves a drafted row it already announced alone, rather than replaying it", () => {
+    const seen = restoreSeen(null, JSON.stringify(["acme-web-1"]))!;
+    expect(arrivals([pr(1, { status: "ready" })], seen, DRAFTING)).toEqual([]);
+  });
+
+  it("takes a v2 record at its word, with no expansion", () => {
+    expect(restoreSeen(JSON.stringify(["acme-web-1"]), JSON.stringify(["acme-web-9"]))).toEqual([
+      "acme-web-1",
+    ]);
+  });
+
+  // Null, not empty: a browser with no record must record before it announces,
+  // and an empty array would read as "seen nothing" and announce everything.
+  it("says nothing was inherited when there is no record, or a mangled one", () => {
+    expect(restoreSeen(null, null)).toBeNull();
+    expect(restoreSeen("{not json", null)).toBeNull();
+    expect(restoreSeen(JSON.stringify({ a: 1 }), null)).toBeNull();
   });
 });

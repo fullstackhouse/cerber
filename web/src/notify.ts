@@ -16,7 +16,15 @@ import { fetchDaemonStatus, fetchReviews } from "./api";
 import { walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
-const SEEN = "cerber.notify.seen";
+/**
+ * The record of what this browser has announced, v2: keyed by *news* rather
+ * than by PR (see `newsKey`). The name is versioned because v1 cannot be read
+ * as v2 — a bare key meant "this PR has been announced", whatever it was
+ * announced as, and reading those as arrival-news would replay a draft-ready
+ * popup for every row already sitting in the queue the moment cerber upgraded.
+ */
+const SEEN = "cerber.notify.seen.v2";
+const SEEN_V1 = "cerber.notify.seen";
 const PREF = "cerber.notify";
 
 /** Same cadence as the queue's own refresh — a PR is news within ten seconds. */
@@ -70,7 +78,7 @@ export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: boolean): b
 export function isNews(r: ReviewListItem, autoReview: boolean): boolean {
   // The daemon's ledger, as far as the list can carry it: a row nobody meant to
   // announce (a review pulled in by hand) is not news here either, or this bell
-  // would announce what the machine's own deliberately does not. Undefined is
+  // would announce rows the machine's own tap deliberately skips. Undefined is
   // announceable — a server too old to send the field must not go quiet.
   if (r.announceable === false) return false;
   if (r.status === "running") return false;
@@ -87,7 +95,8 @@ export function isNews(r: ReviewListItem, autoReview: boolean): boolean {
  * one was told, so a drafted row gets a key of its own; anything else records
  * the plain one.
  */
-const draftKey = (r: ReviewListItem) => `${r.key}:draft`;
+const DRAFT_SUFFIX = ":draft";
+const draftKey = (r: ReviewListItem) => `${r.key}${DRAFT_SUFFIX}`;
 const newsKey = (r: ReviewListItem) => (drafted(r) ? draftKey(r) : r.key);
 
 /**
@@ -264,6 +273,35 @@ function show(n: Notice) {
 }
 
 /**
+ * The seen-set as it stands after an upgrade, or null for a browser that has
+ * never announced anything (which must record before it announces, or it would
+ * tap you about the whole backlog).
+ *
+ * A v1 record says only "this PR was announced", never *what* it was announced
+ * as — the distinction did not exist. Read as arrival-news, every row already
+ * drafted would look never-told-about and be announced again on the first poll
+ * after the upgrade: exactly the backlog storm the daemon's ledger goes out of
+ * its way to avoid. So each v1 key is taken to cover both kinds. The cost is
+ * the opposite mistake, once: a row announced as an arrival before the upgrade
+ * and drafted after it stays quiet. A notification missed beats a backlog
+ * delivered.
+ */
+export function restoreSeen(v2: string | null, v1: string | null): string[] | null {
+  const raw = v2 ?? v1;
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Hand-mangled — start the record over rather than announcing a backlog.
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const keys = parsed.filter((k): k is string => typeof k === "string");
+  return v2 ? keys : keys.flatMap((k) => [k, `${k}${DRAFT_SUFFIX}`]);
+}
+
+/**
  * Watch the queue for arrivals from wherever in the cockpit you are. It polls
  * on its own rather than riding the queue screen's poll: that one stops the
  * moment you open a review, and a notification you only get on one screen is a
@@ -288,15 +326,7 @@ export function useArrivalNotifications(): boolean {
 
   useEffect(() => {
     let alive = true;
-    const stored = read(SEEN);
-    if (stored) {
-      try {
-        const parsed: unknown = JSON.parse(stored);
-        if (Array.isArray(parsed)) seen.current = parsed.filter((k): k is string => typeof k === "string");
-      } catch {
-        // Hand-mangled or from an older shape — start the record over.
-      }
-    }
+    seen.current = restoreSeen(read(SEEN), read(SEEN_V1));
 
     const tick = () =>
       Promise.all([fetchReviews(), fetchDaemonStatus().catch(() => null)])

@@ -1508,9 +1508,13 @@ key this *browser* has seen, on the same `isNews` timing the daemon uses (§9.8)
 seen-set — and keeps whatever was already recorded for it, so a re-review
 passing back through `running` cannot re-announce a draft. A row is recorded
 under a draft-specific key once it has a draft, which is how the browser
-distinguishes the same two kinds of news the daemon's ledger does.
+distinguishes the same two kinds of news the daemon's ledger does. That format
+is versioned in localStorage (`cerber.notify.seen.v2`): a record written before
+it cannot say *what* it announced, so on upgrade each of its keys MUST be read
+as covering both kinds — otherwise the first poll replays a draft-ready popup
+for every row already sitting in the queue.
 
-A A row the ledger records as *absent* — a review pulled in by hand — MUST NOT be
+A row the ledger records as *absent* — a review pulled in by hand — MUST NOT be
 announced by the browser either; the list carries `announceable` so the bell can
 apply the same rule the machine's own tap does (§9.8).
 
