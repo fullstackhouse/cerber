@@ -718,10 +718,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * quiet week would announce that whole week at once — the same reason the
    * browser bell records what it stays quiet about.
    */
-  async function announce(autoReview: boolean, tell: boolean, broke: Set<string>): Promise<void> {
-    const owed = (await listArtifacts()).filter(
-      (a) => a.notifiedAt === null && (isNews(a, autoReview) || broke.has(a.id)),
-    );
+  async function announce(autoReview: boolean, tell: boolean): Promise<void> {
+    const owed = (await listArtifacts()).filter((a) => a.notifiedAt === null && isNews(a, autoReview));
     const n = notice(owed.map(newsOf));
     if (!n) return;
     if (tell) notifierWorks = await notify(n);
@@ -767,21 +765,53 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     });
   }
 
+  /**
+   * Write a run's failure onto the row when the runner never got far enough to
+   * do it itself.
+   *
+   * A review that falls over before it owns the artifact — the PR read, the
+   * diff fetch — leaves the row sitting at `awaiting`, which reads as "a draft
+   * is coming" to everything downstream: the tap waits for one that will never
+   * be written, and the cockpit's own bell, which has only the row to go on,
+   * waits forever. Recording it is what keeps the two halves telling one story;
+   * the alternative, a set of ids the poll passes to its own notifier, is a
+   * fact the daemon knows and nobody else can see.
+   *
+   * Only a row still sitting at `awaiting` with no run on it is rewritten. A
+   * settle that landed while the run worked is a decision, and a failure is no
+   * reason to overrule it — the same line `mergeRunResult` holds.
+   */
+  async function recordEarlyFailure(id: string, error: string): Promise<void> {
+    await updateArtifactByKey(artifactKey(id), (a) =>
+      a.status === "awaiting" && a.run === null
+        ? {
+            ...a,
+            status: "failed" as const,
+            run: {
+              model: opts.model ?? null,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              costUsd: null,
+              error,
+              withSource: opts.withSource !== false,
+              trusted: false,
+              sessionId: null,
+              trigger: "daemon" as const,
+              reviewedSha: null,
+            },
+          }
+        : a,
+    ).catch(() => {
+      // Book-keeping: a row we could not write is one the next poll retries.
+    });
+  }
+
   async function reviewAll(
     refs: DiscoveredPr[],
-  ): Promise<{ reviewed: number; skipped: number; failed: number; failedIds: Set<string> }> {
+  ): Promise<{ reviewed: number; skipped: number; failed: number }> {
     let reviewed = 0;
     let skipped = 0;
     let failed = 0;
-    /**
-     * Rows whose draft this poll tried and couldn't write. Usually the runner
-     * has already marked them `failed` itself, and `isNews` sees that — but a
-     * run that falls over before it owns the artifact (the diff fetch, the PR
-     * read) leaves the row sitting at `awaiting`, where the tap would wait for
-     * a draft that is never coming. Naming them here is what keeps a PR GitHub
-     * is asking you for from going unannounced because cerber broke.
-     */
-    const failedIds = new Set<string>();
     await pool(refs, opts.parallel, async (ref) => {
       const label = artifactId(ref);
       try {
@@ -804,12 +834,13 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           return;
         }
         failed++;
-        failedIds.add(label);
         status.errors++;
-        log(`[${label}] failed: ${err instanceof Error ? err.message : err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        await recordEarlyFailure(label, message);
+        log(`[${label}] failed: ${message}`);
       }
     });
-    return { reviewed, skipped, failed, failedIds };
+    return { reviewed, skipped, failed };
   }
 
   /** Everything a poll writes is the poll's — including the reviews it starts,
@@ -859,10 +890,8 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
 
-      let broke = new Set<string>();
       if (autoReview) {
-        const { reviewed, skipped, failed, failedIds } = await reviewAll(refs);
-        broke = failedIds;
+        const { reviewed, skipped, failed } = await reviewAll(refs);
         status.lastSummary =
           `${refs.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
           `${failed > 0 ? `, ${failed} failed` : ""}`;
@@ -877,7 +906,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // for the draft — and for a PR nobody is drafting (auto-review off, or a
       // run that failed) it goes out here all the same. `isNews` is the rule,
       // and the cockpit's bell reads the same one.
-      await announce(autoReview, notifyOn, broke);
+      await announce(autoReview, notifyOn);
       // Recomputed on the spot rather than left to the next poll: that is
       // minutes away, and the cockpit would spend them deferring to a tap that
       // never came. Recomputed rather than only cleared, so a machine whose

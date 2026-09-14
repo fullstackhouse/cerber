@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { announced, arrivals, daemonAnnouncesHere, notice } from "./notify";
+import { announced, arrivals, daemonAnnouncesHere, daemonDrafts, notice } from "./notify";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
@@ -194,5 +194,22 @@ describe("who announces an arrival when both could", () => {
   it("keeps ringing when there is no daemon to defer to", () => {
     expect(daemonAnnouncesHere(null, "127.0.0.1")).toBe(false);
     expect(daemonAnnouncesHere({ enabled: false }, "127.0.0.1")).toBe(false);
+  });
+
+  describe("whether anything is coming for an undrafted row", () => {
+    it("reads it off the daemon when the status says", () => {
+      expect(daemonDrafts(daemon(), false)).toBe(true);
+      expect(daemonDrafts(daemon({ autoReview: false }), true)).toBe(false);
+      expect(daemonDrafts(daemon({ pollEnabled: false }), true)).toBe(false);
+      expect(daemonDrafts({ enabled: false }, true)).toBe(false);
+    });
+
+    // A read that failed answers nothing. Taken for a no, it announces a row
+    // the daemon is drafting right now — and the draft-ready tap then arrives
+    // second, two popups for one PR out of a single hiccup.
+    it("keeps the last answer when the status read fails", () => {
+      expect(daemonDrafts(null, true)).toBe(true);
+      expect(daemonDrafts(null, false)).toBe(false);
+    });
   });
 });

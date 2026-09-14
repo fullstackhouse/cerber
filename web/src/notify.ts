@@ -38,6 +38,20 @@ const write = (key: string, value: string) => {
 };
 
 /**
+ * Whether the daemon is drafting for you, which is what decides whether an
+ * undrafted row's arrival is the news or its draft will be.
+ *
+ * `null` is a status read that failed, and it answers nothing: taken for a no,
+ * it announces a row the daemon is drafting at that moment, records it as seen,
+ * and leaves the real draft-ready tap to arrive second — an early popup and a
+ * duplicate, from one hiccup. So the last answer that worked stands.
+ */
+export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: boolean): boolean {
+  if (!daemon) return lastKnown;
+  return Boolean(daemon.enabled && daemon.pollEnabled && daemon.autoReview);
+}
+
+/**
  * Whether this row is news *yet* — the browser half of the rule the daemon
  * applies in `src/core/notify.ts`, kept deliberately identical so one PR never
  * gets announced at two different moments by two different bells.
@@ -217,6 +231,13 @@ export function useArrivalNotifications(): boolean {
   // Null until the first response lands. A browser that has never seen this
   // queue must not announce the whole backlog, so the first poll only records.
   const seen = useRef<string[] | null>(null);
+  /**
+   * What the last status read that worked said about drafting. It starts at
+   * "drafting", the conservative end: holding a row back only ever delays its
+   * notice, since a held-back row is not recorded as seen either, so the first
+   * successful read announces it properly.
+   */
+  const drafting = useRef(true);
   const [daemonAnnounces, setDaemonAnnounces] = useState(false);
 
   useEffect(() => {
@@ -238,9 +259,9 @@ export function useArrivalNotifications(): boolean {
           const machineHasIt = daemonAnnouncesHere(daemon);
           setDaemonAnnounces(machineHasIt);
           // Whether anything is coming for an undrafted row, which is what says
-          // if its arrival is the news or the draft is. No daemon, or one with
-          // auto-review off, means nobody is drafting it until you say so.
-          const autoReview = Boolean(daemon?.enabled && daemon.pollEnabled && daemon.autoReview);
+          // if its arrival is the news or the draft is.
+          drafting.current = daemonDrafts(daemon, drafting.current);
+          const autoReview = drafting.current;
           const before = seen.current;
           // Recorded even when we stay quiet, so turning the bell on later
           // announces what arrives next rather than everything already here.

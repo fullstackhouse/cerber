@@ -869,9 +869,13 @@ yet", and the moment there is finally something to read would then pass in
 silence. The rule (`isNews`) is that a row is news when its draft is written
 (`ready`), when its run failed, or when it is `awaiting` and **nothing is
 coming** — auto-review off. A settled row, and a PR that is no longer open, are
-never news. The daemon additionally announces any row whose run this poll
-attempted and could not write at all, since a run that falls over before it
-owns the artifact leaves the row at `awaiting` with no draft coming.
+never news. A run that falls over *before it owns the artifact* (the PR read,
+the diff fetch) MUST be recorded on the row as `failed` by the caller, so that
+"no draft is coming" is a fact on disk rather than one the poll alone knows —
+otherwise the cockpit's bell, which has only the row to go on, holds that row
+back forever. Such a rewrite applies only to a row still at `awaiting` with no
+run on it: a settle that landed while the run worked is a decision, and a
+failure does not overrule it.
 
 - **`notifiedAt` is the ledger**, in three states: `null` means the poll found
   this PR and owes a tap; a timestamp means already told; **absent** means
@@ -1420,7 +1424,10 @@ read from it.
 The browser bell polls the queue from every screen and notifies once per new
 key this *browser* has seen, on the same `isNews` timing the daemon uses (§9.8)
 — a row held back for its draft is deliberately **not** recorded in the
-seen-set, or its announcement would be spent on the silence — the seen-set and the on/off switch live in
+seen-set, or its announcement would be spent on the silence. A daemon-status
+read that *fails* answers nothing and MUST NOT be taken for "auto-review off":
+the last answer that worked stands, or one hiccup announces a row that is being
+drafted and the real draft-ready tap arrives second — the seen-set and the on/off switch live in
 localStorage beside the permission they depend on, because the permission is
 the browser's. Normative behaviors: a fresh browser MUST NOT announce the
 whole backlog (first poll only records); keys are recorded even while quiet,

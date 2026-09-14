@@ -1279,15 +1279,39 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified).toHaveBeenCalledTimes(1);
   });
 
-  // Nothing more is coming for it, so the arrival is the only news there is.
-  it("falls back to the arrival when the run fails", async () => {
+  // Nothing more is coming for it, so the arrival is the only news there is —
+  // and the failure goes on the row, where the cockpit's own bell can see it
+  // too. An id the poll remembers privately is a fact only the daemon has.
+  it("records a run that broke before it owned the row, and announces it", async () => {
     search.mockResolvedValue([DISCOVERED]);
     reviewed.mockRejectedValue(new Error("claude fell over"));
     await pollTimes(1);
+
+    const after = (await loadArtifact("acme/widgets#7"))!;
+    expect(after.status).toBe("failed");
+    expect(after.run?.error).toBe("claude fell over");
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 awaits your review",
       body: "feat: add sprockets — someone",
     });
+  });
+
+  // A settle that lands while the run is failing is a decision, and a broken
+  // run is no reason to overrule it — or to tap about work just dismissed.
+  it("leaves a row you settled mid-run alone, however the run ended", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    reviewed.mockImplementation(async () => {
+      await updateArtifactByKey(artifactKey(artifactId({ owner: "acme", repo: "widgets", number: 7 })), (a) => ({
+        ...a,
+        status: "skipped" as const,
+        settledAt: new Date().toISOString(),
+      }));
+      throw new Error("claude fell over");
+    });
+    await pollTimes(1);
+
+    expect((await loadArtifact("acme/widgets#7"))!.status).toBe("skipped");
+    expect(notified).not.toHaveBeenCalled();
   });
 
   // The same rule the browser bell applies to its own seen-set: a week with the

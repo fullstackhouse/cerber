@@ -139,7 +139,9 @@ left unwritten. Code and tests win when they disagree.
   yet" spends the walk back for nothing and the moment there was finally
   something to read would pass in silence. A PR nobody is drafting (auto-review
   off, a run that failed) is announced as it lands, since that is all the news
-  there will be. `notifiedAt` on the artifact is the ledger, and absent ≠ null:
+  there will be — and a run that dies before it owns the artifact is written
+  onto the row as `failed`, so "nothing is coming" is a fact both bells can
+  read rather than one the poll keeps to itself. `notifiedAt` on the artifact is the ledger, and absent ≠ null:
   null is "owed a tap", a string is "told", absent is a row nobody meant to
   announce — so a restart re-announces nothing and an upgrade announces no
   backlog. It is stamped even when the toggle is off, so switching it on
