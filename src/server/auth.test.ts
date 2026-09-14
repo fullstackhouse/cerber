@@ -71,11 +71,19 @@ describe("token auth", () => {
 describe("the cockpit's own address", () => {
   it("is loopback when the bind is every interface", () => {
     expect(cockpitUrl({ host: "0.0.0.0", port: 4820 })).toBe("http://127.0.0.1:4820/");
-    expect(cockpitUrl({ host: "127.0.0.1", port: 4820 })).toBe("http://127.0.0.1:4820/");
+    expect(cockpitUrl({ host: "::", port: 4820 })).toBe("http://[::1]:4820/");
   });
 
   it("is the interface itself when only one was bound", () => {
     expect(cockpitUrl({ host: "10.0.0.4", port: 80 })).toBe("http://10.0.0.4:80/");
+  });
+
+  // A rewrite here points the click at an address nothing is listening on:
+  // `serve --host ::1` serves IPv6 loopback alone, and 127.0.0.1 is not it.
+  it("leaves an address that already answers here exactly as it is", () => {
+    expect(cockpitUrl({ host: "::1", port: 4820 })).toBe("http://[::1]:4820/");
+    expect(cockpitUrl({ host: "127.0.0.1", port: 4820 })).toBe("http://127.0.0.1:4820/");
+    expect(cockpitUrl({ host: "localhost", port: 4820 })).toBe("http://localhost:4820/");
   });
 
   it("brackets an IPv6 host, so the port is still a port", () => {

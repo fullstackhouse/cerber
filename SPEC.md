@@ -881,7 +881,10 @@ cerber.
   over the moment it does not (§17.4).
 - **Clicking one MUST open the review it is about** (the queue, for a batch),
   at the cockpit address reached from the machine `serve` runs on — token
-  included, or the click lands on a 401. A notification can only open the app
+  included, or the click lands on a 401. Only the wildcard binds are translated
+  to an address (`0.0.0.0` → `127.0.0.1`, `::` → `[::1]`); a bind to `::1`,
+  `localhost` or one interface already names an address that answers there, and
+  rewriting it points the click where nothing is listening. A notification can only open the app
   that posted it, so on macOS this REQUIRES cerber to post as an app of its
   own rather than through `osascript`, whose notifications belong to Script
   Editor and open it (§9.9).
@@ -902,12 +905,26 @@ notification, silently and without asking the user, unless all of:
    never resolved to an app and its permission request is never even raised;
    `<CERBER_HOME>` is fine.
 
+The same refusal is why the bundle MUST be assembled somewhere LaunchServices
+will *not* register it and moved into place when finished: staged beside the
+real one it is a second app carrying cerber's identifier, and a launch reaching
+it mid-build finds an applet with no script and puts up AppleScript's "Press
+Run to run this script" dialog.
+
 The app is launched twice per notification and distinguishes the two with no
 arguments, because a click supplies none: a launch that finds a pending notice
 in `notify/pending.txt` posts it (consuming the file, recording its click
-target), and a launch that finds none is the click on the last one, which it
-answers by opening that target. A notice MUST be written by atomic rename, or
-the app can read half of one.
+target in `notify/url.txt`), and a launch that finds none is the click on the
+last one, which it answers by opening that target and consuming it in turn. A
+notice MUST be written by atomic rename, or the app can read half of one.
+
+One app holds one click target, so two notifications outstanding at once cannot
+be told apart — and opening the wrong PR from the older one would be silent and
+convincing. A notice posted while an unconsumed target is still on disk
+therefore MUST drop its fragment and point at the queue instead: less specific,
+never wrong. Because the click consumes the target, the next notice after any
+click deep-links again; only an unbroken run of notifications nobody touches
+stays on the queue.
 
 Any failure of the above — no `osacompile`, a refused write, a timeout — MUST
 fall back to the plain `osascript` notification, which cannot be clicked

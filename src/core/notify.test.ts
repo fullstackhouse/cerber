@@ -9,6 +9,7 @@ import {
   appleScriptLiteral,
   appletSource,
   ensureNotifierApp,
+  clickTarget,
   notice,
   notify,
   notifyCommand,
@@ -190,6 +191,35 @@ describe("the notice the app reads back", () => {
   });
 });
 
+// A click reaches the app with no arguments, so one app holds one target and
+// two outstanding notifications cannot be told apart. Opening the wrong PR is
+// the failure to avoid; opening the queue is not.
+describe("a second notice while the first is still sitting there", () => {
+  const deep = "http://127.0.0.1:4820/#/r/acme__widgets__7";
+
+  it("deep-links when nothing else is waiting to be clicked", () => {
+    expect(clickTarget(deep, false)).toBe(deep);
+  });
+
+  it("falls back to the queue rather than opening the wrong review", () => {
+    expect(clickTarget(deep, true)).toBe("http://127.0.0.1:4820/");
+  });
+
+  it("keeps a token'd cockpit's query when it drops the deep link", () => {
+    expect(clickTarget("http://127.0.0.1:4820/?token=hunter2#/r/acme__widgets__7", true)).toBe(
+      "http://127.0.0.1:4820/?token=hunter2",
+    );
+  });
+
+  it("leaves a batch's target alone — it already points at the queue", () => {
+    expect(clickTarget("http://127.0.0.1:4820/", true)).toBe("http://127.0.0.1:4820/");
+  });
+
+  it("has nothing to fall back to when there was nowhere to click", () => {
+    expect(clickTarget(null, true)).toBeNull();
+  });
+});
+
 describe("the app cerber posts through", () => {
   it("tells a click apart from a post by whether a notice is waiting", () => {
     const src = appletSource("/home/notify");
@@ -199,6 +229,13 @@ describe("the app cerber posts through", () => {
     expect(src).toContain("rm -f");
     expect(src).toContain('"/home/notify/url.txt"');
     expect(src).toContain("on reopen");
+  });
+
+  // What makes the fallback above self-healing: the target is consumed by the
+  // click, so the next notice after one deep-links again.
+  it("consumes the click target on the way out, as it does the notice", () => {
+    const src = appletSource("/home/notify");
+    expect(src).toContain('rm -f " & quoted form of urlFile');
   });
 
   // A home folder is somebody's name, and names can hold quotes.
@@ -239,6 +276,10 @@ describe.skipIf(process.platform !== "darwin")("building that app", () => {
       // The paw, which only shows once the applet's asset catalogue is gone.
       await expect(fs.stat(path.join(contents, "Resources", "Assets.car"))).rejects.toThrow();
       await expect(fs.stat(path.join(contents, "Resources", "applet.icns"))).resolves.toBeTruthy();
+      // And nothing half-built left beside it: a second bundle here carries
+      // cerber's own identifier, and a launch reaching it mid-build puts up
+      // AppleScript's "Press Run to run this script" dialog.
+      expect((await fs.readdir(home)).filter((e) => e.endsWith(".app"))).toEqual(["Cerber.app"]);
     } finally {
       if (before === undefined) delete process.env.CERBER_HOME;
       else process.env.CERBER_HOME = before;

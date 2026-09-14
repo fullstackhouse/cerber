@@ -779,8 +779,20 @@ export async function buildApp(
   return app;
 }
 
-/** Hosts that mean "everything here", so the way back in is the loopback one. */
-const WILDCARD = new Set(["0.0.0.0", "::", "localhost", "127.0.0.1", "::1"]);
+/**
+ * The wildcard binds, and the loopback address each one answers on.
+ *
+ * Only these two are translated. A bind to `::1`, `localhost` or a particular
+ * interface is already an address that answers here, and rewriting it would
+ * point the click somewhere nothing is listening — `serve --host ::1` serves
+ * IPv6 loopback alone, where `127.0.0.1` does not connect at all. `::` maps to
+ * IPv6 loopback rather than IPv4, because a dual-stack socket is the only
+ * reason `127.0.0.1` would work on one and it is not guaranteed to be one.
+ */
+const WILDCARD = new Map([
+  ["0.0.0.0", "127.0.0.1"],
+  ["::", "::1"],
+]);
 
 /**
  * The cockpit's own address, as reached from the machine `serve` runs on — what
@@ -795,7 +807,7 @@ const WILDCARD = new Set(["0.0.0.0", "::", "localhost", "127.0.0.1", "::1"]);
  */
 export function cockpitUrl(opts: Pick<ServeOptions, "host" | "port" | "token">): string | null {
   if (!Number.isInteger(opts.port) || opts.port <= 0) return null;
-  const host = WILDCARD.has(opts.host) ? "127.0.0.1" : opts.host;
+  const host = WILDCARD.get(opts.host) ?? opts.host;
   const authority = host.includes(":") ? `[${host}]` : host;
   const query = opts.token ? `?token=${encodeURIComponent(opts.token)}` : "";
   return `http://${authority}:${opts.port}/${query}`;

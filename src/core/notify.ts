@@ -22,6 +22,7 @@
 
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -156,7 +157,7 @@ export function notifyCommand(
 export const BUNDLE_ID = "house.fullstack.cerber";
 
 /** Bumped whenever the applet or its plist changes, so an installed app is replaced. */
-const APP_BUILD = "1";
+const APP_BUILD = "2";
 
 const ICON = fileURLToPath(new URL("../../assets/cerber.icns", import.meta.url));
 
@@ -202,8 +203,17 @@ on tap()
 	if raw is "" then
 		try
 			set target to do shell script "cat " & quoted form of urlFile & " 2>/dev/null"
-			if target is not "" then do shell script "open " & quoted form of target
+		on error
+			set target to ""
 		end try
+		-- Consumed on the way out, the same way the notice was: what is left
+		-- behind is what cerber reads as "an earlier notification is still
+		-- sitting there unclicked".
+		if target is not "" then
+			do shell script "open " & quoted form of target & "; rm -f " & quoted form of urlFile
+		else
+			do shell script "rm -f " & quoted form of urlFile
+		end if
 		return
 	end if
 	-- do shell script hands back the lines separated by return, not linefeed.
@@ -216,6 +226,27 @@ on tap()
 	display notification (item 2 of parts) with title (item 1 of parts)
 end tap
 `;
+}
+
+/**
+ * Where a notice may point, given whether an earlier one is still sitting
+ * unclicked in Notification Centre.
+ *
+ * A click reaches the app with no arguments — macOS just opens whatever posted
+ * the notification — so one app can hold exactly one click target, and two
+ * outstanding notifications cannot be told apart. Pointing both at the newest
+ * review would open the wrong PR from the older notification, silently and
+ * convincingly. So the second one drops its fragment and both land on the
+ * queue, where every arrival is a row: less specific, never wrong.
+ *
+ * It heals itself. The target is consumed by the click that follows it, so the
+ * next notice after any click deep-links again; only a run of notifications
+ * nobody touches stays on the queue.
+ */
+export function clickTarget(url: string | null, outstanding: boolean): string | null {
+  if (!url || !outstanding) return url;
+  const fragment = url.indexOf("#");
+  return fragment < 0 ? url : url.slice(0, fragment);
 }
 
 /**
@@ -252,11 +283,18 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
   const source = path.join(dir, "applet.applescript");
   await fs.writeFile(source, appletSource(dir));
 
-  // Staged under a name that still ends in .app: osacompile picks what it
-  // writes from the extension, and anything else gets a bare script file with
-  // no bundle around it — no Info.plist, nothing to sign, nothing to post.
-  const staged = path.join(path.dirname(app), "Cerber.building.app");
-  await fs.rm(staged, { recursive: true, force: true });
+  // Staged in the one place LaunchServices refuses to register — the same
+  // refusal that makes a bundle under /tmp undeliverable also makes it
+  // unlaunchable, which is what a half-built app must be. Staged beside the
+  // real one it is a second app with cerber's own bundle identifier, and a
+  // launch that reaches it mid-build finds an applet with no script yet and
+  // puts up AppleScript's "Press Run to run this script" dialog.
+  //
+  // The name still ends in .app because osacompile picks what it writes from
+  // the extension, and anything else gets a bare script file with no bundle
+  // around it — no Info.plist, nothing to sign, nothing to post.
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "cerber-notifier-"));
+  const staged = path.join(stagingDir, "Cerber.app");
   await run("osacompile", ["-o", staged, source]);
 
   const plist = path.join(staged, "Contents", "Info.plist");
@@ -280,7 +318,14 @@ async function buildNotifierApp(app: string, dir: string): Promise<void> {
   // Not atomic, because a directory swap can't be: the window between these two
   // is a few milliseconds in which a notification would fall back to osascript.
   await fs.rm(app, { recursive: true, force: true });
-  await fs.rename(staged, app);
+  try {
+    await fs.rename(staged, app);
+  } catch {
+    // A CERBER_HOME on another volume: rename can't cross one, and a copy
+    // carries the signature with it — it lives in the bundle's own files.
+    await fs.cp(staged, app, { recursive: true });
+  }
+  await fs.rm(stagingDir, { recursive: true, force: true });
   await run(LSREGISTER, ["-f", app]).catch(() => {
     // Best effort: `open` registers the bundle too, just later than we'd like.
   });
@@ -334,10 +379,16 @@ async function postThroughApp(n: Notice): Promise<boolean> {
   const file = path.join(dir, "pending.txt");
   const tmp = path.join(dir, `pending.${process.pid}.tmp`);
   try {
+    // A target the app hasn't consumed means the notification it belongs to is
+    // still there to be clicked, and two of them cannot be told apart.
+    const outstanding = await fs
+      .stat(path.join(dir, "url.txt"))
+      .then(() => true)
+      .catch(() => false);
     // tmp+rename, so the app can never read half a notice: it reads the file
     // the instant `open` wakes it, and a partial one would post a PR title cut
     // in two or a URL that leads nowhere.
-    await fs.writeFile(tmp, pendingPayload(n));
+    await fs.writeFile(tmp, pendingPayload({ ...n, url: clickTarget(n.url, outstanding) }));
     await fs.rename(tmp, file);
     // -g, so a PR landing doesn't pull focus out of whatever you're doing.
     await run("open", ["-g", app]);
