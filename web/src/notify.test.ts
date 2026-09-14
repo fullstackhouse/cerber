@@ -117,6 +117,16 @@ describe("announced", () => {
     expect(arrivals(ready, kept, DRAFTING)).toEqual([]);
     expect(arrivals([pr(1, { status: "failed" })], kept, DRAFTING)).toEqual([]);
   });
+
+  // ready → failed → ready: the failure must not cost the row the record that
+  // its draft was announced, or the re-draft reads as news nobody was told.
+  it("keeps the draft it announced through a re-review that breaks first", () => {
+    let seen = announced([pr(1, { status: "ready" })], DRAFTING, []);
+    seen = announced([pr(1, { status: "running" })], DRAFTING, seen);
+    seen = announced([pr(1, { status: "failed" })], DRAFTING, seen);
+    seen = announced([pr(1, { status: "running" })], DRAFTING, seen);
+    expect(arrivals([pr(1, { status: "ready" })], seen, DRAFTING)).toEqual([]);
+  });
 });
 
 describe("notice", () => {
@@ -174,6 +184,15 @@ describe("notice", () => {
   it("tags the same news identically, so two open tabs show one popup", () => {
     expect(notice([pr(1), pr(2)])!.tag).toBe(notice([pr(2), pr(1)])!.tag);
     expect(notice([pr(1)])!.tag).not.toBe(notice([pr(2)])!.tag);
+  });
+
+  // A shared tag replaces the popup already on screen instead of raising a new
+  // one (`renotify` defaults false) — so the draft-ready news about a PR whose
+  // failure is still showing would arrive silently.
+  it("tags the draft differently from the arrival it may be replacing", () => {
+    expect(notice([pr(1, { status: "ready" })])!.tag).not.toBe(
+      notice([pr(1, { status: "failed" })])!.tag,
+    );
   });
 });
 

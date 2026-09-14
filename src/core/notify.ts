@@ -7,10 +7,13 @@
 // all afternoon. This half rides the poll instead, so the tap survives a closed
 // cockpit, a denied permission and a browser restart.
 //
-// It taps you once per PR, at the moment that PR is worth walking back to. With
-// auto-review on — the default — that is when the draft is written, not when
-// the PR lands: a tap that leads to "no run yet, press r" is a tap that costs
-// you the walk back and gives you nothing. `isNews` is the whole of that rule.
+// It taps you once per piece of news, at the moment that news is worth walking
+// back for. With auto-review on — the default — that is when the draft is
+// written, not when the PR lands: a tap that leads to "no run yet, press r" is
+// a tap that costs you the walk back and gives you nothing. `isNews` decides
+// whether there is news at all, `pendingNews` whether it is news you have
+// already been told. A PR has at most two: "nobody is drafting this", and
+// "here is the draft" — and it only gets the second if it got the first.
 //
 // Everything here shells out to whatever the OS already has. No dependency, no
 // daemon of its own, and a machine with no notifier is a machine cerber stays

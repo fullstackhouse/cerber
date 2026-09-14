@@ -17,9 +17,9 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const NOTIFY_LABEL: Record<NotifyState, string> = {
   unsupported: "this browser has no notifications to give",
   blocked: "this browser has blocked notifications for cerber",
-  off: "tell me when a PR lands in the queue",
-  ask: "tell me when a PR lands in the queue (the browser will ask first)",
-  on: "tell me when a PR lands in the queue",
+  off: "tell me when a review is ready for me",
+  ask: "tell me when a review is ready for me (the browser will ask first)",
+  on: "tell me when a review is ready for me",
 };
 
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
@@ -84,8 +84,10 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         auto-review on that moment is the draft landing, not the PR arriving — a tap that leads to
         "no run yet" costs you the walk back and gives you nothing — and the notification names
         what the review found. A PR nobody is drafting (auto-review off, or a run that failed) is
-        announced as it lands, since that is all the news there will be. Several at once fold into
-        one notification, and a PR that has already been announced never arrives twice.
+        announced as it lands, since that is all the news there will be — and if a retry then
+        drafts it after all, that is new news and you are told. Several at once fold into one
+        notification, and a PR whose draft has been announced never arrives twice, however its
+        next re-review ends.
       </p>
       <label className="inbox-toggle">
         <input

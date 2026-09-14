@@ -5,9 +5,11 @@
 // the permission belongs to this browser, so the switch and the record of what
 // has already been announced live in localStorage rather than in config.json.
 //
-// One popup per PR, at the moment it is worth coming back for: with auto-review
-// on that is the draft landing, not the PR arriving — see `isNews`, which is
-// the same rule the daemon's own tap applies in `src/core/notify.ts`.
+// One popup per piece of news, at the moment it is worth coming back for: with
+// auto-review on that is the draft landing, not the PR arriving — see
+// `isNews`, the same rule the daemon's own tap applies in
+// `src/core/notify.ts`. A PR has at most two such moments, and only ever gets
+// the second when the first was "nobody is drafting this".
 
 import { useEffect, useRef, useState } from "react";
 import { fetchDaemonStatus, fetchReviews } from "./api";
@@ -126,8 +128,12 @@ export function announced(
       continue;
     }
     out.push(r.key);
-    // A settled row is done being news whatever happens to it next.
-    if (drafted(r) || !inQueue.has(r.key)) out.push(draftKey(r));
+    // Kept once earned: a row whose draft was announced stays quiet through a
+    // re-review that breaks and one that then succeeds. Without the last
+    // clause, `failed` would drop the draft key and the next success would
+    // read as a draft nobody had been told about. A settled row is done being
+    // news whatever happens to it next.
+    if (drafted(r) || !inQueue.has(r.key) || known.has(draftKey(r))) out.push(draftKey(r));
   }
   return out;
 }
@@ -160,7 +166,12 @@ function draftLine(r: ReviewListItem): string {
 /** One popup for one poll's news — a batch is one interruption, not five. */
 export function notice(arrived: ReviewListItem[]): Notice | null {
   if (arrived.length === 0) return null;
-  const tag = `cerber:${arrived.map((r) => r.key).sort().join("|")}`;
+  // Keyed by the *news*, not the PR: a draft-ready popup arriving while the
+  // "run failed" one is still on screen must be a new alert, and a tag it
+  // shares would quietly replace that one instead (`renotify` defaults false).
+  // Two tabs seeing the same news still tag it identically, which is the job
+  // the tag was added for.
+  const tag = `cerber:${arrived.map(newsKey).sort().join("|")}`;
   if (arrived.length === 1) {
     const r = arrived[0]!;
     return {

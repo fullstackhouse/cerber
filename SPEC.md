@@ -857,10 +857,11 @@ the same classification so they can never disagree about who spoke last.
 
 ### 9.8 Desktop Announcements
 
-Each PR is announced once on the machine — `osascript` on macOS, `notify-send`
-on Linux, quiet elsewhere — because the cockpit's own bell needs a live,
-permitted tab, which is exactly what is missing when the user is away from
-cerber.
+Each *piece of news* about a PR is announced once on the machine — `osascript`
+on macOS, `notify-send` on Linux, quiet elsewhere — because the cockpit's own
+bell needs a live, permitted tab, which is exactly what is missing when the user
+is away from cerber. A PR has at most two: "nobody is drafting this" and "here
+is the draft", the second reachable only from the first (the ledger rule below).
 
 **When.** At the moment the row is worth coming back for, which is not the
 moment it arrives. A row cerber is about to draft, or is drafting, MUST be held

@@ -130,7 +130,8 @@ left unwritten. Code and tests win when they disagree.
   an open request only means you never pressed GitHub's review button, not that
   anyone is blocked on you. Bots are excluded, and a read that fails reports
   `unknown` rather than guessing silence at someone who did reply.
-  Each PR is also announced once on this machine (`core/notify.ts` — `osascript`
+  Each piece of news about a PR is also announced once on this machine — at most
+  two, "nobody is drafting this" and "here is the draft" (`core/notify.ts` — `osascript`
   on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's own bell
   needs a live, permitted tab, so it is silent exactly when the user is furthest
   from cerber. The tap goes out when the row is worth coming back for
