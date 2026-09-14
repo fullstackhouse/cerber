@@ -808,6 +808,40 @@ export async function buildApp(
 }
 
 /**
+ * The wildcard binds, and the loopback address each one answers on.
+ *
+ * Only these two are translated. A bind to `::1`, `localhost` or a particular
+ * interface is already an address that answers here, and rewriting it would
+ * point the click somewhere nothing is listening — `serve --host ::1` serves
+ * IPv6 loopback alone, where `127.0.0.1` does not connect at all. `::` maps to
+ * IPv6 loopback rather than IPv4, because a dual-stack socket is the only
+ * reason `127.0.0.1` would work on one and it is not guaranteed to be one.
+ */
+const WILDCARD = new Map([
+  ["0.0.0.0", "127.0.0.1"],
+  ["::", "::1"],
+]);
+
+/**
+ * The cockpit's own address, as reached from the machine `serve` runs on — what
+ * a desktop notification opens when you click it.
+ *
+ * It is the bound host only when that host is a particular interface; a
+ * wildcard bind is every interface, and the one that always answers from here
+ * is loopback. The token rides along because a click has to land on the review
+ * rather than on a 401, and it is the same token `serve` already prints to the
+ * console on startup. Null where there is no address to name yet — port 0 is
+ * whatever the OS picks, which isn't known until it has picked it.
+ */
+export function cockpitUrl(opts: Pick<ServeOptions, "host" | "port" | "token">): string | null {
+  if (!Number.isInteger(opts.port) || opts.port <= 0) return null;
+  const host = WILDCARD.get(opts.host) ?? opts.host;
+  const authority = host.includes(":") ? `[${host}]` : host;
+  const query = opts.token ? `?token=${encodeURIComponent(opts.token)}` : "";
+  return `http://${authority}:${opts.port}/${query}`;
+}
+
+/**
  * Serve the cockpit. `reconcileRunning` is deliberately *not* called here: the
  * caller must have done it before starting the daemon, because the daemon polls
  * as soon as it is constructed. Doing it here as well would have marked that
@@ -818,6 +852,9 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
     const tokenHint = opts.token ? `/?token=${opts.token}` : "";
     console.log(`cerber cockpit: http://${opts.host}:${info.port}${tokenHint}`);
+    // The bound port, not the asked-for one: `--port 0` is the OS's to choose,
+    // and this callback is the first moment anyone knows what it chose.
+    opts.daemon?.cockpitAt(cockpitUrl({ ...opts, port: info.port }));
     if (opts.daemon) {
       const s = opts.daemon.status();
       console.log(

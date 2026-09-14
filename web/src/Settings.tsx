@@ -102,8 +102,10 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         This is the one that works while you're somewhere else: it rides the poll, so it needs
         nothing open but <code>serve</code> itself. It hands the notification to
         whatever this machine already has — Notification Centre on macOS,{" "}
-        <code>notify-send</code> on Linux — and stays quiet where there is neither. It cannot open
-        a review on click; the browser's can.
+        <code>notify-send</code> on Linux — and stays quiet where there is neither. On macOS it{" "}
+        <strong>opens that review when you click it</strong>, through a small app cerber builds
+        for the job (the first one asks you to allow notifications from "Cerber"); a{" "}
+        <code>notify-send</code> tap announces the PR but has no click to give.
       </p>
       <label className="inbox-toggle">
         <input
@@ -121,8 +123,8 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           <>
             Standing down while the machine's own notification is on — two popups for one PR is
             one too many. Untick the machine one above and this browser takes over: it names the
-            PR and <strong>opens that review when you click it</strong>, but only while a cockpit
-            tab is open and this browser has granted the permission.
+            PR and opens that review on click just the same, but only while a cockpit tab is open
+            and this browser has granted the permission.
           </>
         ) : (
           <>

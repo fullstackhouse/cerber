@@ -777,7 +777,38 @@ describe("the tap on the machine when a PR lands", () => {
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 awaits your review",
       body: "feat: add sprockets — someone",
+      url: null,
     });
+  });
+
+  // `--port 0` asks the OS to choose, and the daemon is started before the
+  // server binds — so the address arrives after the first poll, not with the
+  // options, and a tap raised later still has to carry it.
+  it("takes the cockpit's address from serve once the port is bound", async () => {
+    search.mockResolvedValue([]);
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+      handle.cockpitAt("http://127.0.0.1:41234/");
+      search.mockResolvedValue([DISCOVERED]);
+      await vi.waitFor(() => expect(notified).toHaveBeenCalled());
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(notified.mock.calls[0]![0].url).toBe("http://127.0.0.1:41234/#/r/acme__widgets__7");
+  });
+
+  // What the tap is for: the PR it names is one click away, not a popup you
+  // then go and find the review for yourself.
+  it("points the tap at the review, through the cockpit it was given", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const handle = startDaemon({ ...options, cockpitUrl: "http://127.0.0.1:4820/" });
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(notified.mock.calls[0]![0].url).toBe("http://127.0.0.1:4820/#/r/acme__widgets__7");
   });
 
   it("folds one poll's arrivals into one interruption", async () => {
@@ -1249,6 +1280,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 draft ready",
       body: "requests changes · 1 blocker — feat: add sprockets",
+      url: null,
     });
   });
 
@@ -1327,6 +1359,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 awaits your review",
       body: "feat: add sprockets — someone",
+      url: null,
     });
   });
 
@@ -1357,6 +1390,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified).toHaveBeenCalledWith({
       title: "widgets#7 awaits your review",
       body: "feat: add sprockets — someone",
+      url: null,
     });
   });
 

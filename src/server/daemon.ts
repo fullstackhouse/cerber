@@ -56,6 +56,14 @@ export interface DaemonOptions {
    */
   notify: boolean;
   /**
+   * Where a click on one of those notifications lands: the cockpit this `serve`
+   * is about to put up, deep-linked to the review when the notice is about one
+   * PR. Usually left unset and supplied by `cockpitAt` once the server has
+   * bound its port; until one or the other arrives the tap is unclickable, and
+   * still says what arrived.
+   */
+  cockpitUrl?: string;
+  /**
    * "shadow" (default): log what WOULD be auto-sent, send nothing.
    * "on": actually auto-send APPROVE verdicts at/above the threshold —
    * the user opted in explicitly via --auto-send.
@@ -115,6 +123,13 @@ export interface DaemonStatus {
 export interface DaemonHandle {
   status: () => DaemonStatus;
   stop: () => void;
+  /**
+   * Where a notification's click should land, told to the daemon once the
+   * server is actually listening. It cannot be known any earlier: `--port 0`
+   * asks the OS to choose, and the daemon is started before the server so that
+   * its first poll is already running while the port is being bound.
+   */
+  cockpitAt: (url: string | null) => void;
 }
 
 /**
@@ -687,6 +702,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   /** Said once, not every poll: a machine with no notifier will never grow one. */
   let notifierMissing = false;
 
+  /** Null until `serve` is listening and says so — see `cockpitAt`. */
+  let cockpitUrl: string | null = opts.cockpitUrl ?? null;
+
   /**
    * What the last attempt to tap this machine actually did, or null before one
    * has been made.
@@ -723,7 +741,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const news = pendingNews(a, autoReview);
       return news ? [{ id: a.id, news }] : [];
     });
-    const n = notice(owed.map((o) => o.news));
+    // `cockpitUrl` is where a click lands, and it is read here rather than
+    // captured: `serve` hands it over once its port is bound, which can be
+    // after the first poll has already started.
+    const n = notice(owed.map((o) => o.news), cockpitUrl);
     if (!n) return;
     if (tell) notifierWorks = await notify(n);
     const at = new Date().toISOString();
@@ -988,6 +1009,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
 
   return {
     status: () => ({ ...status }),
+    cockpitAt: (url) => {
+      cockpitUrl = url;
+    },
     stop: () => {
       stopped = true;
       if (timer) clearTimeout(timer);

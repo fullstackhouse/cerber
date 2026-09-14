@@ -111,7 +111,9 @@ read-only.
 - **`git`** — REQUIRED for checkouts; a checkout failure MUST degrade to a
   diff-only review, never fail the run (§10.4).
 - A POSIX-ish filesystem with atomic same-directory rename.
-- OPTIONAL: a desktop notifier (`osascript` on macOS, `notify-send` on Linux).
+- OPTIONAL: a desktop notifier. On macOS cerber builds its own (`osacompile`,
+  `plutil`, `codesign` — all base-system tools), falling back to `osascript`;
+  on Linux, `notify-send`.
 
 ### 3.3 The State Directory
 
@@ -125,6 +127,8 @@ variable is set, else `~/.cerber`:
 | `autosend.ndjson` | append-only auto-send decision log (§15.3) |
 | `src/<owner>__<repo>__<number>/` | PR checkouts, LRU cache of 8 (§10) |
 | `run/run-*/` | per-run scratch directories, swept after 24 h (§11.4) |
+| `Cerber.app` | macOS only: the notifier cerber posts through (§9.8) |
+| `notify/` | that app's source, build stamp, and the notice it has yet to post |
 
 ## 4. Core Domain Model
 
@@ -857,11 +861,11 @@ the same classification so they can never disagree about who spoke last.
 
 ### 9.8 Desktop Announcements
 
-Each *piece of news* about a PR is announced once on the machine — `osascript`
-on macOS, `notify-send` on Linux, quiet elsewhere — because the cockpit's own
-bell needs a live, permitted tab, which is exactly what is missing when the user
-is away from cerber. A PR has at most two: "nobody is drafting this" and "here
-is the draft", the second reachable only from the first (the ledger rule below).
+Each *piece of news* about a PR is announced once on the machine — quiet only
+where the platform offers nothing — because the cockpit's own bell needs a live,
+permitted tab, which is exactly what is missing when the user is away from
+cerber. A PR has at most two: "nobody is drafting this" and "here is the draft",
+the second reachable only from the first (the ledger rule below).
 
 **When.** At the moment the row is worth coming back for, which is not the
 moment it arrives. A row cerber is about to draft, or is drafting, MUST be held
@@ -915,6 +919,62 @@ failure does not overrule it.
   (`status.notify`), recomputed immediately after each attempt, so the
   cockpit's browser bell can stand down when the machine tap works and take
   over the moment it does not (§17.4).
+- **Where the platform's notifier can carry a click, clicking one MUST open the
+  review it is about** (the queue, for a batch), at the cockpit address reached
+  from the machine `serve` runs on — the port it actually bound, since
+  `--port 0` is the OS's to choose, and the token included, or the click lands
+  on a 401. macOS is that platform today (§9.9); `notify-send` is invoked with
+  a summary and a body and no action, so a Linux tap announces the PR and
+  nothing more. Every statement of the behavior to a user MUST say which of the
+  two they have. Only the wildcard binds are translated
+  to an address (`0.0.0.0` → `127.0.0.1`, `::` → `[::1]`); a bind to `::1`,
+  `localhost` or one interface already names an address that answers there, and
+  rewriting it points the click where nothing is listening. A notification can only open the app
+  that posted it, so on macOS this REQUIRES cerber to post as an app of its
+  own rather than through `osascript`, whose notifications belong to Script
+  Editor and open it (§9.9).
+
+### 9.9 The macOS Notifier App
+
+Built once into `<CERBER_HOME>/Cerber.app` from an AppleScript applet, and
+rebuilt when the build stamp in `notify/` no longer matches. macOS drops a
+notification, silently and without asking the user, unless all of:
+
+1. **The bundle has a `CFBundleIdentifier`.** `osacompile` writes none. It MUST
+   be stable (`house.fullstack.cerber`) — notification permission is granted to
+   the identifier, and changing it makes every upgrade ask again as a stranger.
+2. **Its signature matches its contents.** Editing `Info.plist` invalidates the
+   ad-hoc signature `osacompile` leaves, so the bundle MUST be re-signed
+   (`codesign --force --sign -`) after the edits.
+3. **It sits where LaunchServices will register it.** A bundle under `/tmp` is
+   never resolved to an app and its permission request is never even raised;
+   `<CERBER_HOME>` is fine.
+
+The same refusal is why the bundle MUST be assembled somewhere LaunchServices
+will *not* register it and moved into place when finished: staged beside the
+real one it is a second app carrying cerber's identifier, and a launch reaching
+it mid-build finds an applet with no script and puts up AppleScript's "Press
+Run to run this script" dialog.
+
+The app is launched twice per notification and distinguishes the two with no
+arguments, because a click supplies none: a launch that finds a pending notice
+in `notify/pending.txt` posts it (consuming the file, recording its click
+target in `notify/url.txt`), and a launch that finds none is the click on the
+last one, which it answers by opening that target and consuming it in turn. A
+notice MUST be written by atomic rename, or the app can read half of one.
+
+One app holds one click target, so two notifications outstanding at once cannot
+be told apart — and opening the wrong PR from the older one would be silent and
+convincing. A notice posted while an unconsumed target is still on disk
+therefore MUST drop its fragment and point at the queue instead: less specific,
+never wrong. Because the click consumes the target, the next notice after any
+click deep-links again; only an unbroken run of notifications nobody touches
+stays on the queue.
+
+Any failure of the above — no `osacompile`, a refused write, a timeout — MUST
+fall back to the plain `osascript` notification, which cannot be clicked
+usefully but still says what arrived. The build is attempted at most once per
+process, so a machine that cannot build one does not pay a timeout per arrival.
 
 ## 10. Checkout Management
 

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The app icon for the notifier bundle cerber builds under ~/.cerber, and
+       the source the committed assets/cerber.icns is rendered from (see the
+       note in src/core/notify.ts). Same paw as web/public/favicon.svg — an app
+       icon is a squircle on the shelf, so the mark is set on the brand tile
+       rather than floated on nothing, which at notification size reads as a
+       missing icon. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5f6ef2" />
+      <stop offset="1" stop-color="#2f3bbd" />
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)" />
+  <g fill="#fff" transform="translate(200 188) scale(26)">
+    <circle cx="6.1" cy="8.9" r="2.5" />
+    <circle cx="12" cy="6.7" r="2.7" />
+    <circle cx="17.9" cy="8.9" r="2.5" />
+    <ellipse cx="12" cy="16.6" rx="5.4" ry="4.3" />
+  </g>
+</svg>
