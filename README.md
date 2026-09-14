@@ -96,11 +96,12 @@ running. It goes to whatever this machine already has (Notification Centre on
 macOS, `notify-send` on Linux) and stays quiet where there is neither. Off with
 `daemon.notify` in `~/.cerber/config.json`, or the checkbox in Settings.
 
-**Clicking it opens that review** in the cockpit. On macOS that takes a small
-app cerber builds once under `~/.cerber` — the first tap asks you to allow
+**On macOS, clicking it opens that review** in the cockpit. It takes a small app
+cerber builds once under `~/.cerber` — the first tap asks you to allow
 notifications from "Cerber" — because a notification can only open the app that
 posted it, and one posted the usual way belongs to Script Editor, which is
-where the click would otherwise land.
+where the click would otherwise land. A `notify-send` tap on Linux announces
+the PR but has no click to give.
 
 The cockpit has a bell of its own, which does the same from the page. But it is
 a page notification — it needs a tab that is open, alive and permitted, which is

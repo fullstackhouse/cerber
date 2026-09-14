@@ -879,10 +879,14 @@ cerber.
   (`status.notify`), recomputed immediately after each attempt, so the
   cockpit's browser bell can stand down when the machine tap works and take
   over the moment it does not (§17.4).
-- **Clicking one MUST open the review it is about** (the queue, for a batch),
-  at the cockpit address reached from the machine `serve` runs on — the port it
-  actually bound, since `--port 0` is the OS's to choose, and the token
-  included, or the click lands on a 401. Only the wildcard binds are translated
+- **Where the platform's notifier can carry a click, clicking one MUST open the
+  review it is about** (the queue, for a batch), at the cockpit address reached
+  from the machine `serve` runs on — the port it actually bound, since
+  `--port 0` is the OS's to choose, and the token included, or the click lands
+  on a 401. macOS is that platform today (§9.9); `notify-send` is invoked with
+  a summary and a body and no action, so a Linux tap announces the PR and
+  nothing more. Every statement of the behavior to a user MUST say which of the
+  two they have. Only the wildcard binds are translated
   to an address (`0.0.0.0` → `127.0.0.1`, `::` → `[::1]`); a bind to `::1`,
   `localhost` or one interface already names an address that answers there, and
   rewriting it points the click where nothing is listening. A notification can only open the app
