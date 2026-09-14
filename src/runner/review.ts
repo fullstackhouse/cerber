@@ -228,6 +228,10 @@ async function performReview(
     status: "running",
     createdAt: existing?.createdAt ?? now(),
     updatedAt: now(),
+    // The announcement ledger belongs to the row, not to the run: a PR the poll
+    // found and has not told you about yet is still owed that tap when this
+    // draft lands (`notifiedAt` in artifact.ts).
+    notifiedAt: existing?.notifiedAt,
     pr,
     diff,
     summary: "",

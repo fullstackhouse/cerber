@@ -303,6 +303,11 @@ export async function buildApp(
       status: "running",
       createdAt: now,
       updatedAt: now,
+      // Kept from the stub this replaces, when there is one: the poll found
+      // that PR and owes the machine a tap for it once the draft lands. Absent
+      // on a PR pasted into the cockpit — nobody asked to be told about that
+      // one, and it is on screen already.
+      notifiedAt: existing?.notifiedAt,
       pr,
       diff: "",
       summary: "",

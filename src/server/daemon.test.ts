@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import { ArtifactSchema } from "../core/artifact.js";
+import { Artifact, ArtifactSchema, artifactId, artifactKey } from "../core/artifact.js";
 import { loadConfig } from "../core/config.js";
 import {
   currentLogin,
@@ -15,7 +15,9 @@ import {
   searchAwaitingMe,
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
-import { loadArtifact, saveArtifact } from "../core/state.js";
+import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
+import { ReviewInProgressError } from "../runner/inflight.js";
+import { reviewPr } from "../runner/review.js";
 import {
   DaemonHandle,
   askedAgainAfterSettling,
@@ -51,6 +53,13 @@ vi.mock("../core/notify.js", async (orig) => ({
   ...(await orig<typeof import("../core/notify.js")>()),
   notify: vi.fn(),
 }));
+// Only the timing of the tap needs a real-looking draft — writing one costs a
+// file, writing one with Claude costs minutes. `pool` and `SETTLED_BY_YOU` stay
+// real: the daemon runs its reviews through them.
+vi.mock("../runner/review.js", async (orig) => ({
+  ...(await orig<typeof import("../runner/review.js")>()),
+  reviewPr: vi.fn(),
+}));
 
 const search = searchAwaitingMe as Mock;
 const prInfo = fetchPrInfo as Mock;
@@ -61,6 +70,7 @@ const lastRequest = fetchLastReviewRequest as Mock;
 const requests = fetchReviewRequests as Mock;
 const login = currentLogin as Mock;
 const notified = notify as Mock;
+const reviewed = reviewPr as Mock;
 
 process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
 
@@ -1158,5 +1168,138 @@ describe("askedAgainAfterSettling", () => {
     expect(reopenedStatus({ ...skipped, run: null })).toBe("awaiting");
     expect(reopenedStatus({ ...skipped, run: { ...RUN, error: "claude exited 1" } })).toBe("awaiting");
     expect(reopenedStatus({ ...skipped, run: { ...RUN, finishedAt: null } })).toBe("awaiting");
+  });
+});
+
+// The bug this timing exists for: the tap arrived the moment GitHub asked for
+// the review, so clicking it got you a row saying "no run yet" — and by the
+// time the draft was written, nothing said so.
+describe("when the tap comes, with cerber drafting for you", () => {
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
+
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    autoReview: true,
+    notify: true,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  /** What a finished run leaves behind: a draft on the row, and `ready`. */
+  async function draftReady(over: Partial<Artifact> = {}) {
+    const id = artifactId({ owner: "acme", repo: "widgets", number: 7 });
+    const artifact = await updateArtifactByKey(artifactKey(id), (a) => ({
+      ...a,
+      status: "ready" as const,
+      verdict: { recommendation: "request_changes" as const, confidence: 80, reasoning: "" },
+      comments: [
+        {
+          id: "c1",
+          path: "src/app.ts",
+          line: 3,
+          body: "this drops the error",
+          chapterId: null,
+          severity: "blocker" as const,
+          origin: "ai" as const,
+          status: "draft" as const,
+          editedByUser: false,
+          originalLine: null,
+          drifted: false,
+        },
+      ],
+      ...over,
+    }));
+    return { artifact: artifact!, skipped: false };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
+    notified.mockResolvedValue(true);
+    reviewed.mockImplementation(() => draftReady());
+  });
+
+  async function pollTimes(polls: number) {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
+      return handle.status();
+    } finally {
+      await stopAndDrain(handle);
+    }
+  }
+
+  it("waits for the draft, and then says what it found", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(1);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(notified).toHaveBeenCalledWith({
+      title: "widgets#7 draft ready",
+      body: "requests changes · 1 blocker — feat: add sprockets",
+    });
+  });
+
+  it("says nothing while the draft is still being written", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    // A run the cockpit already had in flight: the row stays `running`, and
+    // nothing about it is worth a popup yet.
+    reviewed.mockImplementation(async () => {
+      await updateArtifactByKey(artifactKey(artifactId({ owner: "acme", repo: "widgets", number: 7 })), (a) => ({
+        ...a,
+        status: "running" as const,
+      }));
+      throw new ReviewInProgressError("acme/widgets#7");
+    });
+    await pollTimes(1);
+    expect(notified).not.toHaveBeenCalled();
+
+    // …and the poll that finds the draft finished is the one that taps.
+    reviewed.mockImplementation(() => draftReady());
+    await pollTimes(2);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(notified.mock.calls[0]![0].title).toBe("widgets#7 draft ready");
+  });
+
+  it("taps once, not on every poll that finds the same draft", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(3);
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
+  // Nothing more is coming for it, so the arrival is the only news there is.
+  it("falls back to the arrival when the run fails", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    reviewed.mockRejectedValue(new Error("claude fell over"));
+    await pollTimes(1);
+    expect(notified).toHaveBeenCalledWith({
+      title: "widgets#7 awaits your review",
+      body: "feat: add sprockets — someone",
+    });
+  });
+
+  // The same rule the browser bell applies to its own seen-set: a week with the
+  // tap switched off must not arrive as one popup the minute it comes back on.
+  it("records what it stayed quiet about", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, notify: false } });
+    search.mockResolvedValue([DISCOVERED]);
+    await pollTimes(1);
+    expect(notified).not.toHaveBeenCalled();
+
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    await pollTimes(2);
+    expect(notified).not.toHaveBeenCalled();
   });
 });

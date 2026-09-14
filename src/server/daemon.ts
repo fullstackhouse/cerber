@@ -18,7 +18,7 @@ import {
   submitReview,
 } from "../core/gh.js";
 import { withWriter } from "../core/history.js";
-import { notice, notify } from "../core/notify.js";
+import { isNews, newsOf, notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
   appendAutoSendLog,
@@ -50,9 +50,9 @@ export interface DaemonOptions {
    */
   autoReview: boolean;
   /**
-   * Tap this machine's notification centre when a PR lands in the queue. This
-   * is the per-run cap (--no-notify); the config's daemon.notify is consulted
-   * live on every poll, so the cockpit toggle needs no restart.
+   * Tap this machine's notification centre when a PR is worth coming back for.
+   * This is the per-run cap (--no-notify); the config's daemon.notify is
+   * consulted live on every poll, so the cockpit toggle needs no restart.
    */
   notify: boolean;
   /**
@@ -83,9 +83,9 @@ export interface DaemonStatus {
   /** False when the config's daemon.poll toggle idles the loop. */
   pollEnabled: boolean;
   /**
-   * Whether this machine gets a notification of its own when a PR lands. The
-   * cockpit reads it to know whether its own bell would be a second popup
-   * about one PR — see `web/src/notify.ts`.
+   * Whether this machine gets a notification of its own. The cockpit reads it
+   * to know whether its own bell would be a second popup about one PR — see
+   * `web/src/notify.ts`.
    */
   notify: boolean;
   autoReview: boolean;
@@ -157,6 +157,9 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     refresh: null,
     filed: null,
     settledAt: null,
+    // Null, not absent: the poll found this PR, so it owes the machine a tap
+    // for it — once there is something to tap you about (§9.8).
+    notifiedAt: null,
     calibration: null,
     chat: [],
     preChat: null,
@@ -698,19 +701,40 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   let notifierWorks: boolean | null = null;
 
   /**
-   * Tap this machine when a PR lands in the queue.
+   * Tap this machine about every row that has become worth walking back to,
+   * once each.
    *
-   * An artifact is the ledger this rides on: a PR is announced on the poll that
-   * first writes a stub for it, so a restart re-announces nothing, and a PR
-   * that arrived while `serve` was down is still news the next time it runs.
-   * The cockpit's bell announces the same arrival, off the same stub — which is
-   * why it stands down when this is on and both are on one machine.
+   * `notifiedAt` on the artifact is the ledger this rides on: the poll writes
+   * it null when it first stubs a PR ("owed a tap"), and stamps it here. So a
+   * restart re-announces nothing, a PR that arrived while `serve` was down is
+   * still news the next time it runs — and, unlike announcing straight off the
+   * discovery, a tap the daemon is holding back survives the wait. The cockpit's
+   * bell works off the same rule (`isNews`), which is why it stands down when
+   * this is on and both are on one machine.
+   *
+   * Stamped whether or not the notifier worked, and whether or not it was even
+   * asked (`tell` is the notify toggle). A machine with no notifier would
+   * otherwise re-try every row every poll, and a toggle switched on after a
+   * quiet week would announce that whole week at once — the same reason the
+   * browser bell records what it stays quiet about.
    */
-  async function announce(arrivals: DiscoveredPr[]): Promise<void> {
-    const n = notice(arrivals);
+  async function announce(autoReview: boolean, tell: boolean, broke: Set<string>): Promise<void> {
+    const owed = (await listArtifacts()).filter(
+      (a) => a.notifiedAt === null && (isNews(a, autoReview) || broke.has(a.id)),
+    );
+    const n = notice(owed.map(newsOf));
     if (!n) return;
-    notifierWorks = await notify(n);
-    if (notifierWorks) return;
+    if (tell) notifierWorks = await notify(n);
+    const at = new Date().toISOString();
+    // Stamped after the tap, not before: a crash in between costs a repeated
+    // notification, and the other order costs the only one there was going
+    // to be.
+    for (const a of owed) {
+      await updateArtifactByKey(artifactKey(a.id), (current) =>
+        current.notifiedAt === null ? { ...current, notifiedAt: at } : current,
+      );
+    }
+    if (!tell || notifierWorks) return;
     if (notifierMissing) return;
     notifierMissing = true;
     log("no desktop notifier here — arrivals will only show in the cockpit");
@@ -743,10 +767,21 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     });
   }
 
-  async function reviewAll(refs: DiscoveredPr[]): Promise<{ reviewed: number; skipped: number; failed: number }> {
+  async function reviewAll(
+    refs: DiscoveredPr[],
+  ): Promise<{ reviewed: number; skipped: number; failed: number; failedIds: Set<string> }> {
     let reviewed = 0;
     let skipped = 0;
     let failed = 0;
+    /**
+     * Rows whose draft this poll tried and couldn't write. Usually the runner
+     * has already marked them `failed` itself, and `isNews` sees that — but a
+     * run that falls over before it owns the artifact (the diff fetch, the PR
+     * read) leaves the row sitting at `awaiting`, where the tap would wait for
+     * a draft that is never coming. Naming them here is what keeps a PR GitHub
+     * is asking you for from going unannounced because cerber broke.
+     */
+    const failedIds = new Set<string>();
     await pool(refs, opts.parallel, async (ref) => {
       const label = artifactId(ref);
       try {
@@ -769,11 +804,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           return;
         }
         failed++;
+        failedIds.add(label);
         status.errors++;
         log(`[${label}] failed: ${err instanceof Error ? err.message : err}`);
       }
     });
-    return { reviewed, skipped, failed };
+    return { reviewed, skipped, failed, failedIds };
   }
 
   /** Everything a poll writes is the poll's — including the reviews it starts,
@@ -822,25 +858,31 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
-      // Before the reviews, not after: the arrival is the news, and drafting it
-      // takes minutes. This is the same moment the cockpit's bell would ring.
-      if (notifyOn && discovered.length > 0) {
-        await announce(discovered);
-        // Recomputed on the spot rather than left to the next poll: that is
-        // minutes away, and the cockpit would spend them deferring to a tap
-        // that never came. Recomputed rather than only cleared, so a machine
-        // whose notifier comes back takes the job back with it.
-        status.notify = announcing();
-      }
 
+      let broke = new Set<string>();
       if (autoReview) {
-        const { reviewed, skipped, failed } = await reviewAll(refs);
+        const { reviewed, skipped, failed, failedIds } = await reviewAll(refs);
+        broke = failedIds;
         status.lastSummary =
           `${refs.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
           `${failed > 0 ? `, ${failed} failed` : ""}`;
       } else {
         status.lastSummary = `${refs.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""} (auto-review off)`;
       }
+
+      // After the drafting, not before it. The arrival is not the news when
+      // cerber is about to write the review itself: a tap that lands on "no run
+      // yet" makes the walk back to the cockpit for nothing, and by the time
+      // there *is* something to read the PR is no longer new. So the tap waits
+      // for the draft — and for a PR nobody is drafting (auto-review off, or a
+      // run that failed) it goes out here all the same. `isNews` is the rule,
+      // and the cockpit's bell reads the same one.
+      await announce(autoReview, notifyOn, broke);
+      // Recomputed on the spot rather than left to the next poll: that is
+      // minutes away, and the cockpit would spend them deferring to a tap that
+      // never came. Recomputed rather than only cleared, so a machine whose
+      // notifier comes back takes the job back with it.
+      status.notify = announcing();
       log(status.lastSummary);
     } catch (err: unknown) {
       status.errors++;

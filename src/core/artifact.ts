@@ -342,6 +342,18 @@ export const ArtifactSchema = z.object({
    * field forward long after the decision it is meant to date.
    */
   settledAt: z.string().nullable().default(null),
+  /**
+   * When this row was announced on this machine, and the announcement ledger
+   * itself — see `isNews` in `src/core/notify.ts` for what is worth announcing.
+   *
+   * Three states, not two. `null` is "the poll found this and owes you a tap";
+   * a timestamp is "already told". **Absent** is neither: nobody ever meant to
+   * announce this row — a review you pulled in by hand, or one written before
+   * the ledger existed — so it is never news, and an upgrade doesn't announce
+   * a queue the user has been looking at for weeks. Only `stubArtifact` writes
+   * the null.
+   */
+  notifiedAt: z.string().nullable().optional(),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),

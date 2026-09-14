@@ -130,18 +130,29 @@ left unwritten. Code and tests win when they disagree.
   an open request only means you never pressed GitHub's review button, not that
   anyone is blocked on you. Bots are excluded, and a read that fails reports
   `unknown` rather than guessing silence at someone who did reply.
-  Each new PR is also announced on this machine as it lands (`core/notify.ts` —
-  `osascript` on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's
-  own bell needs a live, permitted tab, so it is silent exactly when the user is
-  furthest from cerber. The stub artifact is the ledger — a PR is announced on
-  the poll that first writes one for it, so a restart re-announces nothing
+  Each PR is also announced once on this machine (`core/notify.ts` — `osascript`
+  on macOS, `notify-send` on Linux, quiet elsewhere): the cockpit's own bell
+  needs a live, permitted tab, so it is silent exactly when the user is furthest
+  from cerber. The tap goes out when the row is worth coming back for
+  (`isNews`), not when it arrives — with auto-review on that is the draft
+  landing, and the notice leads with what it found, because a tap onto "no run
+  yet" spends the walk back for nothing and the moment there was finally
+  something to read would pass in silence. A PR nobody is drafting (auto-review
+  off, a run that failed) is announced as it lands, since that is all the news
+  there will be. `notifiedAt` on the artifact is the ledger, and absent ≠ null:
+  null is "owed a tap", a string is "told", absent is a row nobody meant to
+  announce — so a restart re-announces nothing and an upgrade announces no
+  backlog. It is stamped even when the toggle is off, so switching it on
+  doesn't deliver a quiet week all at once
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and
-  raises a desktop notification for PRs this browser has never seen. Browser
-  state, not config — the permission is the browser's, so the switch and the
-  announced-keys record live in localStorage beside it. It stands down when the
-  daemon announces arrivals on this same machine (`daemonAnnouncesHere`), so one
+  raises a desktop notification for PRs this browser has never seen, on the same
+  `isNews` timing the daemon uses — a row held back for its draft is not
+  recorded as seen either, or the announcement would be spent on the silence.
+  Browser state, not config — the permission is the browser's, so the switch and
+  the announced-keys record live in localStorage beside it. It stands down when
+  the daemon announces on this same machine (`daemonAnnouncesHere`), so one
   PR is one popup; a cockpit served from a non-loopback host keeps ringing,
   since that machine's tap lands where nobody is looking. `favicon.ts` is the
   quiet half of the same job: a dot on the tab icon while the inbox holds

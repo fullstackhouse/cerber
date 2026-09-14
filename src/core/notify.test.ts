@@ -1,8 +1,11 @@
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Artifact } from "./artifact.js";
 import {
   Arrival,
   NOTIFY_TIMEOUT_MS,
   appleScriptLiteral,
+  isNews,
+  newsOf,
   notice,
   notify,
   notifyCommand,
@@ -49,6 +52,107 @@ describe("what one poll's arrivals say", () => {
     expect(notice([pr(1), pr(2), pr(3), pr(4), pr(5)])?.body).toBe(
       "widgets#1, widgets#2, widgets#3 and 2 more",
     );
+  });
+});
+
+describe("what a finished draft says", () => {
+  const ready = (over: Partial<Arrival["draft"] & object> = {}): Arrival => ({
+    ...pr(7),
+    draft: { recommendation: "request_changes", blockers: 2, ...over },
+  });
+
+  it("leads with the verdict and the count it rests on", () => {
+    expect(notice([ready()])).toEqual({
+      title: "widgets#7 draft ready",
+      body: "requests changes · 2 blockers — feat: add sprockets",
+    });
+  });
+
+  it("counts one blocker as one", () => {
+    expect(notice([ready({ blockers: 1 })])?.body).toBe(
+      "requests changes · 1 blocker — feat: add sprockets",
+    );
+  });
+
+  it("has no count to give when nothing blocks", () => {
+    expect(notice([ready({ recommendation: "approve", blockers: 0 })])?.body).toBe(
+      "approves — feat: add sprockets",
+    );
+  });
+
+  it("still says something about a draft that took no position", () => {
+    expect(notice([ready({ recommendation: null, blockers: 0 })])?.body).toBe(
+      "drafted — feat: add sprockets",
+    );
+  });
+
+  it("calls a batch of drafts what it is", () => {
+    expect(notice([ready(), { ...pr(8), draft: { recommendation: "approve", blockers: 0 } }])?.title).toBe(
+      "2 drafts ready",
+    );
+  });
+
+  // A drafted PR awaits you too, so the wording true of both is the one used.
+  it("falls back to the general headline when only some are drafted", () => {
+    expect(notice([ready(), pr(8)])?.title).toBe("2 PRs await your review");
+  });
+});
+
+describe("whether a row is news yet", () => {
+  const artifact = (over: Partial<Artifact> = {}): Artifact =>
+    ({
+      status: "awaiting",
+      pr: { repo: "widgets", number: 7, title: "feat: add sprockets", author: "mira", state: "OPEN" },
+      comments: [],
+      verdict: null,
+      ...over,
+    }) as Artifact;
+
+  // The whole point: with cerber drafting, a tap on arrival lands on "no run
+  // yet" — and the moment there is something to read would pass in silence.
+  it("holds back a PR cerber is about to draft, or is drafting", () => {
+    expect(isNews(artifact({ status: "awaiting" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "running" }), true)).toBe(false);
+  });
+
+  it("announces the arrival when nobody is going to draft it", () => {
+    expect(isNews(artifact({ status: "awaiting" }), false)).toBe(true);
+  });
+
+  it("announces the draft the moment it exists", () => {
+    expect(isNews(artifact({ status: "ready" }), true)).toBe(true);
+  });
+
+  // Nothing more is coming for it, so this is the only tap there will be.
+  it("announces a run that failed", () => {
+    expect(isNews(artifact({ status: "failed" }), true)).toBe(true);
+  });
+
+  it("says nothing about a row you already answered, or a PR that is gone", () => {
+    expect(isNews(artifact({ status: "reviewed" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "skipped" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "sent" }), true)).toBe(false);
+    expect(isNews(artifact({ status: "ready", pr: { ...artifact().pr, state: "MERGED" } }), true)).toBe(
+      false,
+    );
+  });
+
+  it("reads the draft off the artifact, blockers and all", () => {
+    const a = artifact({
+      status: "ready",
+      verdict: { recommendation: "request_changes", confidence: 70, reasoning: "" },
+      comments: [
+        { severity: "blocker", status: "draft" },
+        { severity: "blocker", status: "dropped" },
+        { severity: "nit", status: "draft" },
+      ],
+    } as Partial<Artifact>);
+    expect(newsOf(a).draft).toEqual({ recommendation: "request_changes", blockers: 1 });
+  });
+
+  it("carries no draft for a row that has none", () => {
+    expect(newsOf(artifact({ status: "awaiting" })).draft).toBeNull();
+    expect(newsOf(artifact({ status: "failed" })).draft).toBeNull();
   });
 });
 

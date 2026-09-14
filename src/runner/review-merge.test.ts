@@ -138,6 +138,26 @@ describe("what a re-review does to the previous draft", () => {
     expect(artifact.comments.map((c) => c.body)).toEqual(["the AI's finding"]);
   });
 
+  // The run knows nothing about the desktop tap, and a draft nobody announces
+  // is the whole bug the timing rule (§9.8) exists to fix.
+  it("carries the tap the poll still owes this row through the run", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notifiedAt: null });
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.status).toBe("ready");
+    expect(artifact.notifiedAt).toBeNull();
+    expect((await loadArtifact(ID))!.notifiedAt).toBeNull();
+  });
+
+  it("carries it through a run that fails, too", async () => {
+    await saveArtifact({ ...ready([]), status: "awaiting", notifiedAt: null });
+    claudeThat(async () => {}, new Error("model unavailable"));
+
+    await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
+    expect((await loadArtifact(ID))!.notifiedAt).toBeNull();
+  });
+
   it("leaves nothing behind when it fails", async () => {
     // The failure path holds the same line as the success path: no half-kept
     // draft, so what a reader is told about re-review is true either way.
