@@ -3,15 +3,27 @@
 [![npm](https://img.shields.io/npm/v/%40fullstackhouse%2Fcerber)](https://www.npmjs.com/package/@fullstackhouse/cerber)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-**AI code-review cockpit.** Claude reviews your pull requests into local artifacts —
-a summary, a chaptered walkthrough of the changes, draft inline comments, and a
-verdict with a confidence score. You go through it in a local web cockpit.
+**AI code-review cockpit.** Claude reviews your pull requests into local
+artifacts — a summary, a chaptered walkthrough of the changes, draft inline
+comments, and a verdict with a confidence score. You read it in a local web
+cockpit, keep or rewrite or drop each comment, then press Send when you agree
+with it.
 
 **Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
 write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
 reviewing is 100% local and read-only.
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
+
+**A drafted review, as you read it** — verdict and confidence beside the PR
+title, the walkthrough rail on the left, a summary written for someone who has
+not read the diff:
+
+![A review opened in the cockpit: the verdict pill by the PR title, a walkthrough rail listing chapters and their comments on the left, and a summary written in sections — problem first, then the fix, then details.](docs/walkthrough.png)
+
+**And the queue they arrive in** — `cerber serve` polls GitHub for PRs awaiting
+your review and drafts one for each, so they are written by the time you get
+there:
 
 ![The queue: three drafted reviews, each with a verdict and confidence in its row; under the cursor, a strip quotes the selected review's own reasoning so it can be judged without opening it.](docs/queue.png)
 
@@ -24,7 +36,11 @@ Requires Node 20+, an authenticated [`gh`](https://cli.github.com/) and a
 logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no config, no database.
 
 ```bash
-# Review a PR (writes a local artifact to ~/.cerber, nothing else)
+# Open the cockpit — this is the whole product
+npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
+
+# Or review one PR from the terminal (writes a local artifact to ~/.cerber,
+# nothing else)
 npx @fullstackhouse/cerber review https://github.com/owner/repo/pull/123
 
 # Review several
@@ -33,22 +49,79 @@ npx @fullstackhouse/cerber review 123 124 --repo owner/repo
 
 # See what's in the queue
 npx @fullstackhouse/cerber list
-
-# Open the cockpit — it's an inbox: it polls GitHub for PRs awaiting your
-# review and drafts a review for each, so they're ready when you arrive
-npx @fullstackhouse/cerber serve        # → http://127.0.0.1:4820
 ```
 
 `serve` does the whole loop by default: discover → draft → wait for you.
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip those
 switches in the cockpit's Settings, which persist in `~/.cerber/config.json`
-and apply on the next poll. The queue only lists what
-still wants you: anything you have settled moves to the filed tabs right of
-the thin rule in the filter row — reviews you sent, ones you marked reviewed
-or skipped, merged and closed PRs — each tab appearing only while it holds
-something. PRs in archived repos are never picked up at all, since the repo
-is read-only and a review could never be sent.
+and apply on the next poll.
+
+## Contents
+
+- [What a review looks like](#what-a-review-looks-like) — what Claude writes and how you walk it
+- [The inbox](#the-inbox) — what the queue shows, what settles a row, the notifications
+- [It reviews the code, not just the diff](#it-reviews-the-code-not-just-the-diff)
+- [Trusted PRs: reviews that can run things](#trusted-prs-reviews-that-can-run-things)
+- [When the PR moves under you](#when-the-pr-moves-under-you)
+- [Arguing with the review before you send it](#arguing-with-the-review-before-you-send-it)
+- [Every row remembers what happened to it](#every-row-remembers-what-happened-to-it)
+- [Status](#status) · [Running on a VPS](#running-on-a-vps) · [How it works](#how-it-works) · [Development](#development)
+
+## What a review looks like
+
+Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
+`CERBER_HOME`) containing:
+
+- **Summary** — what the PR actually does and why, written top-down
+- **Chapters** — the changed files grouped into a logical walkthrough, each
+  with a title, an explanation, and its slice of the diff
+- **Draft comments** — inline, anchored to file/line, only things worth a
+  human's time. Findings are graded **blocker / minor / nit** — the words mean
+  what they mean everywhere, and only a blocker stands between the PR and
+  approval; a question or note carries no grade at all
+- **Verdict** — approve / comment / request changes, with a 0–100 confidence
+  score and reasoning that names the worst finding still standing
+- **Run metadata** — model, whether it read the source or only the diff, and
+  the token spend as an API-rate equivalent
+
+The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
+diffs. Draft comments sit inline in the diff, anchored to the line they're
+about, each waiting for you to keep, rewrite, or drop it:
+
+![A chapter of the walkthrough: the diff with a draft comment card anchored under the line it discusses, explaining the finding in plain words.](docs/comment.png)
+
+Any line of the diff is one click away from being talked about: hover it and a
+`+` appears in the gutter, the way it does on GitHub. What opens is one box
+with two exits — write the comment yourself, or ask the reviewer about that
+line and get the answer in the conversation below. A line the PR removes can be
+asked about too; a comment on one posts on the file, since GitHub only takes
+inline comments on the new side of a diff.
+
+A markdown file the PR **adds** opens as the document it is, not as a thousand
+rows of `+ ## Heading` — because reviewing a new spec means reading it, and
+every line being an addition means the diff's markers say nothing. It is still
+the review: the draft comments sit in the document under the paragraph they
+point at, and any paragraph takes a comment or a question where it stands. A
+markdown file the PR only *edits* stays a diff — there the change is the point
+— with "read as a document" in its header when you want the prose instead.
+
+Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
+
+The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
+and the strip under the table explains whatever it lands on — the verdict's own
+reasoning, what the run read, how it sits against the auto-send bar — so most
+rows can be judged without opening them. `↵` opens one, `r` drafts (or
+re-drafts) it. Inside a review, `[` and `]` walk to the previous/next PR still
+awaiting you, `n` steps through the chapters, and `s` sends.
+
+## The inbox
+
+The queue only lists what still wants you: anything you have settled moves to
+the filed tabs right of the thin rule in the filter row — reviews you sent,
+ones you marked reviewed or skipped, merged and closed PRs — each tab appearing
+only while it holds something. PRs in archived repos are never picked up at
+all, since the repo is read-only and a review could never be sent.
 
 ### Settled means you settled it
 
@@ -129,56 +202,7 @@ anything, the favicon wears a red dot, and it goes away when the last review is
 dealt with. No permission, no switch — just the paw with a mark on it, so a
 glance at the tab strip answers "is there anything for me?".
 
-## What a review looks like
-
-Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
-`CERBER_HOME`) containing:
-
-- **Summary** — what the PR actually does and why, written top-down
-- **Chapters** — the changed files grouped into a logical walkthrough, each
-  with a title, an explanation, and its slice of the diff
-- **Draft comments** — inline, anchored to file/line, only things worth a
-  human's time. Findings are graded **blocker / minor / nit** — the words mean
-  what they mean everywhere, and only a blocker stands between the PR and
-  approval; a question or note carries no grade at all
-- **Verdict** — approve / comment / request changes, with a 0–100 confidence
-  score and reasoning that names the worst finding still standing
-- **Run metadata** — model, whether it read the source or only the diff, and
-  the token spend as an API-rate equivalent
-
-![A review opened in the cockpit: the verdict pill by the PR title, a walkthrough rail listing chapters and their comments on the left, and a summary written in sections — problem first, then the fix, then details.](docs/walkthrough.png)
-
-The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
-diffs. Draft comments sit inline in the diff, anchored to the line they're
-about, each waiting for you to keep, rewrite, or drop it:
-
-![A chapter of the walkthrough: the diff with a draft comment card anchored under the line it discusses, explaining the finding in plain words.](docs/comment.png)
-
-Any line of the diff is one click away from being talked about: hover it and a
-`+` appears in the gutter, the way it does on GitHub. What opens is one box
-with two exits — write the comment yourself, or ask the reviewer about that
-line and get the answer in the conversation below. A line the PR removes can be
-asked about too; a comment on one posts on the file, since GitHub only takes
-inline comments on the new side of a diff.
-
-A markdown file the PR **adds** opens as the document it is, not as a thousand
-rows of `+ ## Heading` — because reviewing a new spec means reading it, and
-every line being an addition means the diff's markers say nothing. It is still
-the review: the draft comments sit in the document under the paragraph they
-point at, and any paragraph takes a comment or a question where it stands. A
-markdown file the PR only *edits* stays a diff — there the change is the point
-— with "read as a document" in its header when you want the prose instead.
-
-Artifacts are plain JSON you can `cat`, edit, or pipe into anything.
-
-The queue is meant to be walked, not clicked through: `j`/`k` move the cursor
-and the strip under the table explains whatever it lands on — the verdict's own
-reasoning, what the run read, how it sits against the auto-send bar — so most
-rows can be judged without opening them. `↵` opens one, `r` drafts (or
-re-drafts) it. Inside a review, `[` and `]` walk to the previous/next PR still
-awaiting you, `n` steps through the chapters, and `s` sends.
-
-### It reviews the code, not just the diff
+## It reviews the code, not just the diff
 
 Cerber checks the PR's head out locally and lets the review read it. That
 matters because a reviewer holding only a diff hedges over things it could have
@@ -235,7 +259,7 @@ Details worth knowing:
   review is currently reading. `cerber prune` reclaims the space now;
   `cerber prune --all` takes the ones for reviews still awaiting you too.
 
-### Trusted PRs: reviews that can run things
+## Trusted PRs: reviews that can run things
 
 Reading beats guessing, but running beats reading. A review that ran the test
 covering the change reports what happened; one that only read it guesses. So
@@ -304,7 +328,7 @@ unattended by default: with trust rules set, it will run matching PRs' code
 with nobody watching. It warns at startup, the cockpit shows a ⚡ badge while
 it's the case, and `--no-trust` (or `--no-auto-review`) turns it off.
 
-### When the PR moves under you
+## When the PR moves under you
 
 A review is written against one commit, but authors keep pushing. Opening a
 review checks the PR's head and pulls the review forward: comments follow their
@@ -318,7 +342,7 @@ get its opinion of the new code, hit **Re-review at the new head** in the
 cockpit (or `cerber review <pr> --force`) — comments you wrote or rewrote are
 carried into the fresh review.
 
-### Arguing with the review before you send it
+## Arguing with the review before you send it
 
 A draft you disagree with used to leave two options: rewrite it by hand, or
 re-review and hope. Neither lets you say *what was wrong*. So every review has
@@ -376,7 +400,7 @@ the summary, comments and verdict alone, and is still one deliberate click. A
 review that has already been sent can't be argued with: that artifact is the
 record of what GitHub has.
 
-### Every row remembers what happened to it
+## Every row remembers what happened to it
 
 A review keeps one "last updated" time, which means every write erases the
 answer to *when did I skip this, and did they ask again afterwards?* So each
