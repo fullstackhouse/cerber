@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
 import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
@@ -24,12 +26,37 @@ import { cockpitUrl, startServer } from "../server/index.js";
 
 const program = new Command();
 
+/**
+ * The published version, read from the manifest rather than typed here — a
+ * hand-maintained copy drifted to 0.5.0 while 0.30.0 shipped, and `--version`
+ * is the first thing anyone runs to decide whether a project is alive.
+ */
+const { version } = createRequire(import.meta.url)("../../package.json") as { version: string };
+
+/**
+ * Stop before the work starts when a tool cerber shells out to is missing or
+ * logged out, rather than letting it surface as an empty queue or a retrying
+ * poll. `allowDegraded` is for `serve --no-poll`, which is still useful for
+ * reading artifacts already on disk.
+ */
+async function requireTools(allowDegraded = false): Promise<void> {
+  const checks = await preflight();
+  if (!checks.some(isBlocking)) return;
+  const message = formatBlockers(checks);
+  if (allowDegraded) {
+    console.warn(`\n${message}\n`);
+    return;
+  }
+  console.error(`\n${message}\n`);
+  process.exit(1);
+}
+
 program
   .name("cerber")
   .description(
     "AI code-review cockpit. Claude reviews PRs into local artifacts; nothing reaches GitHub until you explicitly send it.",
   )
-  .version("0.5.0");
+  .version(version);
 
 program
   .command("review")
@@ -62,6 +89,7 @@ program
         trust?: boolean;
       },
     ) => {
+      await requireTools();
       let refs: PrRef[];
       if (opts.awaitingMe) {
         const found = await searchAwaitingMe(opts.repo);
@@ -429,6 +457,29 @@ program
   });
 
 program
+  .command("doctor")
+  .description("Check that everything cerber needs is installed and logged in")
+  .action(async () => {
+    const checks = await preflight();
+    for (const c of checks) {
+      if (c.status === "ok") {
+        console.log(`  ✔ ${c.name.padEnd(22)} ${c.detail ?? ""}`.trimEnd());
+      } else {
+        console.log(`  ✗ ${c.name.padEnd(22)} ${c.status === "missing" ? "not installed" : "not logged in"}`);
+        if (c.fix) console.log(`    ${c.fix}`);
+      }
+    }
+    const bad = checks.filter(isBlocking);
+    console.log("");
+    if (bad.length === 0) {
+      console.log("Ready. `cerber serve` opens the cockpit.");
+    } else {
+      console.log(`${bad.length} thing(s) to fix before cerber can review anything.`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("serve", { isDefault: true })
   .description(
     "Start the review cockpit — an inbox: it polls GitHub for PRs awaiting your review and drafts " +
@@ -487,6 +538,9 @@ program
         );
         process.exit(1);
       }
+      // Without `gh` the cockpit binds, polls into an error loop and shows an
+      // empty queue; `--no-poll` is the one shape that still works offline.
+      await requireTools(!opts.poll);
       const threshold = Math.min(100, Math.max(50, Number(opts.autoSendThreshold) || 90));
       if (opts.autoSend) {
         console.log(
