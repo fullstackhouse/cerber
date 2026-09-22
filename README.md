@@ -23,6 +23,12 @@ That gate is the whole point, and the reason this is not another review bot:
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
+**The whole loop, start to finish** — the queue, a drafted review, rewriting one
+comment, dropping another, and the Send button that is the only thing on screen
+able to write to GitHub. Nothing in this recording reached it:
+
+![The cockpit: opening a drafted review from the queue, jumping to a finding through the walkthrough rail, rewriting that comment, dropping another, and stopping on the Send button — the review's tally reading two keeping, one dropped.](docs/demo.gif)
+
 **A drafted review, as you read it** — verdict and confidence beside the PR
 title, the walkthrough rail on the left, a summary written for someone who has
 not read the diff:
