@@ -1,0 +1,20 @@
+{
+  "_owner": "northwind",
+  "_repo": "billing",
+  "_number": 231,
+  "_updatedAt": "2026-09-18T09:55:31Z",
+  "title": "feat(invoices): VAT rounding per line",
+  "url": "https://github.com/northwind/billing/pull/231",
+  "author": {
+    "login": "marta-k"
+  },
+  "body": "An invoice with mixed VAT rates (20% goods, 5% on the installation line) was computing VAT from the first line's rate applied to the whole net. Reported by the Leeds branch after a customer queried a £38 discrepancy.\n\nVAT is now computed and rounded per line, then summed. Adds a test with two rates on one invoice.",
+  "baseRefName": "main",
+  "headRefName": "marta/vat-per-line",
+  "headRefOid": "7b93c40ad1e825f6710c9be43d28a5f09c471be6",
+  "additions": 22,
+  "deletions": 2,
+  "changedFiles": 2,
+  "state": "OPEN",
+  "isDraft": false
+}

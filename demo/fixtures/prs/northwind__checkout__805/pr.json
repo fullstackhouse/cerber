@@ -1,0 +1,20 @@
+{
+  "_owner": "northwind",
+  "_repo": "checkout",
+  "_number": 805,
+  "_updatedAt": "2026-09-17T11:26:53Z",
+  "title": "refactor(orders): split the fulfilment service",
+  "url": "https://github.com/northwind/checkout/pull/805",
+  "author": {
+    "login": "ada-w"
+  },
+  "body": "`FulfilmentService` had grown to do picking and shipping in one class, and every test of either had to stand up both. Splits it into `PickingService` and `ShippingService`, with the old class kept as a thin composition so no caller changes in this PR.\n\nNo behaviour change intended. Follow-up will move callers onto the two services directly and delete the wrapper.",
+  "baseRefName": "main",
+  "headRefName": "ada/split-fulfilment",
+  "headRefOid": "1e6d5a04c9b73f28e0aa41dd6c93b7520fe18a4c",
+  "additions": 59,
+  "deletions": 10,
+  "changedFiles": 4,
+  "state": "OPEN",
+  "isDraft": false
+}

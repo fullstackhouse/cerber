@@ -1,0 +1,73 @@
+{
+  "progress": [
+    "Reading the split — one class becomes two services plus a composing wrapper.",
+    "Checking whether the moved code is actually the same code.",
+    "Two things about behaviour, two about taste. Writing it up."
+  ],
+  "costUsd": 0.31,
+  "review": {
+    "summary": "### 🎯 One class did picking and shipping, so every test had to stand up both\n\n`FulfilmentService` reserved stock and booked a courier in the same method. Testing either half meant constructing the warehouse and the courier client, which is why the file had almost no tests.\n\n### 🔧 Two services, and the old class kept as a wrapper\n\n`PickingService` reserves stock and returns what it got; `ShippingService` takes that list and books a label. `FulfilmentService` survives as a thin composition of the two, default-constructing them, so no caller changes in this PR. The description says a follow-up moves callers across and deletes the wrapper.\n\n### 🔍 Details\n\n`PickingService` also gains an `unpick` that releases reservations — not called from anywhere in this diff. `ShippingService.book` returns early when there is nothing picked. The old `picking-legacy`/`shipping-legacy` imports are gone from this file, but the modules themselves are not in the diff, so whether the logic moved verbatim is not something this review can confirm.\n\n### ⚠️ Worth knowing\n\nA refactor described as behaviour-preserving has two paths here where an order can complete having shipped nothing. Both look inherited rather than introduced, but the split is the moment to decide whether they should stay.",
+    "chapters": [
+      {
+        "id": "wrapper",
+        "title": "The old class, now a composition",
+        "explanation": "`FulfilmentService` moves into `fulfilment/index.ts` and delegates to the two new services. Its constructor default-constructs both, which is what keeps existing callers compiling.",
+        "files": [
+          "src/orders/fulfilment.ts",
+          "src/orders/fulfilment/index.ts"
+        ]
+      },
+      {
+        "id": "picking",
+        "title": "Picking",
+        "explanation": "Reserves each line in the warehouse and collects what it got. An out-of-stock line is logged and skipped. Also adds an `unpick` that releases reservations.",
+        "files": [
+          "src/orders/fulfilment/picking.ts"
+        ]
+      },
+      {
+        "id": "shipping",
+        "title": "Shipping",
+        "explanation": "Takes the picked items, creates a courier label and dispatches it. Returns early on an empty list.",
+        "files": [
+          "src/orders/fulfilment/shipping.ts"
+        ]
+      }
+    ],
+    "comments": [
+      {
+        "path": "src/orders/fulfilment/picking.ts",
+        "line": 12,
+        "severity": "minor",
+        "chapterId": "picking",
+        "body": "An out-of-stock line is skipped, and the caller cannot tell it happened.\n\n`pick` returns only the lines it managed to reserve, with no signal about the ones it didn't, so a three-item order that could only be half filled comes back looking like a successful pick of two. The warning in the log is the only record. If that is the intended behaviour it should be in the return type — `{ picked, unavailable }` — rather than something a reader has to notice."
+      },
+      {
+        "path": "src/orders/fulfilment/shipping.ts",
+        "line": 6,
+        "severity": "minor",
+        "chapterId": "shipping",
+        "body": "An order where nothing could be picked completes silently.\n\nWith the skip above, a fully out-of-stock order reaches here with an empty list, returns immediately, and `fulfil` resolves — so the order is marked fulfilled having shipped nothing. Throwing, or returning something the caller has to handle, would make that visible."
+      },
+      {
+        "path": "src/orders/fulfilment/index.ts",
+        "line": 14,
+        "severity": "nit",
+        "chapterId": "wrapper",
+        "body": "Default-constructed dependencies make the class look injectable without being it.\n\nEvery real caller gets the real `PickingService`, which gets the real warehouse, so the seam only helps tests that already know to use it. Constructing both at the composition root and requiring them here would say plainly where the wiring lives."
+      },
+      {
+        "path": "src/orders/fulfilment/picking.ts",
+        "line": 19,
+        "severity": "nit",
+        "chapterId": "picking",
+        "body": "`unpick` has no callers.\n\nIt is presumably for the follow-up that handles a failed shipment, but dead code in a refactor is hard to review — there is nothing to check it against. Worth landing with the code that uses it."
+      }
+    ],
+    "verdict": {
+      "recommendation": "approve",
+      "confidence": 76,
+      "reasoning": "No blockers — the split is clean and the two behaviour findings look inherited rather than introduced.\n\n- **Compared the wrapper to the deleted class** — same two steps in the same order, same arguments. A caller of `fulfil` sees no difference.\n- **Read both new services** — each does one thing, and both are constructible without the other, which is the point of the change.\n- **Two silent-success paths** — a skipped out-of-stock line and an empty-parcel early return. Graded minor because the old code almost certainly did the same, and this PR claims no behaviour change.\n- **Couldn't confirm the move is verbatim** — `picking-legacy.ts` and `shipping-legacy.ts` aren't in the diff and there is no checkout here, so \"no behaviour change\" is taken from the description. Reading those two files would settle it, and is what holds the confidence down.\n- **No tests in the change** — the stated reason for the split is testability, and nothing here exercises it yet."
+    }
+  }
+}

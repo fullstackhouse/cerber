@@ -10,3 +10,6 @@ web/dist/
 .ai/qa/artifacts_*/
 .ai/qa/test-env.json
 .ai/qa/test-env.env
+
+# The demo harness scratch home: reviews, checkouts and recorded sends.
+demo/home/

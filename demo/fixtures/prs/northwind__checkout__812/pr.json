@@ -1,0 +1,18 @@
+{
+  "_owner": "northwind",
+  "_repo": "checkout",
+  "_number": 812,
+  "_updatedAt": "2026-09-19T08:12:44Z",
+  "title": "fix(payments): retry failed webhooks with backoff",
+  "url": "https://github.com/northwind/checkout/pull/812",
+  "author": { "login": "marta-k" },
+  "body": "A lock timeout on the ledger used to lose a capture outright: Stripe got a 500, we got a page, and the customer's order sat unpaid until someone replayed the event by hand. Four of those last month.\n\nThis retries transient failures in-process with exponential backoff and full jitter (5 attempts, 500ms base) instead of bouncing them back to Stripe, whose next delivery is an hour away.\n\n- new `withBackoff` helper in `src/payments/retry-queue.ts`\n- `handleWebhook` runs `dispatch` through it\n- once the retries are exhausted we log and return, so Stripe sees a 200\n\nTests cover the retry-then-succeed path and the give-up path.",
+  "baseRefName": "main",
+  "headRefName": "marta/webhook-retry-backoff",
+  "headRefOid": "4f1c9b2d7a83e6045c1d8ba9f27e3c0d61a4b8e2",
+  "additions": 81,
+  "deletions": 1,
+  "changedFiles": 3,
+  "state": "OPEN",
+  "isDraft": false
+}

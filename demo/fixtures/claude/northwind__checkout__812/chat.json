@@ -1,0 +1,39 @@
+{
+  "turns": [
+    {
+      "match": "double.?charg|dedupe|dedup|stripe.*(replay|retri)|(replay|retri).*stripe|idempot",
+      "progress": [
+        "Re-reading the handler for what the guard actually holds.",
+        "Checking whether Stripe's own dedupe would cover the replay.",
+        "It wouldn't — Stripe dedupes on the event id, and nothing here looks at it. Tightening the comment to say that."
+      ],
+      "costUsd": 0.08,
+      "reply": "It double-charges. Stripe does dedupe its own deliveries — a replay arrives with the same `event.id` — but nothing in this handler ever looks at `event.id`. The only guard is `inFlight`, and that holds `event.data.object.id`, the payment intent, and drops it in the `finally` as soon as the request ends.\n\nSo the second delivery finds an empty set, walks into `dispatch`, and calls `capturePayment` with no idempotency key. Stripe's dedupe is on its side of the wire; it stops the same event being *delivered* twice concurrently, not the same intent being *captured* twice an hour apart.\n\nThe one thing I couldn't check from the diff is whether `capturePayment` derives a key internally — `src/payments/capture.ts` isn't in the change. If it does, this is a minor, not a blocker.",
+      "revisions": [
+        {
+          "kind": "comment-edit",
+          "commentAt": "src/payments/webhook-handler.ts:15",
+          "severity": "blocker",
+          "body": "A redelivered webhook can capture the same payment twice.\n\nStripe redelivers with the same `event.id`, but nothing here keys off it: `inFlight` holds `event.data.object.id`, the payment intent, and drops it in the `finally`. So a replay arrives with an empty guard and this line re-enters `capturePayment`, which takes no idempotency key. The customer pays twice.\n\nKey the guard on `event.id` and pass it through as the idempotency key."
+        }
+      ]
+    },
+    {
+      "match": "\\bnit\\b|naming|\\bname\\b.*\\bkey\\b",
+      "progress": [
+        "Looking again at the retry-queue field name."
+      ],
+      "costUsd": 0.03,
+      "reply": "Fair — it's taste, and it's graded as taste. `name` isn't wrong, it just reads badly in the logs because the only value it ever holds is a payment intent id. Drop it if you don't want to spend a round-trip on it; I'd leave it in as a nit.",
+      "revisions": []
+    }
+  ],
+  "fallback": {
+    "progress": [
+      "Re-reading the review and the diff for what you're asking about."
+    ],
+    "costUsd": 0.04,
+    "reply": "I'm working from the diff alone here — this review ran without a checkout, so I can't open anything outside the changed lines. What I can say stands on the three files in the change: the retry loop in `retry-queue.ts`, the guard and the give-up branch in `handleWebhook`, and the two new tests.\n\nPoint me at the part of the review you want me to defend or change, and I'll answer that specifically.",
+    "revisions": []
+  }
+}

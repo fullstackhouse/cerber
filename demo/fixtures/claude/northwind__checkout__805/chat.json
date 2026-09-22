@@ -1,0 +1,11 @@
+{
+  "turns": [],
+  "fallback": {
+    "progress": [
+      "Re-reading the review and the diff for what you're asking about."
+    ],
+    "costUsd": 0.04,
+    "reply": "Worth saying plainly: I reviewed this from the diff, with no checkout, and the two legacy modules the old class imported aren't in it. So \"no behaviour change\" is the description's claim, not something I checked — that's what the 76 is about.\n\nThe two minors are both the same shape of thing: an order can come out the far end having shipped nothing, and nobody finds out. Point me at one and I'll go into it.",
+    "revisions": []
+  }
+}

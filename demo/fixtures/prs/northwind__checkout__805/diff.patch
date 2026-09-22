@@ -1,0 +1,93 @@
+diff --git a/src/orders/fulfilment.ts b/src/orders/fulfilment.ts
+deleted file mode 100644
+index 6d4a0c1..0000000
+--- a/src/orders/fulfilment.ts
++++ /dev/null
+@@ -1,10 +0,0 @@
+-import { pickItems } from "./picking-legacy.js";
+-import { bookCourier } from "./shipping-legacy.js";
+-import type { Order } from "./types.js";
+-
+-export class FulfilmentService {
+-  async fulfil(order: Order): Promise<void> {
+-    const picked = await pickItems(order);
+-    await bookCourier(order, picked);
+-  }
+-}
+diff --git a/src/orders/fulfilment/index.ts b/src/orders/fulfilment/index.ts
+new file mode 100644
+index 0000000..4ea77b3
+--- /dev/null
++++ b/src/orders/fulfilment/index.ts
+@@ -0,0 +1,22 @@
++import { PickingService } from "./picking.js";
++import { ShippingService } from "./shipping.js";
++import type { Order } from "../types.js";
++
++export { PickingService } from "./picking.js";
++export { ShippingService } from "./shipping.js";
++
++/**
++ * Picking and shipping used to live in one class that did both. They are now
++ * two services; this composes them so callers don't have to change yet.
++ */
++export class FulfilmentService {
++  constructor(
++    private readonly picking = new PickingService(),
++    private readonly shipping = new ShippingService(),
++  ) {}
++
++  async fulfil(order: Order): Promise<void> {
++    const picked = await this.picking.pick(order);
++    await this.shipping.book(order, picked);
++  }
++}
+diff --git a/src/orders/fulfilment/picking.ts b/src/orders/fulfilment/picking.ts
+new file mode 100644
+index 0000000..91b2d40
+--- /dev/null
++++ b/src/orders/fulfilment/picking.ts
+@@ -0,0 +1,24 @@
++import { warehouse } from "../../lib/warehouse.js";
++import { logger } from "../../lib/logger.js";
++import type { Order, PickedItem } from "../types.js";
++
++export class PickingService {
++  async pick(order: Order): Promise<PickedItem[]> {
++    const picked: PickedItem[] = [];
++    for (const line of order.lines) {
++      const stock = await warehouse.reserve(line.sku, line.quantity);
++      if (!stock) {
++        logger.warn({ sku: line.sku, order: order.id }, "out of stock");
++        continue;
++      }
++      picked.push({ sku: line.sku, quantity: line.quantity, bin: stock.bin });
++    }
++    return picked;
++  }
++
++  async unpick(items: PickedItem[]): Promise<void> {
++    for (const item of items) {
++      await warehouse.release(item.sku, item.quantity);
++    }
++  }
++}
+diff --git a/src/orders/fulfilment/shipping.ts b/src/orders/fulfilment/shipping.ts
+new file mode 100644
+index 0000000..b70cc19
+--- /dev/null
++++ b/src/orders/fulfilment/shipping.ts
+@@ -0,0 +1,13 @@
++import { courier } from "../../lib/courier.js";
++import type { Order, PickedItem } from "../types.js";
++
++export class ShippingService {
++  async book(order: Order, items: PickedItem[]): Promise<void> {
++    if (items.length === 0) return;
++    const label = await courier.createLabel({
++      address: order.shippingAddress,
++      parcels: items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
++    });
++    await courier.dispatch(label.id);
++  }
++}

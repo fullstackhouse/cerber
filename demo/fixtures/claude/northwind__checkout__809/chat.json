@@ -1,0 +1,11 @@
+{
+  "turns": [],
+  "fallback": {
+    "progress": [
+      "Re-reading the review and the diff for what you're asking about."
+    ],
+    "costUsd": 0.04,
+    "reply": "I reviewed this from the diff alone — no checkout — so I can speak to the two files in the change and not much past them. Both findings are presentation calls rather than correctness ones, and I'd approve with either left as it is.\n\nTell me which one you want defended or dropped and I'll answer that.",
+    "revisions": []
+  }
+}

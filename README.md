@@ -23,6 +23,16 @@ That gate is the whole point, and the reason this is not another review bot:
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
+**The whole loop in seventeen seconds** — five PRs already drafted when you sit
+down, the one that isn't an approval, straight to its blocker, arguing with the
+reviewer until it rewrites its own finding, dropping the comment you disagree
+with, and sending what's left as your review:
+
+![The cockpit: an inbox of five drafted reviews; opening the one with a blocker; jumping to the finding through the walkthrough rail; asking the reviewer whether the bug is real and watching it revise its own comment; dropping a second comment; then sending the review to GitHub.](docs/demo.gif)
+
+Same recording in full colour, if the GIF's palette is fighting the code:
+[`docs/demo.mp4`](docs/demo.mp4).
+
 **A drafted review, as you read it** — verdict and confidence beside the PR
 title, the walkthrough rail on the left, a summary written for someone who has
 not read the diff:

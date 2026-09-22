@@ -1,0 +1,11 @@
+{
+  "turns": [],
+  "fallback": {
+    "progress": [
+      "Re-reading the review and the diff for what you're asking about."
+    ],
+    "costUsd": 0.04,
+    "reply": "The arithmetic I'm confident about. The rule isn't mine to settle — per-line versus whole-invoice rounding is a tax decision, and nothing in the diff says which one the business follows.\n\nIf you know the answer, tell me and I'll rewrite that comment to say it rather than ask it.",
+    "revisions": []
+  }
+}
