@@ -19,6 +19,10 @@ pnpm dev doctor     # the same preflight a user gets
 
 `pnpm typecheck && pnpm test` is the gate. Both must pass; CI runs them again.
 
+To drive the cockpit without a GitHub token, a Claude subscription or a network —
+useful for working on the UI, and for trying the Send button without sending
+anything — run [`demo/run.sh`](./demo/README.md).
+
 - **Tests live next to the code** (`src/core/foo.ts` → `src/core/foo.test.ts`), and
   a change to behaviour comes with one that fails without it.
 - **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
