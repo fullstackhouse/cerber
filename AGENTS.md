@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Cerber: AI code-review cockpit. Codex reviews PRs into local JSON artifacts;
+Cerber: AI code-review cockpit. Claude reviews PRs into local JSON artifacts;
 the user walks through them in a local React cockpit. **Hard rule: cerber never
 writes to GitHub except (a) an explicit, user-confirmed Send, or (b) daemon
 auto-send that the user explicitly enabled with --auto-send — approve-only,
@@ -88,13 +88,13 @@ left unwritten. Code and tests win when they disagree.
   nothing) and settings
   (`config.ts` — `~/.cerber/config.json`, zod-validated, written by the CLI and
   the cockpit's settings screen)
-- `src/runner/` — review prompt + headless `Codex -p --output-format
+- `src/runner/` — review prompt + headless `claude -p --output-format
   stream-json` runner (rides the user's login; prompt on stdin; validate output
   with zod, retry once on bad JSON; `progress.ts` turns the run's own events
   into the plain-English lines the cockpit and the logs show while it works). Runs inside the PR checkout with `Read`/`Grep`/`Glob`
   only; `--no-source` reviews the diff alone, with every tool off and an empty cwd.
   `chat.ts` is one turn of a conversation about a finished draft: it resumes the
-  review's own session (`run.sessionId`, captured from `Codex -p`), re-clones an
+  review's own session (`run.sessionId`, captured from `claude -p`), re-clones an
   evicted checkout so resume is whole, and revises the artifact directly
 - `src/server/` — Hono API + static cockpit serving, plus the inbox loop
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
@@ -130,24 +130,44 @@ left unwritten. Code and tests win when they disagree.
   an open request only means you never pressed GitHub's review button, not that
   anyone is blocked on you. Bots are excluded, and a read that fails reports
   `unknown` rather than guessing silence at someone who did reply.
-  Each new PR is also announced on this machine as it lands (`core/notify.ts` —
-  `notify-send` on Linux, quiet where there is neither): the cockpit's
-  own bell needs a live, permitted tab, so it is silent exactly when the user is
-  furthest from cerber. The stub artifact is the ledger — a PR is announced on
-  the poll that first writes one for it, so a restart re-announces nothing.
-  Clicking the tap opens the review, which on macOS is why cerber builds its own
-  `Cerber.app` under `~/.cerber` and posts through that: a notification can only
-  open the app that posted it, and `osascript`'s belong to Script Editor. macOS
-  drops one silently unless the bundle has a stable identifier, a signature that
-  survived the plist edits, and a home LaunchServices will register — the
-  fallback for any of that failing is the plain `osascript` tap
+  Each piece of news about a PR is also announced once on this machine — at most
+  two, "nobody is drafting this" and "here is the draft" (`core/notify.ts` —
+  `notify-send` on Linux, quiet where there is neither): the cockpit's own bell
+  needs a live, permitted tab, so it is silent exactly when the user is furthest
+  from cerber. The tap goes out when the row is worth coming back for
+  (`isNews`), not when it arrives — with auto-review on that is the draft
+  landing, and the notice leads with what it found, because a tap onto "no run
+  yet" spends the walk back for nothing and the moment there was finally
+  something to read would pass in silence. A PR nobody is drafting (auto-review
+  off, a run that failed) is announced as it lands, since that is all the news
+  there will be — and a run that dies before it owns the artifact is written
+  onto the row as `failed`, so "nothing is coming" is a fact both bells can
+  read rather than one the poll keeps to itself. `notified` on the artifact is
+  the ledger, and absent ≠ null: null is "owed a tap", a record is "told, and
+  what was said", absent is a row nobody meant to announce — so a restart
+  re-announces nothing and an upgrade announces no backlog. It is stamped even
+  when the toggle is off, so switching it on doesn't deliver a quiet week all
+  at once. It records *what* was said because a failed run is retried on the
+  next poll: a row told "nobody drafted this" is news again once a draft
+  exists (`pendingNews`), while one already announced as drafted stays quiet
+  however its next re-review ends — a PR you were told about is not news for
+  getting worse. The cockpit's bell says the same with a draft-specific
+  seen-key. Clicking the tap opens the review, which on macOS is why cerber
+  builds its own `Cerber.app` under `~/.cerber` and posts through that: a
+  notification can only open the app that posted it, and `osascript`'s belong to
+  Script Editor. macOS drops one silently unless the bundle has a stable
+  identifier, a signature that survived the plist edits, and a home
+  LaunchServices will register — the fallback for any of that failing is the
+  plain `osascript` tap
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and
-  raises a desktop notification for PRs this browser has never seen. Browser
-  state, not config — the permission is the browser's, so the switch and the
-  announced-keys record live in localStorage beside it. It stands down when the
-  daemon announces arrivals on this same machine (`daemonAnnouncesHere`), so one
+  raises a desktop notification for PRs this browser has never seen, on the same
+  `isNews` timing the daemon uses — a row held back for its draft is not
+  recorded as seen either, or the announcement would be spent on the silence.
+  Browser state, not config — the permission is the browser's, so the switch and
+  the announced-keys record live in localStorage beside it. It stands down when
+  the daemon announces on this same machine (`daemonAnnouncesHere`), so one
   PR is one popup; a cockpit served from a non-loopback host keeps ringing,
   since that machine's tap lands where nobody is looking. `favicon.ts` is the
   quiet half of the same job: a dot on the tab icon while the inbox holds
@@ -165,7 +185,7 @@ left unwritten. Code and tests win when they disagree.
 
 - TypeScript strict, ESM (NodeNext in src/, bundler in web/)
 - State files are user-editable: read defensively, write atomically (tmp+rename)
-- Zero config: ride existing `gh`/`Codex` logins, degrade gracefully
+- Zero config: ride existing `gh`/`claude` logins, degrade gracefully
 - `pnpm typecheck && pnpm test` must pass before commit
 - Conventional commits — they drive the release: every green merge to `main`
   runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
@@ -177,7 +197,7 @@ left unwritten. Code and tests win when they disagree.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
-- Don't handle API keys — `gh` and `Codex` own auth
+- Don't handle API keys — `gh` and `claude` own auth
 - A re-review replaces the whole draft, comments included — the user's own
   along with the AI's. That is a decision, not a gap to fix: half-keeping them
   (carrying on success, losing on failure) costs the code and still loses the

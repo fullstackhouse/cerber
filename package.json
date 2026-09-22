@@ -3,6 +3,18 @@
   "version": "0.30.0",
   "description": "AI code-review cockpit: Claude reviews your PRs into local artifacts; nothing reaches GitHub until you say so.",
   "license": "MIT",
+  "keywords": [
+    "code-review",
+    "pull-request",
+    "ai",
+    "claude",
+    "claude-code",
+    "github",
+    "cli",
+    "local-first",
+    "developer-tools",
+    "human-in-the-loop"
+  ],
   "author": "Full Stack House (https://fullstack.house)",
   "repository": "github:fullstackhouse/cerber",
   "type": "module",
