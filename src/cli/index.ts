@@ -39,8 +39,8 @@ const { version } = createRequire(import.meta.url)("../../package.json") as { ve
  * poll. `allowDegraded` is for `serve --no-poll`, which is still useful for
  * reading artifacts already on disk.
  */
-async function requireTools(allowDegraded = false): Promise<void> {
-  const checks = await preflight();
+async function requireTools(allowDegraded = false, opts: { git?: boolean } = {}): Promise<void> {
+  const checks = await preflight(opts);
   if (!checks.some(isBlocking)) return;
   const message = formatBlockers(checks);
   if (allowDegraded) {
@@ -89,7 +89,8 @@ program
         trust?: boolean;
       },
     ) => {
-      await requireTools();
+      // `--no-source` never clones the PR head, so a missing `git` is not its problem.
+      await requireTools(false, { git: opts.source });
       let refs: PrRef[];
       if (opts.awaitingMe) {
         const found = await searchAwaitingMe(opts.repo);
@@ -464,6 +465,7 @@ program
     for (const c of checks) {
       if (c.status === "ok") {
         console.log(`  ✔ ${c.name.padEnd(22)} ${c.detail ?? ""}`.trimEnd());
+        if (c.note) console.log(`    ${c.note}`);
       } else {
         console.log(`  ✗ ${c.name.padEnd(22)} ${c.status === "missing" ? "not installed" : "not logged in"}`);
         if (c.fix) console.log(`    ${c.fix}`);
@@ -540,7 +542,7 @@ program
       }
       // Without `gh` the cockpit binds, polls into an error loop and shows an
       // empty queue; `--no-poll` is the one shape that still works offline.
-      await requireTools(!opts.poll);
+      await requireTools(!opts.poll, { git: opts.source });
       const threshold = Math.min(100, Math.max(50, Number(opts.autoSendThreshold) || 90));
       if (opts.autoSend) {
         console.log(

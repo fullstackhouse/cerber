@@ -44,6 +44,16 @@ describe("checkGh", () => {
 });
 
 describe("checkClaude", () => {
+  // `claude --version` answers the same logged in or out, so a pass here must
+  // not read as "your session works" — it said everything was fine while the
+  // first review failed on a logged-out CLI.
+  it("does not claim to have checked the login", async () => {
+    exec.mockResolvedValueOnce({ stdout: "2.1.278 (Claude Code)\n" });
+    const check = await checkClaude();
+    expect(check.status).toBe("ok");
+    expect(check.note).toMatch(/login not checked/);
+  });
+
   it("points at Claude Code, and says there is no API-key path", async () => {
     exec.mockRejectedValueOnce(enoent());
     const check = await checkClaude();
@@ -58,6 +68,14 @@ describe("preflight", () => {
     const checks = await preflight();
     expect(checks.map((c) => c.name)).toEqual(["gh (GitHub CLI)", "claude (Claude Code)", "git"]);
     expect(checks.some(isBlocking)).toBe(false);
+  });
+
+  // `--no-source` reviews the diff alone and never clones the PR head, so a
+  // missing git must not stop it — the first cut blocked that run too.
+  it("skips git when the run will not clone a checkout", async () => {
+    exec.mockResolvedValue({ stdout: "ok\n" });
+    const checks = await preflight({ git: false });
+    expect(checks.map((c) => c.name)).toEqual(["gh (GitHub CLI)", "claude (Claude Code)"]);
   });
 });
 

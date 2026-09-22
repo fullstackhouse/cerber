@@ -22,6 +22,8 @@ export type Check = {
   detail?: string;
   /** Present when not `ok` — one line the user can act on. */
   fix?: string;
+  /** A limit of the check itself, shown even when it passes. */
+  note?: string;
 };
 
 export function isBlocking(check: Check): boolean {
@@ -78,7 +80,17 @@ export async function checkClaude(): Promise<Check> {
       fix: "Run `claude` once and log in — a review is drafted through your Claude Code session.",
     };
   }
-  return { name: "claude (Claude Code)", status: "ok", detail: version.out.split("\n")[0] };
+  // `claude --version` answers whether or not anyone is logged in, and the only
+  // honest way to test the session is to spend a turn on it — too expensive for
+  // something that runs before every review. So the check says what it knows
+  // and names where the real answer shows up, rather than implying it verified
+  // a login it never looked at.
+  return {
+    name: "claude (Claude Code)",
+    status: "ok",
+    detail: version.out.split("\n")[0],
+    note: "installed; login not checked — a logged-out CLI fails on the first review, with claude's own message",
+  };
 }
 
 export async function checkGit(): Promise<Check> {
@@ -93,9 +105,16 @@ export async function checkGit(): Promise<Check> {
   return { name: "git", status: "ok", detail: version.out.split("\n")[0] };
 }
 
-/** Everything cerber shells out to, checked in parallel. */
-export async function preflight(): Promise<Check[]> {
-  return Promise.all([checkGh(), checkClaude(), checkGit()]);
+/**
+ * Everything cerber shells out to for this command, checked in parallel.
+ *
+ * `git` is only reached when a run clones the PR head, so `--no-source` must
+ * not be blocked by its absence: that mode reviews the diff alone and never
+ * touches a checkout.
+ */
+export async function preflight(opts: { git?: boolean } = {}): Promise<Check[]> {
+  const needsGit = opts.git ?? true;
+  return Promise.all([checkGh(), checkClaude(), ...(needsGit ? [checkGit()] : [])]);
 }
 
 /** The blocking checks, formatted as the message printed instead of failing later. */
