@@ -23,6 +23,19 @@ That gate is the whole point, and the reason this is not another review bot:
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
+**The whole loop in seventeen seconds** — five PRs already drafted when you sit
+down, the one that isn't an approval, straight to its blocker, arguing with the
+reviewer until it rewrites its own finding, dropping the comment you disagree
+with, and sending what's left as your review:
+
+![The cockpit: an inbox of five drafted reviews; opening the one with a blocker; jumping to the finding through the walkthrough rail; asking the reviewer whether the bug is real and watching it revise its own comment; dropping a second comment; then sending the review to GitHub.](docs/demo.gif)
+
+Same recording in full colour, if the GIF's palette is fighting the code:
+[`docs/demo.mp4`](docs/demo.mp4). Both come from
+[`demo/run.sh`](demo/README.md) — fixture PRs, a stubbed `gh` and a stubbed
+`claude`, no network — so you can record your own, and so the Send at the end
+was a real click that wrote a real payload to a file instead of to GitHub.
+
 **A drafted review, as you read it** — verdict and confidence beside the PR
 title, the walkthrough rail on the left, a summary written for someone who has
 not read the diff:
@@ -35,8 +48,9 @@ there:
 
 ![The queue: three drafted reviews, each with a verdict and confidence in its row; under the cursor, a strip quotes the selected review's own reasoning so it can be judged without opening it.](docs/queue.png)
 
-*Every screenshot in this README is cerber reviewing cerber's own pull
-requests.*
+*The two screenshots above are cerber reviewing cerber's own pull requests. The
+recording uses `demo/`'s fixtures — a fictional team, so the whole thing can run
+with no network and end on a Send that is safe to press.*
 
 ## Quick start
 
