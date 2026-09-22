@@ -1,0 +1,144 @@
+diff --git a/src/payments/retry-queue.ts b/src/payments/retry-queue.ts
+new file mode 100644
+index 0000000..7c31f9a
+--- /dev/null
++++ b/src/payments/retry-queue.ts
+@@ -0,0 +1,47 @@
++import { setTimeout as delay } from "node:timers/promises";
++import { logger } from "../lib/logger.js";
++
++const BASE_DELAY_MS = 500;
++const MAX_ATTEMPTS = 5;
++
++export interface RetryTask<T> {
++  /** Identifies the task in the retry logs. */
++  name: string;
++  run: () => Promise<T>;
++}
++
++export class RetriesExhausted extends Error {
++  constructor(
++    readonly task: string,
++    readonly attempts: number,
++    readonly cause: unknown,
++  ) {
++    super(`${task} failed after ${attempts} attempts`);
++  }
++}
++
++/**
++ * Run a task, retrying failures with exponential backoff and full jitter.
++ *
++ * Stripe gives up on a webhook after a few days of its own retries, which is
++ * far longer than we can hold a request open — so transient failures (a lock
++ * timeout, a blip talking to the ledger) are retried here instead of bouncing
++ * back to Stripe and waiting an hour for the next delivery.
++ */
++export async function withBackoff<T>(task: RetryTask<T>): Promise<T> {
++  let lastError: unknown;
++  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
++    try {
++      return await task.run();
++    } catch (err) {
++      lastError = err;
++      const wait = Math.round(Math.random() * BASE_DELAY_MS * 2 ** (attempt - 1));
++      logger.warn(
++        { task: task.name, attempt, wait, err },
++        "task failed, retrying after backoff",
++      );
++      await delay(wait);
++    }
++  }
++  throw new RetriesExhausted(task.name, MAX_ATTEMPTS, lastError);
++}
+diff --git a/src/payments/webhook-handler.ts b/src/payments/webhook-handler.ts
+index 3a1b8c2..e90d114 100644
+--- a/src/payments/webhook-handler.ts
++++ b/src/payments/webhook-handler.ts
+@@ -1,6 +1,7 @@
+ import { logger } from "../lib/logger.js";
+ import { capturePayment, refundPayment } from "./capture.js";
+ import { StripeEvent } from "./types.js";
++import { RetriesExhausted, withBackoff } from "./retry-queue.js";
+ 
+ /**
+  * Payment intents we are working on right now. A second delivery of the same
+@@ -8,29 +9,42 @@ import { StripeEvent } from "./types.js";
+  */
+ const inFlight = new Set<string>();
+ 
++async function processWithRetry(event: StripeEvent): Promise<void> {
++  await withBackoff({
++    name: `webhook:${event.data.object.id}`,
++    run: () => dispatch(event),
++  });
++}
++
+ export async function handleWebhook(event: StripeEvent): Promise<void> {
+   const intentId = event.data.object.id;
+   if (inFlight.has(intentId)) {
+     logger.info({ intent: intentId }, "webhook already in flight, ignoring");
+     return;
+   }
+   inFlight.add(intentId);
+   try {
+-    await dispatch(event);
++    await processWithRetry(event);
++  } catch (err) {
++    if (err instanceof RetriesExhausted) {
++      logger.error({ err, intent: intentId }, "webhook gave up after retries");
++      return;
++    }
++    throw err;
+   } finally {
+     inFlight.delete(intentId);
+   }
+ }
+ 
+ async function dispatch(event: StripeEvent): Promise<void> {
+   switch (event.type) {
+     case "payment_intent.requires_capture":
+       await capturePayment(event.data.object);
+       break;
+     case "charge.refunded":
+       await refundPayment(event.data.object);
+       break;
+     default:
+       logger.debug({ type: event.type }, "webhook type not handled");
+   }
+ }
+diff --git a/src/payments/webhook-handler.test.ts b/src/payments/webhook-handler.test.ts
+index 5f0a7d1..b2c4e88 100644
+--- a/src/payments/webhook-handler.test.ts
++++ b/src/payments/webhook-handler.test.ts
+@@ -1,6 +1,7 @@
+ import { describe, expect, it, vi } from "vitest";
+ import { handleWebhook } from "./webhook-handler.js";
+ import { capturePayment } from "./capture.js";
++import { requiresCapture } from "../../test/factories.js";
+ 
+ vi.mock("./capture.js");
+ 
+@@ -20,4 +21,22 @@ describe("handleWebhook", () => {
+     await handleWebhook(requiresCapture("pi_1"));
+     expect(capturePayment).toHaveBeenCalledTimes(1);
+   });
++
++  it("retries a failing capture and succeeds on the second attempt", async () => {
++    vi.mocked(capturePayment)
++      .mockRejectedValueOnce(new Error("lock timeout"))
++      .mockResolvedValueOnce(undefined);
++
++    await handleWebhook(requiresCapture("pi_2"));
++
++    expect(capturePayment).toHaveBeenCalledTimes(2);
++  });
++
++  it("gives up quietly once the retries are exhausted", async () => {
++    vi.mocked(capturePayment).mockRejectedValue(new Error("ledger down"));
++
++    await expect(handleWebhook(requiresCapture("pi_3"))).resolves.toBeUndefined();
++
++    expect(capturePayment).toHaveBeenCalledTimes(5);
++  });
+ });

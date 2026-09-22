@@ -1,0 +1,50 @@
+{
+  "progress": [
+    "Reading the change — VAT moves from one rate for the invoice to a rate per line.",
+    "Working out what the new rounding does to invoices that already exist.",
+    "The arithmetic is right; the rule it implements is a question for someone else. Writing that."
+  ],
+  "costUsd": 0.22,
+  "review": {
+    "summary": "An invoice with mixed VAT rates — 20% on goods, 5% on the installation line — took the *first* line's rate and applied it to the whole net. On the invoice the Leeds branch reported, that came out £38 too high.\n\nVAT is now computed per line and summed, with each line rounded to the nearest penny on the way. A new `lineVat` does the per-line maths and `roundMinor` does the rounding, halves away from zero. A test covers an invoice carrying two rates.",
+    "chapters": [
+      {
+        "id": "per-line",
+        "title": "VAT per line, rounded per line",
+        "explanation": "`lineVat` computes and rounds one line's VAT; `invoiceTotals` sums those instead of applying one rate to the whole net. The rounding rule is new and applies to every invoice, not just mixed-rate ones.",
+        "files": [
+          "src/invoices/totals.ts"
+        ]
+      },
+      {
+        "id": "test",
+        "title": "The mixed-rate test",
+        "explanation": "Two lines at 20% and 5% on a £20 net, expecting £2.50 of VAT. It pins the reported bug; it does not pin the rounding.",
+        "files": [
+          "src/invoices/totals.test.ts"
+        ]
+      }
+    ],
+    "comments": [
+      {
+        "path": "src/invoices/totals.ts",
+        "line": 6,
+        "severity": "minor",
+        "chapterId": "per-line",
+        "body": "Rounding halves away from zero is a choice, and it is not obviously the one the rule wants.\n\nHMRC lets a trader round VAT down to the nearest penny per line, or round to the nearest penny, as long as it is applied consistently — and whichever this is now, it is what every invoice gets from here on. A one-line comment naming the rule being implemented, and who confirmed it, would make this reviewable by the person who actually knows."
+      },
+      {
+        "path": "src/invoices/totals.ts",
+        "line": 20,
+        "severity": "minor",
+        "chapterId": "per-line",
+        "body": "Invoices that already exist will re-render with a different total.\n\nRounding each line and then summing can differ from rounding once at the end by up to half a penny per line. Anything that re-computes totals from stored lines — a PDF regenerated, a credit note, the statement view — will now disagree with the figure the customer was sent and paid. Worth knowing whether those paths recompute or read a stored total before this ships."
+      }
+    ],
+    "verdict": {
+      "recommendation": "comment",
+      "confidence": 68,
+      "reasoning": "The arithmetic does what the description says; what I can't settle is whether the rounding rule it introduces is the right one.\n\n- **Checked the maths** — 20% of £10 plus 5% of £10 is £2.50, and the new test asserts exactly that. The old code would have returned £4.00 here, which matches the reported symptom.\n- **Read the rounding** — `Math.sign(v) * Math.round(Math.abs(v))` is round-half-away-from-zero, which differs from `Math.round` only on negative halves. Credit notes carry negative lines, so it does come up.\n- **Couldn't settle the rule** — per-line versus whole-invoice rounding is a tax decision, not a code one, and nothing in the diff says which one the business follows. Someone who knows the answer should say so before this ships.\n- **Couldn't check the re-render paths** — whether stored invoices recompute their totals is outside this diff and there is no checkout here. That is the risk that decides whether this is safe to release quietly.\n- **No blockers** — nothing here is wrong on its own terms, so this is a question rather than a refusal."
+    }
+  }
+}

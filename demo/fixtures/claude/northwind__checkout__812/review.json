@@ -1,0 +1,67 @@
+{
+  "progress": [
+    "Reading the diff — three files: a new retry helper, the webhook handler that uses it, and its tests.",
+    "The dedupe guard is keyed on the payment intent, not on the Stripe event, and it's cleared in a finally. Working out what that leaves open.",
+    "Following a redelivery of the same event through the new retry path.",
+    "It re-enters the capture with no idempotency key. That's a blocker — writing it up.",
+    "Grading the other two findings and settling the verdict."
+  ],
+  "costUsd": 0.42,
+  "review": {
+    "summary": "### 🎯 A lock timeout on the ledger lost the capture outright\n\nWhen the ledger was slow to answer, `capturePayment` threw, the webhook handler let the error out, and Stripe got a 500. The order stayed unpaid until somebody noticed and replayed the event by hand. The PR description counts four of those last month.\n\n### 🔧 Retry in-process instead of handing the failure back to Stripe\n\nA new `withBackoff` helper runs a task up to five times, sleeping a jittered exponential delay between attempts (500ms base, so roughly 0-0.5s, 0-1s, 0-2s, 0-4s). `handleWebhook` now runs `dispatch` through it rather than calling it directly, so a lock timeout is retried inside the same request instead of waiting an hour for Stripe's next delivery.\n\n### 🔍 Details\n\nThe jitter is full jitter — `Math.random() * base * 2 ** (attempt - 1)` — not the exponential value itself, so a burst of simultaneous failures spreads out instead of retrying in lockstep. Exhausting the attempts throws `RetriesExhausted`, which carries the task name, the attempt count and the original error. The handler catches that one class and returns; anything else still propagates.\n\nThe two new tests pin the retry-then-succeed path (two calls to `capturePayment`) and the give-up path (five calls, handler resolves).\n\n### ⚠️ Worth knowing\n\nThe retry re-enters the charge path with nothing keyed to the Stripe event, so a redelivery can capture the same payment twice. The give-up branch makes that more likely rather than less, because it returns 200 and tells Stripe the delivery succeeded. Both are in the comments.",
+    "chapters": [
+      {
+        "id": "retry-helper",
+        "title": "The backoff helper",
+        "explanation": "A new `withBackoff` in `src/payments/retry-queue.ts` runs a task up to five times with a jittered exponential delay, and throws `RetriesExhausted` carrying the original error when it runs out. Worth looking at the loop bounds and what the error type gives callers to branch on.",
+        "files": [
+          "src/payments/retry-queue.ts"
+        ]
+      },
+      {
+        "id": "handler-wiring",
+        "title": "The webhook handler runs through it",
+        "explanation": "`handleWebhook` now calls `dispatch` via the helper, and swallows `RetriesExhausted` so Stripe sees a 200. This is where the risk lives: the existing `inFlight` guard is keyed on the payment intent, and the retry loop re-enters the charge path.",
+        "files": [
+          "src/payments/webhook-handler.ts"
+        ]
+      },
+      {
+        "id": "tests",
+        "title": "What the new tests pin down",
+        "explanation": "Two cases: a capture that fails once and then succeeds, and one that never succeeds. Both assert on how many times `capturePayment` was called, which is the right thing to assert here.",
+        "files": [
+          "src/payments/webhook-handler.test.ts"
+        ]
+      }
+    ],
+    "comments": [
+      {
+        "path": "src/payments/webhook-handler.ts",
+        "line": 15,
+        "severity": "blocker",
+        "chapterId": "handler-wiring",
+        "body": "A redelivered webhook can capture the same payment twice.\n\n`inFlight` is keyed on the payment intent and cleared in the `finally`, so it only ever guards two deliveries that overlap in time. Nothing records the Stripe event id, and `capturePayment` takes no idempotency key — so when Stripe redelivers `payment_intent.requires_capture`, this line walks straight back into the charge path and the customer pays twice.\n\nStripe retries a delivery for up to three days, and the give-up branch below returns 200, which is exactly when a redelivery arrives. Key the guard on `event.id` and pass it to `capturePayment` as the idempotency key."
+      },
+      {
+        "path": "src/payments/webhook-handler.ts",
+        "line": 30,
+        "severity": "minor",
+        "chapterId": "handler-wiring",
+        "body": "Giving up returns 200, so Stripe stops redelivering and the payment is lost for good.\n\nThat is the bug this PR exists to fix, moved one layer along: before, a failure at least came back an hour later. Now five attempts inside one request is the whole budget. Rethrow after the retries, or write the event somewhere a human reads, so a ledger outage longer than two seconds doesn't quietly drop orders."
+      },
+      {
+        "path": "src/payments/retry-queue.ts",
+        "line": 9,
+        "severity": "nit",
+        "chapterId": "retry-helper",
+        "body": "`name` holds a payment intent id, which makes the retry logs read oddly.\n\nThe only call site passes `webhook:pi_3Px…`, so the warnings come out as `task: \"webhook:pi_3Px…\"`. `key` would say what it actually is."
+      }
+    ],
+    "verdict": {
+      "recommendation": "request_changes",
+      "confidence": 91,
+      "reasoning": "The retry path can charge a customer twice — that is the blocker, and everything else here is fine.\n\n- **Traced the dedupe guard** — `inFlight` is an in-process `Set` keyed on `event.data.object.id` and cleared in the `finally`, so it survives exactly as long as the request. Nothing in the diff records a Stripe event id anywhere.\n- **Followed the redelivery** — the give-up branch returns 200, so Stripe marks the delivery done; but its own retries also fire on any 5xx or timeout, and each one re-enters `dispatch` through this line with no idempotency key.\n- **Read the backoff maths** — full jitter, base 500ms, five attempts. Worst case is about 7.5s held open in one request, which is survivable, and the jitter does spread a thundering herd.\n- **Checked the tests** — they pin the two paths the description claims and assert on call counts. Neither covers a second delivery of the same event, which is the case that breaks.\n- **Didn't run anything** — this was reviewed from the diff alone, with no checkout. `capturePayment` is not in the diff, so \"takes no idempotency key\" comes from the call site; if it derives one internally from the intent, the blocker softens to a minor. Worth confirming in `src/payments/capture.ts`."
+    }
+  }
+}

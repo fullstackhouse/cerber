@@ -1,0 +1,11 @@
+{
+  "turns": [],
+  "fallback": {
+    "progress": [
+      "Re-reading the review and the diff for what you're asking about."
+    ],
+    "costUsd": 0.04,
+    "reply": "There isn't much here to argue about: one dependency, a patch version, and a lockfile that moved nothing else. I read the three lock hunks and they are all the same package.\n\nWhat I can't tell you is whether the build still passes — that's CI's job, not a diff read's.",
+    "revisions": []
+  }
+}

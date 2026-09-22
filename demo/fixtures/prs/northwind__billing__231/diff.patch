@@ -1,0 +1,49 @@
+diff --git a/src/invoices/totals.ts b/src/invoices/totals.ts
+index 2c9e441..ab3f107 100644
+--- a/src/invoices/totals.ts
++++ b/src/invoices/totals.ts
+@@ -1,13 +1,22 @@
+ import type { InvoiceLine, Money } from "./types.js";
+ import { addMoney, multiply, zero } from "../lib/money.js";
+ 
++/** Round to the nearest minor unit, halves away from zero. */
++function roundMinor(value: number): number {
++  return Math.sign(value) * Math.round(Math.abs(value));
++}
++
+ export function lineNet(line: InvoiceLine): Money {
+   return multiply(line.unitPrice, line.quantity);
+ }
+ 
++export function lineVat(line: InvoiceLine): Money {
++  const net = lineNet(line);
++  return { currency: net.currency, minor: roundMinor(net.minor * line.vatRate) };
++}
++
+ export function invoiceTotals(lines: InvoiceLine[], currency: string) {
+   const net = lines.reduce((sum, l) => addMoney(sum, lineNet(l)), zero(currency));
+-  const vatRate = lines[0]?.vatRate ?? 0;
+-  const vat = { currency, minor: Math.round(net.minor * vatRate) };
++  const vat = lines.reduce((sum, l) => addMoney(sum, lineVat(l)), zero(currency));
+   return { net, vat, gross: addMoney(net, vat) };
+ }
+diff --git a/src/invoices/totals.test.ts b/src/invoices/totals.test.ts
+index 71b0a92..e5c3d88 100644
+--- a/src/invoices/totals.test.ts
++++ b/src/invoices/totals.test.ts
+@@ -14,4 +14,15 @@ describe("invoiceTotals", () => {
+     expect(totals.vat.minor).toBe(400);
+     expect(totals.gross.minor).toBe(2400);
+   });
++
++  it("applies each line's own VAT rate", () => {
++    const totals = invoiceTotals(
++      [line({ unitPrice: 1000, quantity: 1, vatRate: 0.2 }), line({ unitPrice: 1000, quantity: 1, vatRate: 0.05 })],
++      "GBP",
++    );
++
++    expect(totals.net.minor).toBe(2000);
++    expect(totals.vat.minor).toBe(250);
++    expect(totals.gross.minor).toBe(2250);
++  });
+ });

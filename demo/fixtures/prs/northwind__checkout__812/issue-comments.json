@@ -1,0 +1,16 @@
+[
+  {
+    "author": "marta-k",
+    "at": "2026-09-19T08:14:10Z",
+    "body": "This is the fourth lost capture this month, so I'd like it in before Friday's release.",
+    "bot": false,
+    "url": "https://github.com/northwind/checkout/pull/812#issuecomment-5512001"
+  },
+  {
+    "author": "northwind-ci[bot]",
+    "at": "2026-09-19T08:31:55Z",
+    "body": "✅ All checks have passed — 412 tests, 0 failures.",
+    "bot": true,
+    "url": "https://github.com/northwind/checkout/pull/812#issuecomment-5512044"
+  }
+]

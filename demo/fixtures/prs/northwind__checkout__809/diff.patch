@@ -1,0 +1,52 @@
+diff --git a/src/cart/promo.ts b/src/cart/promo.ts
+index 8b21d04..c7e5f33 100644
+--- a/src/cart/promo.ts
++++ b/src/cart/promo.ts
+@@ -12,6 +12,18 @@ export interface AppliedPromo {
+   amountOff: Money;
+ }
+ 
++/**
++ * How a promo should read on the summary line: "SPRING25 — 25% off" for a
++ * percentage code, "WELCOME10 — £10 off" for a fixed one.
++ */
++export function describePromo(promo: AppliedPromo): string {
++  const off =
++    promo.kind === "percentage"
++      ? `${promo.percentOff}% off`
++      : `${formatMoney(promo.amountOff)} off`;
++  return `${promo.code} — ${off}`;
++}
++
+ export function totalDiscount(promos: AppliedPromo[]): Money {
+   return promos.reduce((sum, p) => addMoney(sum, p.amountOff), zero(promos[0].amountOff.currency));
+ }
+diff --git a/src/cart/SummaryLine.tsx b/src/cart/SummaryLine.tsx
+index 1f9c882..44ad0b1 100644
+--- a/src/cart/SummaryLine.tsx
++++ b/src/cart/SummaryLine.tsx
+@@ -1,5 +1,6 @@
+ import { formatMoney } from "../lib/money.js";
+-import { totalDiscount } from "./promo.js";
++import { describePromo, totalDiscount } from "./promo.js";
++import type { AppliedPromo } from "./promo.js";
+ import type { Cart } from "./types.js";
+ 
+ export function SummaryLine({ cart }: { cart: Cart }) {
+@@ -10,6 +11,16 @@ export function SummaryLine({ cart }: { cart: Cart }) {
+         <span>Subtotal</span>
+         <span>{formatMoney(cart.subtotal)}</span>
+       </div>
++      {cart.promos.length > 0 && (
++        <div className="summary-line summary-line--promo">
++          <span>
++            {cart.promos.map((p: AppliedPromo) => describePromo(p)).join(", ")}
++          </span>
++          <span className="summary-line__amount">
++            −{formatMoney(totalDiscount(cart.promos))}
++          </span>
++        </div>
++      )}
+       <div className="summary-line summary-line--total">
+         <span>Total</span>
+         <span>{formatMoney(cart.total)}</span>

@@ -1,0 +1,20 @@
+{
+  "_owner": "northwind",
+  "_repo": "checkout",
+  "_number": 809,
+  "_updatedAt": "2026-09-18T16:41:08Z",
+  "title": "feat(cart): show promo codes on the summary line",
+  "url": "https://github.com/northwind/checkout/pull/809",
+  "author": {
+    "login": "tomek-r"
+  },
+  "body": "Support keeps getting \"did my code apply?\" tickets. The discount shows up in the total but the code itself never appears anywhere on the cart, so there's nothing to point at.\n\nAdds a `describePromo` helper and a summary row listing every applied code with the total discount beside it. Row is hidden when there are no promos.",
+  "baseRefName": "main",
+  "headRefName": "tomek/promo-on-summary",
+  "headRefOid": "9ad2e7315c6f40b8d93a1e57cc204f8b6d31a09e",
+  "additions": 24,
+  "deletions": 1,
+  "changedFiles": 2,
+  "state": "OPEN",
+  "isDraft": false
+}

@@ -1,0 +1,242 @@
+#!/usr/bin/env node
+// Offline stand-in for the GitHub CLI, for the cerber demo harness.
+//
+// cerber shells out to `gh` for everything it knows about GitHub, so putting
+// this first on PATH makes the whole product run for real against fixture
+// data — including its one write, which lands in a file instead of on GitHub.
+//
+// Every argv shape cerber actually uses is handled below. Anything else exits
+// non-zero with the exact argv it was given: a stub that answered "" to an
+// unknown call would turn a typo into a silently empty queue, which is the one
+// failure a demo cannot afford.
+//
+// See ../README.md.
+
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES = process.env.CERBER_DEMO_FIXTURES ?? path.resolve(HERE, "..", "fixtures");
+const argv = process.argv.slice(2);
+
+function out(text) {
+  process.stdout.write(text.endsWith("\n") || text === "" ? text : text + "\n");
+}
+
+/** Refuse loudly. An empty answer here reads downstream as "GitHub said no rows". */
+function unsupported(why) {
+  process.stderr.write(
+    `demo gh stub: ${why}\n` +
+      `  argv: ${JSON.stringify(argv)}\n` +
+      `  fixtures: ${FIXTURES}\n` +
+      `  Add a fixture or teach demo/bin/gh this call — see demo/README.md.\n`,
+  );
+  process.exit(1);
+}
+
+const keyOf = (owner, repo, number) => `${owner}__${repo}__${number}`;
+
+function prDir(owner, repo, number) {
+  const dir = path.join(FIXTURES, "prs", keyOf(owner, repo, number));
+  if (!existsSync(dir)) unsupported(`no fixture for ${owner}/${repo}#${number}`);
+  return dir;
+}
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/** `--jq` streams one object per line, which is what cerber's parsers expect. */
+function ndjson(rows) {
+  out(rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""));
+}
+
+/** The value after a flag: `--repo owner/repo` or `--repo=owner/repo`. */
+function flag(name) {
+  const i = argv.indexOf(name);
+  if (i !== -1 && argv[i + 1] != null) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(`${name}=`));
+  return eq ? eq.slice(name.length + 1) : null;
+}
+
+function splitRepo(value, why) {
+  const [owner, repo] = String(value ?? "").split("/");
+  if (!owner || !repo) unsupported(why);
+  return [owner, repo];
+}
+
+function allPrs() {
+  return readdirSync(path.join(FIXTURES, "prs"))
+    .filter((d) => existsSync(path.join(FIXTURES, "prs", d, "pr.json")))
+    .map((d) => readJson(path.join(FIXTURES, "prs", d, "pr.json")));
+}
+
+// ---------------------------------------------------------------- preflight
+
+if (argv[0] === "--version") {
+  out("gh version 2.63.0 (demo stub)\nhttps://github.com/cli/cli/releases/tag/v2.63.0");
+  process.exit(0);
+}
+
+if (argv[0] === "auth" && argv[1] === "status") {
+  const { login } = readJson(path.join(FIXTURES, "account.json"));
+  out(
+    `github.com\n` +
+      `  ✓ Logged in to github.com account ${login} (demo stub)\n` +
+      `  - Active account: true\n` +
+      `  - Token scopes: 'gist', 'read:org', 'repo'`,
+  );
+  process.exit(0);
+}
+
+// ------------------------------------------------------------------ pr view
+
+if (argv[0] === "pr" && argv[1] === "view") {
+  const number = Number(argv[2]);
+  const [owner, repo] = splitRepo(flag("--repo"), "pr view without --repo owner/repo");
+  const dir = prDir(owner, repo, number);
+  const fields = (flag("--json") ?? "").split(",");
+  if (fields.includes("reviewRequests")) {
+    out(JSON.stringify(readJson(path.join(dir, "review-requests.json"))));
+    process.exit(0);
+  }
+  // Answer exactly the fields asked for, the way gh does.
+  const pr = readJson(path.join(dir, "pr.json"));
+  const picked = {};
+  for (const f of fields) {
+    if (f in pr) picked[f] = pr[f];
+    else unsupported(`pr view asked for an unfixtured field: ${f}`);
+  }
+  out(JSON.stringify(picked));
+  process.exit(0);
+}
+
+// ------------------------------------------------------------------ pr diff
+
+if (argv[0] === "pr" && argv[1] === "diff") {
+  const number = Number(argv[2]);
+  const [owner, repo] = splitRepo(flag("--repo"), "pr diff without --repo owner/repo");
+  process.stdout.write(readFileSync(path.join(prDir(owner, repo, number), "diff.patch"), "utf8"));
+  process.exit(0);
+}
+
+// ------------------------------------------------------------- search prs
+
+if (argv[0] === "search" && argv[1] === "prs") {
+  const repoFilter = flag("--repo");
+  const rows = allPrs()
+    .filter((pr) => pr.state === "OPEN")
+    .filter((pr) => !repoFilter || `${pr._owner}/${pr._repo}` === repoFilter)
+    .map((pr) => ({
+      number: pr._number,
+      title: pr.title,
+      url: pr.url,
+      updatedAt: pr._updatedAt,
+      isDraft: pr.isDraft,
+      repository: { nameWithOwner: `${pr._owner}/${pr._repo}` },
+      author: pr.author,
+    }));
+  out(JSON.stringify(rows));
+  process.exit(0);
+}
+
+// ----------------------------------------------------------------- gh api
+
+if (argv[0] === "api") {
+  // THE ONLY WRITE. Record it; never leave the machine.
+  const method = flag("--method");
+  const reviewsWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(a));
+  if (method === "POST" && reviewsWrite) {
+    const [, owner, repo, , number] = reviewsWrite.split("/");
+    const body = readFileSync(0, "utf8");
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      unsupported("send payload on stdin was not JSON");
+    }
+    const home = process.env.CERBER_HOME;
+    if (!home) unsupported("CERBER_HOME is unset — refusing to record a send outside the scratch home");
+    const dir = path.join(home, "sent");
+    mkdirSync(dir, { recursive: true });
+    const at = new Date().toISOString();
+    const file = path.join(dir, `${keyOf(owner, repo, number)}-${at.replace(/[:.]/g, "-")}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({ at, endpoint: reviewsWrite, method: "POST", payload: parsed }, null, 2) + "\n",
+    );
+    process.stderr.write(`demo gh stub: recorded the review payload at ${file}\n`);
+    const id = 900000000 + Number(number);
+    out(
+      JSON.stringify({
+        id,
+        state: parsed.event === "APPROVE" ? "APPROVED" : parsed.event === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : "COMMENTED",
+        html_url: `https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview-${id}`,
+        submitted_at: at,
+        body: parsed.body,
+      }),
+    );
+    process.exit(0);
+  }
+
+  if (argv[1] === "user" && flag("--jq") === ".login") {
+    out(readJson(path.join(FIXTURES, "account.json")).login);
+    process.exit(0);
+  }
+
+  if (argv[1] === "graphql") {
+    // -F is repeatable, so `flag()` (first match wins) cannot read it.
+    const named = (name) => {
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === "-F" && String(argv[i + 1] ?? "").startsWith(`${name}=`)) {
+          return argv[i + 1].slice(name.length + 1);
+        }
+      }
+      return null;
+    };
+    const owner = named("owner");
+    const repo = named("repo");
+    const n = Number(named("number"));
+    const nodes = readJson(path.join(prDir(owner, repo, n), "review-request-events.json"));
+    out(
+      JSON.stringify({
+        data: { repository: { pullRequest: { timelineItems: { nodes } } } },
+      }),
+    );
+    process.exit(0);
+  }
+
+  const endpoint = argv.find((a) => a.startsWith("repos/") || a.startsWith("orgs/"));
+
+  // Trust rules ask about org/team membership. Nobody in a fictional org is a
+  // member of anything, and GitHub answers that with a 404.
+  if (endpoint?.startsWith("orgs/")) {
+    process.stderr.write(`gh: Not Found (HTTP 404)\n`);
+    process.exit(1);
+  }
+
+  const comments = endpoint?.match(/^repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/comments/);
+  if (comments) {
+    const dir = prDir(comments[1], comments[2], Number(comments[3]));
+    ndjson(readJson(path.join(dir, "issue-comments.json")));
+    process.exit(0);
+  }
+
+  const reviews = endpoint?.match(/^repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/reviews/);
+  if (reviews) {
+    const dir = prDir(reviews[1], reviews[2], Number(reviews[3]));
+    ndjson(readJson(path.join(dir, "reviews.json")));
+    process.exit(0);
+  }
+
+  const files = endpoint?.match(/^repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/files/);
+  if (files) {
+    // Only reached when `pr diff` refused a huge PR, which no fixture is.
+    unsupported("the files API is only used for PRs too large to diff; no fixture is");
+  }
+
+  unsupported(`unhandled gh api call`);
+}
+
+unsupported("unhandled gh invocation");

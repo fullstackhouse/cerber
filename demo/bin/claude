@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+// Offline stand-in for the Claude Code CLI, for the cerber demo harness.
+//
+// cerber spawns `claude -p --output-format stream-json --verbose` with the
+// prompt on stdin and reads newline-delimited events off stdout. This reads
+// the prompt, works out which of cerber's two prompts it is (a review, or a
+// chat turn about one), and replays the canned payload for that PR — with a
+// few narration events in front of it so the cockpit's live progress strip has
+// something real to show.
+//
+// Unknown invocations exit non-zero with the exact argv. A stub that emitted
+// no result event would surface as "claude produced no result event", which at
+// least says something; one that emitted an empty review would not.
+//
+// See ../README.md.
+
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES = process.env.CERBER_DEMO_FIXTURES ?? path.resolve(HERE, "..", "fixtures");
+const argv = process.argv.slice(2);
+
+/** Real runs take minutes. Default to a beat per event so the cockpit's
+ *  progress strip is visible on camera; set 0 for a fast scripted run. */
+const STEP_MS = Number(process.env.CERBER_DEMO_STEP_MS ?? 350);
+
+function fail(why) {
+  process.stderr.write(
+    `demo claude stub: ${why}\n` +
+      `  argv: ${JSON.stringify(argv)}\n` +
+      `  fixtures: ${FIXTURES}\n` +
+      `  See demo/README.md.\n`,
+  );
+  process.exit(1);
+}
+
+if (argv[0] === "--version") {
+  process.stdout.write("2.0.30 (Claude Code) — demo stub\n");
+  process.exit(0);
+}
+if (!argv.includes("-p")) fail("expected `claude -p …` (headless mode)");
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
+
+const sessionId = process.env.CERBER_DEMO_SESSION ?? "demo-session-0000-0000";
+
+function readStdin() {
+  try {
+    return readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function text(body) {
+  return { type: "assistant", message: { content: [{ type: "text", text: body }] } };
+}
+function tool(name, input) {
+  return { type: "assistant", message: { content: [{ type: "tool_use", name, input }] } };
+}
+
+async function narrate(steps) {
+  for (const step of steps) {
+    if (typeof step === "string") emit(text(step));
+    else emit(tool(step.tool, step.input ?? {}));
+    if (STEP_MS > 0) await sleep(STEP_MS);
+  }
+}
+
+/** The result event cerber reads: `result` is the model's whole answer. */
+function result(body, costUsd) {
+  emit({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    session_id: sessionId,
+    total_cost_usd: costUsd,
+    modelUsage: { "claude-opus-4-6-20260115": { inputTokens: 48120, outputTokens: 3180 } },
+    result: body,
+  });
+}
+
+const prompt = readStdin();
+if (!prompt.trim()) fail("no prompt arrived on stdin");
+
+const repo = prompt.match(/^Repo: (\S+)\/(\S+)$/m);
+const number = prompt.match(/^PR #(\d+):/m);
+if (!repo || !number) fail("could not find `Repo:` / `PR #n:` in the prompt");
+const key = `${repo[1]}__${repo[2]}__${number[1]}`;
+
+const isReview = prompt.startsWith("You are an expert senior code reviewer.");
+const isChat = prompt.startsWith("You are the code reviewer who wrote the review below");
+if (!isReview && !isChat) fail("the prompt is neither cerber's review prompt nor its chat prompt");
+
+const file = path.join(FIXTURES, "claude", key, isReview ? "review.json" : "chat.json");
+if (!existsSync(file)) fail(`no canned ${isReview ? "review" : "chat"} payload at ${file}`);
+const canned = JSON.parse(readFileSync(file, "utf8"));
+
+// ------------------------------------------------------------------ review
+
+if (isReview) {
+  await narrate(canned.progress ?? []);
+  // `wrap` lets a fixture prove cerber's extractJson tolerates prose around
+  // the JSON, the way a real model sometimes answers.
+  const json = JSON.stringify(canned.review, null, 2);
+  result(canned.wrap ? canned.wrap.replace("{{json}}", json) : json, canned.costUsd ?? null);
+  process.exit(0);
+}
+
+// -------------------------------------------------------------------- chat
+
+// The user's message is the tail of the chat prompt.
+const message = prompt.split("\n## The user's message\n").pop()?.trim() ?? "";
+
+/**
+ * Comment ids are minted per run, so a canned revision cannot name one. The
+ * chat prompt lists every comment as `- <id> — <path>:<line> …`, so a fixture
+ * points at "path:line" and the id is looked up here.
+ */
+function commentIds() {
+  const ids = new Map();
+  for (const line of prompt.split("\n")) {
+    const m = line.match(/^- (\S+) — (\S+?):(\d+|file-level)/);
+    if (m) ids.set(`${m[2]}:${m[3]}`, m[1]);
+  }
+  return ids;
+}
+
+function resolve(revision) {
+  if (!revision.commentAt) return revision;
+  const { commentAt, ...rest } = revision;
+  const id = commentIds().get(commentAt);
+  if (!id) fail(`the review has no comment at ${commentAt} — cannot resolve a canned revision`);
+  return { ...rest, commentId: id };
+}
+
+const turn =
+  (canned.turns ?? []).find((t) => new RegExp(t.match, "i").test(message)) ?? canned.fallback;
+if (!turn) fail(`no canned chat turn matches: ${JSON.stringify(message.slice(0, 200))}`);
+
+await narrate(turn.progress ?? []);
+result(
+  JSON.stringify({
+    reply: turn.reply,
+    revisions: (turn.revisions ?? []).map(resolve),
+  }),
+  turn.costUsd ?? null,
+);

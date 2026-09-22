@@ -1,0 +1,50 @@
+{
+  "progress": [
+    "Reading the diff — a new describePromo helper and a row in the cart summary.",
+    "Checking what happens when a cart carries more than one code.",
+    "Two things worth saying, neither of them blocking. Writing the review."
+  ],
+  "costUsd": 0.19,
+  "review": {
+    "summary": "A discount showed up in the cart total with nothing on screen naming the code that caused it, so support had no way to answer \"did my code apply?\" beyond doing the arithmetic. This adds a row to the cart summary listing every applied code and the discount beside it.\n\nThe formatting lives in a new `describePromo` in `promo.ts` — \"SPRING25 — 25% off\" for a percentage code, \"WELCOME10 — £10 off\" for a fixed one — and `SummaryLine` renders the row only when there is at least one promo. Nothing about how discounts are calculated changes.",
+    "chapters": [
+      {
+        "id": "helper",
+        "title": "How a promo reads",
+        "explanation": "`describePromo` turns an `AppliedPromo` into the one-line label the summary shows, branching on whether the code is a percentage or a fixed amount. It is the only new logic in the PR.",
+        "files": [
+          "src/cart/promo.ts"
+        ]
+      },
+      {
+        "id": "row",
+        "title": "The row in the cart summary",
+        "explanation": "A conditional row between the subtotal and the total, listing the codes and the combined discount. Worth a look at how it behaves with several codes on a narrow screen.",
+        "files": [
+          "src/cart/SummaryLine.tsx"
+        ]
+      }
+    ],
+    "comments": [
+      {
+        "path": "src/cart/promo.ts",
+        "line": 22,
+        "severity": "minor",
+        "chapterId": "helper",
+        "body": "\"off\" is hardcoded English in a file that has no other user-facing copy.\n\nEvery other label on this screen — Subtotal, Total — comes from the catalogue, so this one string will stay English in the German and Dutch storefronts. Same for the em dash separator, which is a typographic choice some locales make differently."
+      },
+      {
+        "path": "src/cart/SummaryLine.tsx",
+        "line": 17,
+        "severity": "minor",
+        "chapterId": "row",
+        "body": "Three codes in one span will overflow the summary line on a phone.\n\nThe codes are joined into a single string, so the row cannot wrap between them — it wraps mid-code or overflows, depending on the container. Stacked promos are rare but they are exactly the carts where a customer wants to check what applied. One element per code would let it wrap."
+      }
+    ],
+    "verdict": {
+      "recommendation": "approve",
+      "confidence": 88,
+      "reasoning": "No blockers — the change is small, the logic is in one testable helper, and nothing about pricing moves.\n\n- **Checked the guard** — the row renders only when `cart.promos.length > 0`, so an empty cart is unchanged and `totalDiscount`'s reliance on `promos[0]` is never reached from here.\n- **Read the two branches** — percentage and fixed-amount codes both produce a sensible label, and `formatMoney` is the same helper the rest of the summary uses.\n- **Two presentation findings** — a hardcoded string and a row that can't wrap. Both are the author's call; neither would stop me approving.\n- **No test for the helper** — `describePromo` is pure and has two branches, which is the cheapest possible test to write. Not a blocker, just noted.\n- **Didn't see the styles** — `summary-line--promo` is a new class and the stylesheet isn't in the diff. Whether the row actually looks right is something the preview would settle, not this review."
+    }
+  }
+}

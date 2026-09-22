@@ -1,0 +1,29 @@
+{
+  "progress": [
+    "A single-dependency bump — next 15.4.1 to 15.4.2.",
+    "Checking the lockfile moves only that package, and that the version is a patch.",
+    "Nothing to flag."
+  ],
+  "costUsd": 0.06,
+  "wrap": "Here is the review.\n\n{{json}}\n\nNothing else to add — it is a clean patch bump.",
+  "review": {
+    "summary": "Renovate bumps `next` from 15.4.1 to 15.4.2, a patch release. The lockfile moves the same package and nothing else — no transitive dependency changes, no new packages.\n\nUpstream's notes say the release fixes a hydration mismatch in `next/image` when `priority` is set, and a dev-server crash on Windows paths with spaces. Neither is a behaviour this app would have to adapt to.",
+    "chapters": [
+      {
+        "id": "bump",
+        "title": "The version bump",
+        "explanation": "One line in `package.json` and the matching entries in the lockfile. The integrity hash changes because the tarball does; everything else in the lock is untouched.",
+        "files": [
+          "package.json",
+          "pnpm-lock.yaml"
+        ]
+      }
+    ],
+    "comments": [],
+    "verdict": {
+      "recommendation": "approve",
+      "confidence": 94,
+      "reasoning": "No blockers, and nothing worth a comment — this is a patch bump of one dependency.\n\n- **Read the lockfile diff** — three hunks, all of them the `next` specifier, version and integrity hash. No other package moved, so nothing transitive came along.\n- **Checked the range** — 15.4.1 to 15.4.2 is a patch under semver, and the `engines` line is unchanged at `>=18.18.0`.\n- **Read the release notes in the description** — an image hydration fix and a Windows dev-server fix. Neither touches an API this app calls.\n- **Didn't run the build** — an upstream patch can still break a build in practice. CI is the thing that settles that, not a diff read."
+    }
+  }
+}
