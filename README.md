@@ -1,6 +1,7 @@
 # cerber 🐕
 
 [![npm](https://img.shields.io/npm/v/%40fullstackhouse%2Fcerber)](https://www.npmjs.com/package/@fullstackhouse/cerber)
+[![CI](https://github.com/fullstackhouse/cerber/actions/workflows/ci.yml/badge.svg)](https://github.com/fullstackhouse/cerber/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 **AI code-review cockpit.** Claude reviews your pull requests into local
@@ -11,7 +12,14 @@ with it.
 
 **Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
 write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
-reviewing is 100% local and read-only.
+reviewing is 100% local and read-only. Reviews go out under your own account,
+as your review, because you decided each line of it should.
+
+That gate is the whole point, and the reason this is not another review bot:
+
+> Reviewing pull requests with an AI model creates a specific danger: a system
+> that can both draft opinions and hold GitHub credentials will eventually post
+> one without a human deciding it should.
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
@@ -32,8 +40,18 @@ requests.*
 
 ## Quick start
 
-Requires Node 20+, an authenticated [`gh`](https://cli.github.com/) and a
-logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no config, no database.
+Requires Node 20+, an authenticated [`gh`](https://cli.github.com/), `git`, and
+a logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no
+config, no database.
+
+**Claude Code is a hard requirement, and a paid one.** Cerber drafts reviews by
+running `claude` as you: it rides your existing Claude Code login and draws on
+that plan's usage limits, so you need a Claude subscription that includes Claude
+Code. There is no `ANTHROPIC_API_KEY` path — not as a fallback, not at all.
+GitHub only; no GitLab or Bitbucket. Notifications are macOS and Linux.
+
+Run `cerber doctor` first — it checks all three tools and tells you which one to
+fix, instead of letting a missing login turn into an empty cockpit later.
 
 ```bash
 # Open the cockpit — this is the whole product
@@ -339,8 +357,15 @@ commit's SHA, so inline comments land where they were written.
 
 The AI's summary and verdict still describe the commit that was reviewed. To
 get its opinion of the new code, hit **Re-review at the new head** in the
-cockpit (or `cerber review <pr> --force`) — comments you wrote or rewrote are
-carried into the fresh review.
+cockpit (or `cerber review <pr> --force`).
+
+> ⚠️ **A re-review replaces the whole draft — including comments you wrote or
+> rewrote, and a send body you wrote yourself.** They are dropped when the run
+> starts and they do not come back, on success or on failure. This is a
+> decision, not a bug ([`docs/lifecycle.md`](docs/lifecycle.md)): the run owns
+> the draft. If you have written comments you want to keep, send the review or
+> copy them out first. Your *decisions* do survive — a send, a `reviewed` or
+> `skipped` you set, and the chat transcript are all kept.
 
 ## Arguing with the review before you send it
 
@@ -478,6 +503,15 @@ pnpm build               # dist/ (CLI+server) + web/dist (cockpit)
 
 Web cockpit dev with hot reload: `pnpm dev serve` in one terminal,
 `npx vite --config web/vite.config.ts` in another (proxies `/api`).
+
+## Contributing and security
+
+Patches welcome — [`CONTRIBUTING.md`](./CONTRIBUTING.md) has the gate
+(`pnpm typecheck && pnpm test`) and the one rule that is not negotiable.
+
+Cerber holds your GitHub credentials and, on a trusted PR, runs that PR's code.
+[`SECURITY.md`](./SECURITY.md) says exactly what that means, what is stripped
+from a trusted run, and where to report a vulnerability privately.
 
 ## License
 

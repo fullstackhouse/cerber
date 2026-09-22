@@ -81,8 +81,13 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
 
 /**
  * Org and team membership, for `@org/*` and `@org/team` trust rules. A 404 is
- * GitHub's "no" and the answer we want; anything else (no `read:org` scope, an
- * outage) throws, so a broken check can never read as "trusted".
+ * GitHub's "no"; anything else (an outage, a rate limit) throws. Either way the
+ * answer is never "trusted", which is the property that matters.
+ *
+ * Note that a token without `read:org` also gets a 404 rather than a 403 — so a
+ * missing scope reads as "not a member" and silently narrows trust instead of
+ * announcing itself. Fail-closed, but quiet: if a rule you expect to match
+ * doesn't, check the scope before the rule.
  */
 export async function isOrgMember(org: string, login: string): Promise<boolean> {
   return membershipCheck(["api", `orgs/${org}/members/${login}`, "--silent"]);
