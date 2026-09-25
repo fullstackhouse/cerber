@@ -150,7 +150,8 @@ function applyViewed(root: HTMLElement, viewed: Set<string>, peeked: Set<string>
  */
 function keepFileInView(file: HTMLElement | null, head: HTMLElement | null): void {
   if (!file || !head) return;
-  if (head.getBoundingClientRect().top > file.getBoundingClientRect().top + 1) {
+  // The file's top above the header's sticky line means the header is pinned.
+  if (file.getBoundingClientRect().top < parseFloat(getComputedStyle(head).top)) {
     requestAnimationFrame(() => file.scrollIntoView({ block: "start" }));
   }
 }
@@ -397,7 +398,8 @@ function DiffGroup({
       // The label's own click is re-fired on the box; only the box's counts.
       const wrapper = target.closest<HTMLElement>(".d2h-file-wrapper");
       if (target instanceof HTMLInputElement && target.dataset.viewedPath) {
-        keepFileInView(wrapper, wrapper?.querySelector(".d2h-file-header") ?? null);
+        // Already flipped by the click: checked now means it is about to fold.
+        if (target.checked) keepFileInView(wrapper, wrapper?.querySelector(".d2h-file-header") ?? null);
         viewedRef.current.onToggleViewed(target.dataset.viewedPath);
         return;
       }
@@ -680,7 +682,7 @@ function MarkdownFile({
             type="checkbox"
             checked={viewed}
             onChange={() => {
-              keepFileInView(fileEl.current, headEl.current);
+              if (!viewed) keepFileInView(fileEl.current, headEl.current);
               viewedState.onToggleViewed(path);
             }}
           />{" "}
