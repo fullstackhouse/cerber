@@ -2,6 +2,7 @@ import { markFavicon } from "./favicon";
 import {
   Artifact,
   ChatRef,
+  CockpitConfig,
   ConfigView,
   DaemonConfig,
   DaemonStatus,
@@ -157,6 +158,13 @@ export const updateTrustRule = (rule: string, remove = false) =>
 /** Flip the inbox knobs. The daemon picks the change up on its next poll. */
 export const updateDaemonConfig = (patch: Partial<DaemonConfig>) =>
   request<ConfigView>("/api/config/daemon", {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+
+/** Flip the review page's knobs. Applies to the next review opened. */
+export const updateCockpitConfig = (patch: Partial<CockpitConfig>) =>
+  request<ConfigView>("/api/config/cockpit", {
     method: "POST",
     body: JSON.stringify(patch),
   });

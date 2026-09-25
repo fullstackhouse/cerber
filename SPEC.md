@@ -451,6 +451,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `daemon.intervalMinutes` | positive int | `5` | |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
 | `daemon.repos` | string[] | `[]` | `owner/repo` filters; empty = everything `gh` can see |
+| `cockpit.stickyChapters` | boolean | `true` | pin a chapter's title under the top bar while scrolling through it; read when a review opens |
 
 Auto-send has deliberately **no** config-file surface; its mode and threshold
 exist only as CLI flags (§15.1), so enabling it requires a decision at every
@@ -1430,7 +1431,7 @@ static assets included. No CORS: same-origin only.
 | Method & path | Purpose | Notable answers |
 |---|---|---|
 | `GET /api/daemon` | daemon status | `{enabled: false}` when none |
-| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` | settings | full config view; 400 with the trust parser's message verbatim |
+| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/cockpit` · `POST /api/config/trust` | settings | full config view; 400 with the trust parser's message verbatim |
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |

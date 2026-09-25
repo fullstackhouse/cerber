@@ -293,8 +293,13 @@ export interface DaemonConfig {
   repos: string[];
 }
 
+export interface CockpitConfig {
+  stickyChapters: boolean;
+}
+
 export interface ConfigView {
   path: string;
   trust: TrustEntry[];
   daemon: DaemonConfig;
+  cockpit: CockpitConfig;
 }

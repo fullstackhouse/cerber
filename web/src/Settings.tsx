@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, updateCockpitConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
 import { ConfigView } from "./types";
 
@@ -135,6 +135,21 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
             the cockpit.
           </>
         )}
+      </p>
+
+      <h1>Review page</h1>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={config.cockpit.stickyChapters}
+          disabled={busy}
+          onChange={(e) => apply(updateCockpitConfig({ stickyChapters: e.target.checked }))}
+        />{" "}
+        keep the chapter title pinned while scrolling through it
+      </label>
+      <p className="muted">
+        Ten files into a chapter you still see which one you're in, and the pinned title can open
+        the chapter's explanation. Stored in <code>{config.path}</code> under <code>cockpit</code>.
       </p>
 
       <h1>Trusted PRs</h1>

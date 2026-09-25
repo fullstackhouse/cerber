@@ -37,6 +37,13 @@ export const DaemonConfigSchema = z.object({
 });
 export type DaemonConfig = z.infer<typeof DaemonConfigSchema>;
 
+/** How the cockpit's review page behaves. */
+export const CockpitConfigSchema = z.object({
+  /** Pin a chapter's title under the top bar while you scroll through it. */
+  stickyChapters: z.boolean().default(true),
+});
+export type CockpitConfig = z.infer<typeof CockpitConfigSchema>;
+
 export const ConfigSchema = z.object({
   /** Whose PRs may be reviewed by running code. See core/trust.ts for syntax. */
   trust: z
@@ -55,6 +62,7 @@ export const ConfigSchema = z.object({
       });
     }),
   daemon: DaemonConfigSchema.default({}),
+  cockpit: CockpitConfigSchema.default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

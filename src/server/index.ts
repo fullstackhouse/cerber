@@ -19,7 +19,7 @@ import {
 import { toMarkdown } from "../core/export.js";
 import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.js";
 import { z } from "zod";
-import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
+import { CockpitConfigSchema, DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
@@ -119,7 +119,12 @@ export async function buildApp(
   app.get("/api/config", async (c) => {
     try {
       const config = await loadConfig();
-      return c.json({ path: configPath(), trust: trustView(config.trust), daemon: config.daemon });
+      return c.json({
+        path: configPath(),
+        trust: trustView(config.trust),
+        daemon: config.daemon,
+        cockpit: config.cockpit,
+      });
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -138,7 +143,31 @@ export async function buildApp(
       const config = await loadConfig();
       const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
       await saveConfig({ ...config, daemon });
-      return c.json({ path: configPath(), trust: trustView(config.trust), daemon });
+      return c.json({ path: configPath(), trust: trustView(config.trust), daemon, cockpit: config.cockpit });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) {
+        return c.json(
+          { error: err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") },
+          400,
+        );
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // The review page's own knobs. The cockpit reads them when a review opens.
+  app.post("/api/config/cockpit", async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "body must be JSON" }, 400);
+    }
+    try {
+      const config = await loadConfig();
+      const cockpit = CockpitConfigSchema.parse({ ...config.cockpit, ...body });
+      await saveConfig({ ...config, cockpit });
+      return c.json({ path: configPath(), trust: trustView(config.trust), daemon: config.daemon, cockpit });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) {
         return c.json(
@@ -182,7 +211,7 @@ export async function buildApp(
       await saveConfig({ ...config, trust });
       // Full ConfigView — the cockpit replaces its config state with this
       // wholesale, so omitting daemon would crash the Settings toggles.
-      return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon });
+      return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon, cockpit: config.cockpit });
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
