@@ -1222,6 +1222,10 @@ button {
   font-weight: 500;
 }
 
+.rail-item-done {
+  color: var(--fainter);
+}
+
 .rail-group {
   margin-bottom: 2px;
 }
@@ -2191,6 +2195,39 @@ button {
 /* The offer to stop reading the diff, in the diff's own file header. */
 .d2h-file-header .md-read-toggle {
   margin-left: auto;
+}
+
+/* GitHub's "Viewed" box, at the right end of every file header. */
+.file-viewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.d2h-file-header .md-read-toggle + .file-viewed,
+.md-file-head .btn + .file-viewed {
+  margin-left: 8px;
+}
+
+/* A viewed file folds to its header until its diff changes; the header
+   opens it back up without unticking it. */
+.file-viewed-on:not(.file-peek) > :not(.d2h-file-header) {
+  display: none;
+}
+
+.file-viewed-on .d2h-file-header,
+.md-file-head-viewed {
+  cursor: pointer;
+}
+
+.file-viewed-on:not(.file-peek) .d2h-file-header,
+.md-file-head-folded {
+  opacity: 0.7;
 }
 
 /* A card's markdown sits flush with the card's own padding. A document's does

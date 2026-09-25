@@ -95,6 +95,9 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
     notified: current.notified,
     calibration: current.calibration,
     filed: current.filed,
+    // Reading progress is the user's; a mark on a file the run saw change
+    // unticks itself through its fingerprint.
+    viewed: current.viewed,
     chat: current.chat,
     preChat: current.preChat,
     pendingChat: current.pendingChat,

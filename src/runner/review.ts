@@ -235,6 +235,9 @@ async function performReview(
     // `existing` was loaded minutes ago, and a poll may have announced the row
     // since.
     notified: existing?.notified,
+    // Reading progress is the user's, like the chat. A file this run finds
+    // changed unticks itself through its fingerprint.
+    viewed: existing?.viewed,
     pr,
     diff,
     summary: "",
@@ -286,7 +289,9 @@ async function performReview(
   // must not touch.
   const decided = existing ? userOwnsStatus(existing) : false;
   const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
-    !decided && userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+    !decided && userOwnsStatus(current)
+      ? current
+      : { ...artifact, notified: current.notified, viewed: current.viewed },
   );
   const held = claimed !== null && !decided && userOwnsStatus(claimed);
   if (!held) {

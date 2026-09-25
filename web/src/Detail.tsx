@@ -1,7 +1,13 @@
 import { html } from "diff2html";
 import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
+import {
+  diffLineCounts,
+  fileFingerprint,
+  patchForFiles,
+  splitDiffByFile,
+  unclaimedFiles,
+} from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
 import {
   addComment,
@@ -17,6 +23,7 @@ import {
   rerunReview,
   resetReviewToPreChat,
   sendReview,
+  setViewed,
   startChatTurn,
 } from "./api";
 import { highlightDiff } from "./highlight";
@@ -110,6 +117,42 @@ function insertRow(row: Element, className: string): { tr: HTMLElement; holder: 
   tr.appendChild(td);
   row.after(tr);
   return { tr, holder };
+}
+
+/** Which files the reader has viewed, and which of those they opened back up. */
+interface ViewedState {
+  viewed: Set<string>;
+  peeked: Set<string>;
+  onToggleViewed: (path: string) => void;
+  onTogglePeek: (path: string) => void;
+}
+
+/**
+ * Tick each file's box and fold the viewed ones, straight on diff2html's DOM —
+ * toggling a file must not rebuild the diff under the reader.
+ */
+function applyViewed(root: HTMLElement, viewed: Set<string>, peeked: Set<string>): void {
+  root.querySelectorAll<HTMLElement>(".d2h-file-wrapper").forEach((wrapper) => {
+    const path = wrapper.dataset.path;
+    if (!path) return;
+    const on = viewed.has(path);
+    wrapper.classList.toggle("file-viewed-on", on);
+    wrapper.classList.toggle("file-peek", on && peeked.has(path));
+    const box = wrapper.querySelector<HTMLInputElement>("input[data-viewed-path]");
+    if (box) box.checked = on;
+  });
+}
+
+/** The "Viewed" box a file header carries, as GitHub has it. */
+function viewedBox(path: string): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "file-viewed";
+  label.title = "Mark as viewed — folds the file until its diff changes";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.dataset.viewedPath = path;
+  label.append(box, " Viewed");
+  return label;
 }
 
 /**
@@ -214,6 +257,7 @@ function DiffGroup({
   onAddLineComment,
   onAskAboutLine,
   onRead,
+  viewedState,
 }: {
   patch: string;
   comments: ReviewComment[];
@@ -225,6 +269,7 @@ function DiffGroup({
   onAskAboutLine: (pick: LinePick, message: string) => void;
   /** Read this markdown file as a document instead of as a diff. */
   onRead: (path: string) => void;
+  viewedState: ViewedState;
 }) {
   const rendered = useMemo(
     () =>
@@ -260,6 +305,8 @@ function DiffGroup({
   // diff underneath the reader.
   const onReadRef = useRef(onRead);
   onReadRef.current = onRead;
+  const viewedRef = useRef(viewedState);
+  viewedRef.current = viewedState;
   const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
   /** One per file, for the comments that are about the file and not a line. */
   const [fileSlots, setFileSlots] = useState<{ path: string; el: HTMLElement }[]>([]);
@@ -303,8 +350,10 @@ function DiffGroup({
           button.title = "Render this markdown instead of showing it line by line";
           wrapper.querySelector(".d2h-file-header")?.appendChild(button);
         }
+        wrapper.querySelector(".d2h-file-header")?.appendChild(viewedBox(path));
       }
     });
+    applyViewed(root, viewedRef.current.viewed, viewedRef.current.peeked);
 
     const placed: { id: string; el: HTMLElement }[] = [];
     // When several comments target the same line, insert each after the last.
@@ -327,9 +376,22 @@ function DiffGroup({
     // Registered before the read-only exit: a sent review takes no comments,
     // but it is still something to read, so its markdown still swaps.
     const onClick = (e: MouseEvent) => {
-      const toggle = (e.target as HTMLElement).closest<HTMLElement>(".md-read-toggle");
+      const target = e.target as HTMLElement;
+      const toggle = target.closest<HTMLElement>(".md-read-toggle");
       if (toggle?.dataset.readPath) {
         onReadRef.current(toggle.dataset.readPath);
+        return;
+      }
+      // The label's own click is re-fired on the box; only the box's counts.
+      if (target instanceof HTMLInputElement && target.dataset.viewedPath) {
+        viewedRef.current.onToggleViewed(target.dataset.viewedPath);
+        return;
+      }
+      if (target.closest(".file-viewed")) return;
+      // A folded file opens from its header, without losing its tick.
+      const folded = target.closest(".d2h-file-header")?.closest<HTMLElement>(".file-viewed-on");
+      if (folded?.dataset.path) {
+        viewedRef.current.onTogglePeek(folded.dataset.path);
         return;
       }
       const button = (e.target as HTMLElement).closest<HTMLElement>(".line-add");
@@ -390,6 +452,14 @@ function DiffGroup({
     // effect renders, and re-running on every poll would flicker the diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rendered, anchors, paths, readable, readOnly]);
+
+  const viewedKey = paths.filter((p) => viewedState.viewed.has(p)).join("\n");
+  const peekedKey = paths.filter((p) => viewedState.peeked.has(p)).join("\n");
+  useEffect(() => {
+    if (ref.current) applyViewed(ref.current, viewedState.viewed, viewedState.peeked);
+    // The keys are the part of the sets this diff draws.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewedKey, peekedKey]);
 
   // Park the composer under the picked row. Separate from the render above so
   // that opening and closing it doesn't rebuild the whole diff.
@@ -524,6 +594,7 @@ function MarkdownFile({
   onAddLineComment,
   onAskAboutLine,
   onShowDiff,
+  viewedState,
 }: {
   path: string;
   doc: MdDocument;
@@ -534,8 +605,11 @@ function MarkdownFile({
   onAddLineComment: (pick: LinePick, body: string) => void;
   onAskAboutLine: (pick: LinePick, message: string) => void;
   onShowDiff: () => void;
+  viewedState: ViewedState;
 }) {
   const [pick, setPick] = useState<LinePick | null>(null);
+  const viewed = viewedState.viewed.has(path);
+  const folded = viewed && !viewedState.peeked.has(path);
 
   // Every comment lands under the block that holds its line — or, for a line
   // that is blank in the source, under the block it follows. None is dropped:
@@ -561,7 +635,14 @@ function MarkdownFile({
 
   return (
     <div className="md-file">
-      <div className="md-file-head">
+      <div
+        className={`md-file-head${viewed ? " md-file-head-viewed" : ""}${folded ? " md-file-head-folded" : ""}`}
+        onClick={(e) => {
+          if (viewed && !(e.target as HTMLElement).closest("button, label")) {
+            viewedState.onTogglePeek(path);
+          }
+        }}
+      >
         <Icon name="file" />
         <span className="md-file-name">{path}</span>
         {doc.isNew ? (
@@ -575,13 +656,21 @@ function MarkdownFile({
         <button className="btn btn-sm" onClick={onShowDiff} title="Back to the line-by-line diff">
           show the diff
         </button>
+        <label className="file-viewed" title="Mark as viewed — folds the file until its diff changes">
+          <input
+            type="checkbox"
+            checked={viewed}
+            onChange={() => viewedState.onToggleViewed(path)}
+          />{" "}
+          Viewed
+        </label>
       </div>
       {/* About the file rather than a block of it — under the header, where
           the diff view puts the same thing. */}
-      {placed.rest.length > 0 && (
+      {!folded && placed.rest.length > 0 && (
         <div className="file-comments">{placed.rest.map(renderComment)}</div>
       )}
-      {doc.items.map((item, i) => (
+      {!folded && doc.items.map((item, i) => (
         <Fragment key={i}>
           {item.kind === "gap" ? (
             <div className="md-gap" title="These lines are in the file but not in the diff.">
@@ -637,6 +726,7 @@ function DiffBlock({
   chatBusy,
   onAddLineComment,
   onAskAboutLine,
+  viewedState,
 }: {
   patch: string;
   comments: ReviewComment[];
@@ -645,6 +735,7 @@ function DiffBlock({
   chatBusy: boolean;
   onAddLineComment: (pick: LinePick, body: string) => void;
   onAskAboutLine: (pick: LinePick, message: string) => void;
+  viewedState: ViewedState;
 }) {
   const files = useMemo(() => (patch.trim() ? splitDiffByFile(patch) : []), [patch]);
   const docs = useMemo(
@@ -700,6 +791,7 @@ function DiffBlock({
               onAddLineComment={onAddLineComment}
               onAskAboutLine={onAskAboutLine}
               onShowDiff={() => setChoice((c) => ({ ...c, [path]: false }))}
+              viewedState={viewedState}
             />
           );
         }
@@ -714,6 +806,7 @@ function DiffBlock({
             onAddLineComment={onAddLineComment}
             onAskAboutLine={onAskAboutLine}
             onRead={(path) => setChoice((c) => ({ ...c, [path]: true }))}
+            viewedState={viewedState}
           />
         );
       })}
@@ -959,6 +1052,7 @@ function ChapterSection({
   readOnly,
   anchorRef,
   flash,
+  viewedState,
 }: {
   chapter: Chapter;
   n: number;
@@ -978,8 +1072,10 @@ function ChapterSection({
   chatBusy: boolean;
   readOnly: boolean;
   anchorRef: (el: HTMLElement | null) => void;
+  viewedState: ViewedState;
 }) {
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
+  const viewedCount = chapter.files.filter((f) => viewedState.viewed.has(f)).length;
   // Comments that can be anchored render inline under the line they point at
   // (like GitHub). One that can't still belongs to its file — a comment on a
   // line the PR removed, or about the file as a whole — so it goes to the diff
@@ -1014,6 +1110,7 @@ function ChapterSection({
           {comments.length > 0
             ? ` · ${comments.length} comment${comments.length === 1 ? "" : "s"}`
             : " · no comments"}
+          {viewedCount > 0 && ` · ${viewedCount}/${chapter.files.length} viewed`}
           {heavy != null && !open && (
             <span title="Drawing this many lines at once would leave the page too slow to scroll. Open it if you want it — nothing else on the page is affected.">
               {` · ${heavy.toLocaleString()} lines to draw, folded to keep the page quick`}
@@ -1056,6 +1153,7 @@ function ChapterSection({
               })
             }
             onAskAboutLine={onAskAboutLine}
+            viewedState={viewedState}
           />
           {!readOnly && chapter.files.length > 0 && (
             <AddComment files={chapter.files} chapterId={chapter.id} onAdd={onAddComment} />
@@ -1889,6 +1987,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // an effect would draw the giant diff once before folding it away, which is
   // the whole cost the fold exists to avoid.
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
+  // Viewed files the reader opened back up without unticking them.
+  const [peeked, setPeeked] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const verdictEl = useRef<HTMLDivElement | null>(null);
@@ -2076,7 +2176,53 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // A fold belongs to the review it was made in. The cockpit walks from one
   // review to the next without remounting, so without this a chapter opened
   // here would carry its id — "__other" above all — onto the next PR's page.
-  useEffect(() => setFlipped(new Set()), [reviewKey]);
+  useEffect(() => {
+    setFlipped(new Set());
+    setPeeked(new Set());
+  }, [reviewKey]);
+
+  const fingerprints = useMemo(
+    () =>
+      Object.fromEntries(
+        splitDiffByFile(artifact?.diff ?? "").map((p) => [p.path, fileFingerprint(p.patch)]),
+      ),
+    [artifact?.diff],
+  );
+  // A mark counts only while the file's diff is the one that was marked — a
+  // push that changes the file unticks it.
+  const viewed = useMemo(
+    () =>
+      new Set(
+        Object.keys(fingerprints).filter((p) => artifact?.viewed?.[p] === fingerprints[p]),
+      ),
+    [fingerprints, artifact?.viewed],
+  );
+  const togglePeek = (path: string) =>
+    setPeeked((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  const toggleViewed = (path: string) => {
+    const fingerprint = viewed.has(path) ? null : (fingerprints[path] ?? null);
+    setPeeked((s) => {
+      const next = new Set(s);
+      next.delete(path);
+      return next;
+    });
+    setArtifact((a) => {
+      if (!a) return a;
+      const next = { ...a.viewed };
+      if (fingerprint === null) delete next[path];
+      else next[path] = fingerprint;
+      return { ...a, viewed: next };
+    });
+    setViewed(reviewKey, path, fingerprint)
+      .then(setArtifact)
+      .catch((e) => setError(String(e)));
+  };
+  const viewedState: ViewedState = { viewed, peeked, onToggleViewed: toggleViewed, onTogglePeek: togglePeek };
 
   const openChapter = (i: number) => {
     const ch = chapters[i];
@@ -2101,6 +2247,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
   const goComment = (chapterIndex: number, commentId: string) => {
     openChapter(chapterIndex);
+    // A comment in a folded viewed file would otherwise be jumped to unseen.
+    const path = artifact?.comments.find((c) => c.id === commentId)?.path;
+    if (path && viewed.has(path)) setPeeked((s) => new Set(s).add(path));
     setFlash(commentId);
     scrollToComment(commentId);
   };
@@ -2405,36 +2554,42 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <button className="lab rail-lab rail-lab-btn" onClick={() => goChapter(0)}>
                 changes
               </button>
-              {chapters.map((ch, i) => (
-                <div key={ch.id} className="rail-group">
-                  <button
-                    className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}`}
-                    onClick={() => goChapter(i)}
-                  >
-                    <span className="grow">
-                      {i + 1} · {ch.title}
-                    </span>
-                    <span className="rail-count">{ch.files.length}f</span>
-                  </button>
-                  {/* Where the comments are, before you go looking for them. */}
-                  {artifact.comments
-                    .filter((c) => c.chapterId === ch.id)
-                    .map((c) => (
-                      <button
-                        key={c.id}
-                        className={`rail-comment${c.status === "dropped" ? " rail-comment-dropped" : ""}`}
-                        title={`${c.path}${c.line != null ? `:${c.line}` : ""} — ${c.body}`}
-                        onClick={() => goComment(i, c.id)}
-                      >
-                        <span className={`rail-dot tone-${commentTone(c, tone)}`}>●</span>
-                        <span className="rail-comment-loc">
-                          {c.path.split("/").pop()}
-                          {c.line != null ? `:${c.drifted ? "~" : ""}${c.line}` : ""}
-                        </span>
-                      </button>
-                    ))}
-                </div>
-              ))}
+              {chapters.map((ch, i) => {
+                const done = ch.files.length > 0 && ch.files.every((f) => viewed.has(f));
+                return (
+                  <div key={ch.id} className="rail-group">
+                    <button
+                      className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}${done ? " rail-item-done" : ""}`}
+                      onClick={() => goChapter(i)}
+                    >
+                      <span className="grow">
+                        {i + 1} · {ch.title}
+                      </span>
+                      <span className="rail-count" title={done ? "every file viewed" : undefined}>
+                        {done ? "✓ " : ""}
+                        {ch.files.length}f
+                      </span>
+                    </button>
+                    {/* Where the comments are, before you go looking for them. */}
+                    {artifact.comments
+                      .filter((c) => c.chapterId === ch.id)
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          className={`rail-comment${c.status === "dropped" ? " rail-comment-dropped" : ""}`}
+                          title={`${c.path}${c.line != null ? `:${c.line}` : ""} — ${c.body}`}
+                          onClick={() => goComment(i, c.id)}
+                        >
+                          <span className={`rail-dot tone-${commentTone(c, tone)}`}>●</span>
+                          <span className="rail-comment-loc">
+                            {c.path.split("/").pop()}
+                            {c.line != null ? `:${c.drifted ? "~" : ""}${c.line}` : ""}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                );
+              })}
             </>
           )}
 
@@ -2537,6 +2692,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               chatBusy={chatBusy}
               readOnly={readOnly}
               flash={flash}
+              viewedState={viewedState}
               anchorRef={(el) => {
                 if (el) chapterEls.current.set(ch.id, el);
                 else chapterEls.current.delete(ch.id);

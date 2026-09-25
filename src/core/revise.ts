@@ -97,6 +97,8 @@ export function mergeConcurrentEdits(
     // Nor does a turn announce anything: the ledger is the poll's, and a turn
     // takes minutes, which is long enough for a poll to have stamped it.
     notified: current.notified,
+    // Ticked while the turn ran, and never the turn's to touch.
+    viewed: current.viewed,
   };
 }
 

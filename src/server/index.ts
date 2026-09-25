@@ -348,7 +348,9 @@ export async function buildApp(
     // run below folds its draft under whatever the row says instead
     // (`mergeRunResult`), which is the same line every other writer holds.
     const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
-      userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+      userOwnsStatus(current)
+        ? current
+        : { ...artifact, notified: current.notified, viewed: current.viewed },
     );
     // Declining the claim is only half the job: the run below forces, and a
     // forced run reopens a settled row on purpose. So the decision ends the
@@ -497,6 +499,25 @@ export async function buildApp(
       ...a,
       comments: a.comments.filter((cm) => cm.id !== id),
     }));
+    if (!updated) return c.json({ error: "not found" }, 404);
+    return c.json(updated);
+  });
+
+  // Reading progress, not a review edit — so a sent review takes it too.
+  app.put("/api/reviews/:key/viewed", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.path !== "string" || !body.path) {
+      return c.json({ error: "path must be a non-empty string" }, 400);
+    }
+    if (body.fingerprint !== null && typeof body.fingerprint !== "string") {
+      return c.json({ error: "fingerprint must be a string, or null to unmark" }, 400);
+    }
+    const updated = await updateArtifactByKey(c.req.param("key"), (a) => {
+      const viewed = { ...a.viewed };
+      if (body.fingerprint === null) delete viewed[body.path];
+      else viewed[body.path] = body.fingerprint;
+      return { ...a, viewed };
+    });
     if (!updated) return c.json({ error: "not found" }, 404);
     return c.json(updated);
   });
