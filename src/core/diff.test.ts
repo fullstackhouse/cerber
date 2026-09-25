@@ -122,6 +122,12 @@ index 111..222 100644
     expect(fileFingerprint(patch.replace("const b = 2;", "const b = 3;"))).not.toBe(fileFingerprint(patch));
   });
 
+  it("counts a removed `-- comment`, which reads like a file header", () => {
+    const sql = (removed: string) =>
+      `diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n select 1;\n--- ${removed}`;
+    expect(fileFingerprint(sql("old note"))).not.toBe(fileFingerprint(sql("other note")));
+  });
+
   it("tells two versions of a binary apart by the only line that differs", () => {
     const binary = (index: string) =>
       `diff --git a/logo.png b/logo.png\nindex ${index} 100644\nBinary files a/logo.png and b/logo.png differ`;

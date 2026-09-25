@@ -140,9 +140,10 @@ export function diffLineCounts(diff: string): Map<string, number> {
  */
 export function fileFingerprint(patch: string): string {
   const lines = patch.split("\n");
-  const content = lines.filter(
-    (l) => /^[+\- ]/.test(l) && !l.startsWith("+++ ") && !l.startsWith("--- "),
-  );
+  // `---`/`+++` are file headers only before the first hunk; inside one they
+  // are a removed `-- comment` or an added `++ line`, and those are changes.
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  const content = firstHunk < 0 ? [] : lines.slice(firstHunk).filter((l) => /^[+\- ]/.test(l));
   const text = (content.length > 0 ? content : lines).join("\n");
   // FNV-1a, 32-bit.
   let hash = 0x811c9dc5;

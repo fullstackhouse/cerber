@@ -309,5 +309,14 @@ describe("PUT /api/reviews/:key/viewed — reading progress", () => {
     await saveArtifact(artifact("ready"));
     expect((await putViewed({ path: "", fingerprint: "x" })).status).toBe(400);
     expect((await putViewed({ path: "src/a.ts", fingerprint: 7 })).status).toBe(400);
+    const app = await buildApp({});
+    for (const body of ["not json", "null"]) {
+      const res = await app.request(`/api/reviews/${KEY}/viewed`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      expect(res.status).toBe(400);
+    }
   });
 });
