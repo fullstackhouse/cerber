@@ -171,11 +171,12 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           checked={stickyChapters}
           onChange={(e) => setStickyChapters(e.target.checked)}
         />{" "}
-        keep the chapter title pinned while scrolling through it
+        keep chapter titles and file headers pinned while scrolling
       </label>
       <p className="muted">
         Ten files into a chapter you still see which one you're in, and the pinned title can open
-        the chapter's explanation. Per-browser, like the theme.
+        the chapter's explanation. Deep in a long file its name and Viewed box stay in reach.
+        Per-browser, like the theme.
       </p>
 
       <h1>Trusted PRs</h1>

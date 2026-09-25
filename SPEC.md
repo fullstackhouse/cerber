@@ -1561,8 +1561,11 @@ While you scroll through an open chapter its title stays pinned under the top
 bar, so ten files in you still know which chapter you are in. The pinned title
 offers the chapter's explanation, folded by default; the explanation in the
 chapter body stays where it is. Folding a pinned chapter returns to its top.
-The pin is on by default and a browser MAY switch it off from Settings; like
-the theme (§17.8) that is browser state, stored in localStorage
+Each file's header (its name and Viewed box) pins the same way, under the
+chapter's title, until the file scrolls away; folding a file from its pinned
+header returns to that header.
+The pin covers both, is on by default and a browser MAY switch it off from
+Settings; like the theme (§17.8) that is browser state, stored in localStorage
 (`cerber.stickyChapters`, `off`; anything else, or nothing, is on), not in
 `config.json`. Independently of the pin, the rail marks the chapter you are
 scrolled into.
