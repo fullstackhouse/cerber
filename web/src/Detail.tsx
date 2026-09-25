@@ -24,7 +24,7 @@ import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
 import { MdBlock, MdDocument, isMarkdownPath, readMarkdown } from "./mdblocks";
 import { walkFrom } from "./inbox";
-import { useStickyChapters } from "./stickyChapters";
+import { useStickyChapters } from "./sticky-chapters";
 import {
   EVENT_LABEL,
   EVENT_TONE,

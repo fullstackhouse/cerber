@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
-import { useStickyChapters } from "./stickyChapters";
+import { useStickyChapters } from "./sticky-chapters";
 import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStickyChapters } from "./stickyChapters";
+import { parseStickyChapters } from "./sticky-chapters";
 
 describe("parseStickyChapters", () => {
   it("is on unless switched off", () => {
