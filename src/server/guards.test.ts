@@ -281,3 +281,33 @@ describe("POST /api/reviews/:key/refresh — not over a row that moved underneat
     expect((await loadArtifact(ID))!.pr.headSha).toBe("def");
   });
 });
+
+describe("PUT /api/reviews/:key/viewed — reading progress", () => {
+  const putViewed = async (body: Record<string, unknown>) => {
+    const app = await buildApp({});
+    return app.request(`/api/reviews/${KEY}/viewed`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  };
+
+  it("marks and unmarks a file", async () => {
+    await saveArtifact(artifact("ready"));
+    expect((await putViewed({ path: "src/a.ts", fingerprint: "0badf00d" })).status).toBe(200);
+    expect((await loadArtifact(ID))!.viewed).toEqual({ "src/a.ts": "0badf00d" });
+    expect((await putViewed({ path: "src/a.ts", fingerprint: null })).status).toBe(200);
+    expect((await loadArtifact(ID))!.viewed).toEqual({});
+  });
+
+  it("still takes a mark on a review already sent", async () => {
+    await saveArtifact({ ...artifact("sent"), sent: { at: "2026-08-21T10:00:00.000Z", url: null, event: "APPROVE", auto: false } });
+    expect((await putViewed({ path: "src/a.ts", fingerprint: "0badf00d" })).status).toBe(200);
+  });
+
+  it("refuses a body it cannot store", async () => {
+    await saveArtifact(artifact("ready"));
+    expect((await putViewed({ path: "", fingerprint: "x" })).status).toBe(400);
+    expect((await putViewed({ path: "src/a.ts", fingerprint: 7 })).status).toBe(400);
+  });
+});

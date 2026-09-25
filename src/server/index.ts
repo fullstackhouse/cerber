@@ -501,6 +501,25 @@ export async function buildApp(
     return c.json(updated);
   });
 
+  // Reading progress, not a review edit — so a sent review takes it too.
+  app.put("/api/reviews/:key/viewed", async (c) => {
+    const body = await c.req.json();
+    if (typeof body.path !== "string" || !body.path) {
+      return c.json({ error: "path must be a non-empty string" }, 400);
+    }
+    if (body.fingerprint !== null && typeof body.fingerprint !== "string") {
+      return c.json({ error: "fingerprint must be a string, or null to unmark" }, 400);
+    }
+    const updated = await updateArtifactByKey(c.req.param("key"), (a) => {
+      const viewed = { ...a.viewed };
+      if (body.fingerprint === null) delete viewed[body.path];
+      else viewed[body.path] = body.fingerprint;
+      return { ...a, viewed };
+    });
+    if (!updated) return c.json({ error: "not found" }, 404);
+    return c.json(updated);
+  });
+
   // ---- Freshness: pull a review forward onto the PR's current head ----
   // Read-only against GitHub (pr view + pr diff); writes only the local artifact.
 

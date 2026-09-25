@@ -205,7 +205,7 @@ What a re-review does *not* touch are the decisions you have made
 whatever the artifact says now rather than written over it, so a send stands, a
 `reviewed` or `skipped` you set while the run was going stands — with the fresh
 draft underneath it, which is what the row shows if you change your mind — and
-the chat transcript is kept. Only the draft itself is the run's to replace.
+the chat transcript and the files you marked as viewed are kept. Only the draft itself is the run's to replace.
 
 ### Re-review vs refresh — different things
 

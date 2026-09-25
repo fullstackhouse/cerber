@@ -170,6 +170,8 @@ export interface Artifact {
     url: string | null;
     auto?: boolean;
   } | null;
+  /** Files marked as viewed: path → fingerprint of the patch when marked. */
+  viewed?: Record<string, string>;
   refresh?: {
     at: string;
     fromSha: string;

@@ -45,6 +45,13 @@ export const fetchDaemonStatus = () => request<DaemonStatus>("/api/daemon");
 export const fetchReview = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}`);
 
+/** Mark a file as viewed at this version of its patch, or `null` to unmark. */
+export const setViewed = (key: string, path: string, fingerprint: string | null) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/viewed`, {
+    method: "PUT",
+    body: JSON.stringify({ path, fingerprint }),
+  });
+
 export const patchReview = (
   key: string,
   body: {
