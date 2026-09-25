@@ -99,12 +99,39 @@ function highlightSide(
   const text = lines.map((l) => l.ctn.textContent ?? "").join("\n");
   if (!text.trim() || text.length > maxHunkChars) return;
 
-  const highlighted = splitLines(hljs.highlight(text, { language, ignoreIllegals: true }).value);
+  // A hunk can open inside a block comment whose `/*` sits in the collapsed
+  // lines above it; without the opener the comment's prose reads as code.
+  const opener = startsInsideComment(text) && hasBlockComments(language) ? "/**\n" : "";
+  const highlighted = splitLines(
+    hljs.highlight(opener + text, { language, ignoreIllegals: true }).value,
+  ).slice(opener ? 1 : 0);
   lines.forEach((line, i) => {
     const value = highlighted[i];
     if (value === undefined || !apply(line)) return;
     paint(line.ctn, value);
   });
+}
+
+/**
+ * Whether a hunk side begins inside a block comment: a closer comes before any
+ * opener, or, with neither in sight, every line is a ` * …` continuation. A
+ * closer with a quote or slash before it on its line is a glob or a regex.
+ */
+export function startsInsideComment(text: string): boolean {
+  const close = text.indexOf("*/");
+  const open = text.indexOf("/*");
+  if (close === -1) {
+    const filled = text.split("\n").filter((line) => line.trim());
+    return open === -1 && filled.length > 0 && filled.every((line) => /^\s*\*(\s|$)/.test(line));
+  }
+  if (open !== -1 && open < close) return false;
+  const lineStart = text.lastIndexOf("\n", close) + 1;
+  return !/["'`/]/.test(text.slice(lineStart, close));
+}
+
+function hasBlockComments(language: string): boolean {
+  const value = hljs.highlight("/* */", { language, ignoreIllegals: true }).value;
+  return value.startsWith('<span class="hljs-comment">');
 }
 
 /**
