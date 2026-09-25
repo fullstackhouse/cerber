@@ -112,24 +112,26 @@ function highlightSide(
   });
 }
 
+/** A comment closer starts its line or follows a space; in `/\s*\/` or `**\/` it doesn't. */
+const closer = /(^|\s)\*\//m;
+const continuation = /^\s*\*(\s|$)/;
+
 /**
  * Whether a hunk side begins inside a block comment: a closer comes before any
- * opener, or, with neither in sight, every line is a ` * …` continuation. A
- * closer with a quote or slash before it on its line is a glob or a regex.
+ * opener, or, with no closer in sight, every line is a ` * …` continuation. An
+ * opener on a continuation line is the comment's own text.
  */
 export function startsInsideComment(text: string): boolean {
-  const close = text.indexOf("*/");
-  const open = text.indexOf("/*");
+  const close = text.search(closer);
   if (close === -1) {
     const filled = text.split("\n").filter((line) => line.trim());
-    return open === -1 && filled.length > 0 && filled.every((line) => /^\s*\*(\s|$)/.test(line));
+    return filled.length > 0 && filled.every((line) => continuation.test(line));
   }
-  if (open !== -1 && open < close) return false;
-  const lineStart = text.lastIndexOf("\n", close) + 1;
-  return !/["'`/]/.test(text.slice(lineStart, close));
+  const lead = text.slice(0, close).split("\n");
+  return lead.every((line) => continuation.test(line) || !line.includes("/*"));
 }
 
-function hasBlockComments(language: string): boolean {
+export function hasBlockComments(language: string): boolean {
   const value = hljs.highlight("/* */", { language, ignoreIllegals: true }).value;
   return value.startsWith('<span class="hljs-comment">');
 }
