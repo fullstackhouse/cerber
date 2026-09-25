@@ -9,7 +9,6 @@ import {
   dismissPendingChat,
   exportUrl,
   fetchReview,
-  fetchConfig,
   fetchReviews,
   fetchSendPreview,
   patchComment,
@@ -25,6 +24,7 @@ import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
 import { MdBlock, MdDocument, isMarkdownPath, readMarkdown } from "./mdblocks";
 import { walkFrom } from "./inbox";
+import { useStickyChapters } from "./stickyChapters";
 import {
   EVENT_LABEL,
   EVENT_TONE,
@@ -991,6 +991,13 @@ function ChapterSection({
     if (!stuck) setAbout(false);
   }, [stuck]);
   const pinned = sticky && stuck && open;
+  const sectionEl = useRef<HTMLElement | null>(null);
+  // Folding a pinned chapter removes everything above the fold line you had
+  // scrolled past, so without this you'd land somewhere in a later chapter.
+  const toggle = () => {
+    onToggle();
+    if (pinned) requestAnimationFrame(() => sectionEl.current?.scrollIntoView({ block: "start" }));
+  };
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
   // Comments that can be anchored render inline under the line they point at
   // (like GitHub). One that can't still belongs to its file — a comment on a
@@ -1015,10 +1022,16 @@ function ChapterSection({
   );
 
   return (
-    <section className={`chapter${sticky ? " chapter-sticky" : ""}`} ref={anchorRef}>
+    <section
+      className={`chapter${sticky ? " chapter-sticky" : ""}`}
+      ref={(el) => {
+        sectionEl.current = el;
+        anchorRef(el);
+      }}
+    >
       <header
         className={`chapter-head${sticky ? " chapter-head-sticky" : ""}${pinned ? " chapter-head-stuck" : ""}`}
-        onClick={onToggle}
+        onClick={toggle}
       >
         <span className="faint">{open ? "▾" : "▸"}</span>
         <h3>
@@ -1036,9 +1049,9 @@ function ChapterSection({
           )}
         </span>
         <span className="grow" />
-        {pinned && (
+        {sticky && open && (
           <button
-            className="btn btn-sm"
+            className={`btn btn-sm${pinned ? "" : " chapter-about-idle"}`}
             aria-expanded={about}
             onClick={(e) => {
               e.stopPropagation();
@@ -1923,7 +1936,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
-  const [stickyChapters, setStickyChapters] = useState(true);
+  const [stickyChapters] = useStickyChapters();
   // The chapter under the top bar right now, and whether its title is pinned.
   const [here, setHere] = useState<{ id: string; stuck: boolean } | null>(null);
   const verdictEl = useRef<HTMLDivElement | null>(null);
@@ -1993,12 +2006,6 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   useEffect(() => {
     fetchReviews()
       .then(setNeighbours)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetchConfig()
-      .then((c) => setStickyChapters(c.cockpit.stickyChapters))
       .catch(() => {});
   }, []);
 
@@ -2083,10 +2090,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     const measure = () => {
       frame = 0;
       const topH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--top-h")) || 0;
+      // A jump leaves a chapter 12px below the top bar (its scroll margin),
+      // and that chapter is still the one you're in.
+      const line = topH + 16;
       let next: { id: string; stuck: boolean } | null = null;
       for (const ch of chapters) {
         const rect = chapterEls.current.get(ch.id)?.getBoundingClientRect();
-        if (rect && rect.top <= topH && rect.bottom > topH) next = { id: ch.id, stuck: rect.top < topH - 1 };
+        if (rect && rect.top <= line && rect.bottom > line) next = { id: ch.id, stuck: rect.top < topH - 1 };
       }
       setHere((prev) => (prev?.id === next?.id && prev?.stuck === next?.stuck ? prev : next));
     };
@@ -2096,10 +2106,15 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     measure();
     window.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
+    // Folding a chapter or the top bar changing height moves the page
+    // without a scroll event.
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.body);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
+      observer.disconnect();
     };
   }, [chapters]);
 

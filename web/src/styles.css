@@ -1386,7 +1386,13 @@ button {
 }
 
 .chapter-head-stuck {
-  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Holds its room while the title isn't pinned, so the bar doesn't grow the
+   moment it sticks. */
+.chapter-about-idle {
+  visibility: hidden;
 }
 
 .chapter-head-about {

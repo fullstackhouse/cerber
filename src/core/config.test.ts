@@ -28,18 +28,8 @@ describe("config", () => {
     repos: [],
   };
 
-  const DEFAULT_COCKPIT = { stickyChapters: true };
-
   it("trusts nobody and runs the full inbox when there is no config at all", async () => {
-    expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON, cockpit: DEFAULT_COCKPIT });
-  });
-
-  it("pins chapter titles unless the config says otherwise", async () => {
-    await fs.mkdir(home, { recursive: true });
-    await fs.writeFile(configPath(), '{"daemon": {"poll": false}}');
-    expect((await loadConfig()).cockpit).toEqual({ stickyChapters: true });
-    await saveConfig({ cockpit: { stickyChapters: false } });
-    expect((await loadConfig()).cockpit).toEqual({ stickyChapters: false });
+    expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON });
   });
 
   it("keeps an inbox knob a hand-edit flipped, defaulting the rest", async () => {
@@ -56,7 +46,7 @@ describe("config", () => {
   it("writes JSON a human can still read and edit", async () => {
     await saveConfig({ trust: ["@acme/*"] });
     const raw = await fs.readFile(configPath(), "utf8");
-    expect(JSON.parse(raw)).toEqual({ trust: ["@acme/*"], daemon: DEFAULT_DAEMON, cockpit: DEFAULT_COCKPIT });
+    expect(JSON.parse(raw)).toEqual({ trust: ["@acme/*"], daemon: DEFAULT_DAEMON });
     // Pretty-printed, trailing newline — the file stays diffable and editable.
     expect(raw).toMatch(/^\{\n {2}"trust": \[\n {4}"@acme\/\*"\n {2}\],\n/);
     expect(raw.endsWith("\n")).toBe(true);

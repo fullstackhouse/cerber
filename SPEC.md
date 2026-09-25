@@ -451,7 +451,6 @@ present an absent log as "predates history being kept", not as an empty one.
 | `daemon.intervalMinutes` | positive int | `5` | |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
 | `daemon.repos` | string[] | `[]` | `owner/repo` filters; empty = everything `gh` can see |
-| `cockpit.stickyChapters` | boolean | `true` | pin a chapter's title under the top bar while scrolling through it; read when a review opens |
 
 Auto-send has deliberately **no** config-file surface; its mode and threshold
 exist only as CLI flags (§15.1), so enabling it requires a decision at every
@@ -1431,7 +1430,7 @@ static assets included. No CORS: same-origin only.
 | Method & path | Purpose | Notable answers |
 |---|---|---|
 | `GET /api/daemon` | daemon status | `{enabled: false}` when none |
-| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/cockpit` · `POST /api/config/trust` | settings | full config view; 400 with the trust parser's message verbatim |
+| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` | settings | full config view; 400 with the trust parser's message verbatim |
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
@@ -1555,6 +1554,16 @@ above all) onto the next PR's page. Nor may anything else the last review put
 on screen: the detail view clears the artifact and the load error when the key
 changes, so no review is ever drawn under another's URL and no failure to load
 one is reported over the next.
+
+While you scroll through an open chapter its title stays pinned under the top
+bar, so ten files in you still know which chapter you are in. The pinned title
+offers the chapter's explanation, folded by default; the explanation in the
+chapter body stays where it is. Folding a pinned chapter returns to its top.
+The pin is on by default and a browser MAY switch it off from Settings; like
+the theme (§17.8) that is browser state, stored in localStorage
+(`cerber.stickyChapters`, `off`; anything else, or nothing, is on), not in
+`config.json`. Independently of the pin, the rail marks the chapter you are
+scrolled into.
 
 ### 17.6 Truth-Telling Surfaces
 

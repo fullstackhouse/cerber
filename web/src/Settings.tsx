@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, updateCockpitConfig, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
+import { useStickyChapters } from "./stickyChapters";
 import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
 
@@ -32,6 +33,7 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
   const [theme, setTheme] = useTheme();
+  const [stickyChapters, setStickyChapters] = useStickyChapters();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -166,15 +168,14 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
       <label className="inbox-toggle">
         <input
           type="checkbox"
-          checked={config.cockpit.stickyChapters}
-          disabled={busy}
-          onChange={(e) => apply(updateCockpitConfig({ stickyChapters: e.target.checked }))}
+          checked={stickyChapters}
+          onChange={(e) => setStickyChapters(e.target.checked)}
         />{" "}
         keep the chapter title pinned while scrolling through it
       </label>
       <p className="muted">
         Ten files into a chapter you still see which one you're in, and the pinned title can open
-        the chapter's explanation. Stored in <code>{config.path}</code> under <code>cockpit</code>.
+        the chapter's explanation. Per-browser, like the theme.
       </p>
 
       <h1>Trusted PRs</h1>
