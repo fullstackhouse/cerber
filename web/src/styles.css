@@ -312,6 +312,15 @@ button {
   border-color: var(--green-fill);
 }
 
+/* A filled button keeps its own text colour on hover: `.btn:hover` outranks
+   the fill's class and would paint the text in --fg, the dark button's own
+   background. The fill shifts instead, so the hover still shows. */
+.btn-keep-on:hover:not(:disabled) {
+  color: var(--on-fill);
+  background: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+  border-color: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+}
+
 .btn-drop-on {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 40%, transparent);
@@ -323,6 +332,12 @@ button {
   border-color: var(--fg);
   font-size: 11.5px;
   padding: 7px 14px;
+}
+
+.btn-dark:hover:not(:disabled) {
+  color: var(--bg);
+  background: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  border-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
 }
 
 .btn-dark:disabled {
