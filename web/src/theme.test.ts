@@ -72,6 +72,25 @@ describe("saveTheme", () => {
     expect(() => saveTheme("dark", refusing)).not.toThrow();
     expect(() => saveTheme("system", refusing)).not.toThrow();
   });
+
+  // Chrome with site data blocked throws on merely reading
+  // `window.localStorage`, before any method is called.
+  it("shrugs off storage that can't even be reached", () => {
+    const before = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("SecurityError: access is denied for this document");
+      },
+    });
+    try {
+      expect(() => saveTheme("dark")).not.toThrow();
+      expect(() => saveTheme("system")).not.toThrow();
+    } finally {
+      if (before) Object.defineProperty(globalThis, "localStorage", before);
+      else delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
+  });
 });
 
 // index.html applies the pin before the first paint and can't import theme.ts,
