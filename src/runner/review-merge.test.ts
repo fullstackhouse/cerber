@@ -150,6 +150,28 @@ describe("what a re-review does to the previous draft", () => {
     expect((await loadArtifact(ID))!.notified).toBeNull();
   });
 
+  it("keeps the files you marked as viewed", async () => {
+    const viewed = { "a.ts": "0badf00d" };
+    await saveArtifact({ ...ready([]), viewed });
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.viewed).toEqual(viewed);
+    expect((await loadArtifact(ID))!.viewed).toEqual(viewed);
+  });
+
+  it("keeps a mark made while the run was fetching", async () => {
+    await saveArtifact(ready([]));
+    claudeThat(async () => {});
+    diff.mockImplementationOnce(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, viewed: { "a.ts": "0badf00d" } }));
+      return DIFF;
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.viewed).toEqual({ "a.ts": "0badf00d" });
+  });
+
   it("carries it through a run that fails, too", async () => {
     await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
     claudeThat(async () => {}, new Error("model unavailable"));

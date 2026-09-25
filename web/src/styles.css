@@ -1222,6 +1222,15 @@ button {
   font-weight: 500;
 }
 
+.rail-item-done {
+  color: var(--fainter);
+}
+
+/* The chapter you are scrolled into. */
+.rail-item-here {
+  color: var(--accent);
+}
+
 .rail-group {
   margin-bottom: 2px;
 }
@@ -1358,7 +1367,9 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin-bottom: 10px;
-  overflow: hidden;
+  /* clip, not hidden: hidden makes the chapter a scroll container, and a
+     sticky title inside one never sticks. */
+  overflow: clip;
 }
 
 .chapter-head {
@@ -1368,6 +1379,55 @@ button {
   padding: 11px 16px;
   cursor: pointer;
   user-select: none;
+}
+
+.chapter-head-sticky {
+  position: sticky;
+  top: var(--top-h, 0px);
+  z-index: 4;
+  flex-wrap: wrap;
+  background: var(--surface);
+}
+
+.chapter-head-stuck {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Holds its room while the title isn't pinned, so the bar doesn't grow the
+   moment it sticks. */
+.chapter-about-idle {
+  visibility: hidden;
+}
+
+.chapter-head-about {
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+  cursor: auto;
+  user-select: text;
+}
+
+/* A file's header pins under its chapter's title. */
+.chapter-sticky {
+  --file-top: calc(var(--top-h, 0px) + var(--chapter-head-h, 0px));
+}
+
+.chapter-sticky .diff .d2h-file-header,
+.chapter-sticky .md-file-head {
+  position: sticky;
+  top: var(--file-top);
+  z-index: 3;
+}
+
+.chapter-sticky .d2h-file-wrapper,
+.chapter-sticky .md-file {
+  scroll-margin-top: var(--file-top);
+}
+
+/* A comment jumped to inside a pinned chapter must clear its title and its
+   file's header too. */
+.chapter-sticky .comment {
+  scroll-margin-top: calc(var(--file-top) + 60px);
 }
 
 .chapter-body {
@@ -2097,7 +2157,8 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin: 8px 0;
-  overflow: hidden;
+  /* clip, not hidden: hidden would keep its header from pinning. */
+  overflow: clip;
 }
 
 /* Same header the diff gives a file, so the page reads as one list of files
@@ -2191,6 +2252,39 @@ button {
 /* The offer to stop reading the diff, in the diff's own file header. */
 .d2h-file-header .md-read-toggle {
   margin-left: auto;
+}
+
+/* GitHub's "Viewed" box, at the right end of every file header. */
+.file-viewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.d2h-file-header .md-read-toggle + .file-viewed,
+.md-file-head .btn + .file-viewed {
+  margin-left: 8px;
+}
+
+/* A viewed file folds to its header until its diff changes; the header
+   opens it back up without unticking it. */
+.file-viewed-on:not(.file-peek) > :not(.d2h-file-header) {
+  display: none;
+}
+
+.file-viewed-on .d2h-file-header,
+.md-file-head-viewed {
+  cursor: pointer;
+}
+
+.file-viewed-on:not(.file-peek) .d2h-file-header,
+.md-file-head-folded {
+  opacity: 0.7;
 }
 
 /* A card's markdown sits flush with the card's own padding. A document's does

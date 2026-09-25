@@ -173,6 +173,11 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
     expect(mergeRunResult(fresh, makeArtifact({ chat })).chat).toEqual(chat);
   });
 
+  it("keeps what you marked as viewed", () => {
+    const viewed = { "src/a.ts": "0badf00d" };
+    expect(mergeRunResult(fresh, makeArtifact({ viewed })).viewed).toEqual(viewed);
+  });
+
   it("otherwise takes the run's own status", () => {
     expect(mergeRunResult(fresh, makeArtifact({ status: "running" })).status).toBe(fresh.status);
   });

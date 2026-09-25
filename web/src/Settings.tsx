@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
+import { useStickyChapters } from "./sticky-chapters";
 import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
 
@@ -32,6 +33,7 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
   const [theme, setTheme] = useTheme();
+  const [stickyChapters, setStickyChapters] = useStickyChapters();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +162,21 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
       <p className="muted">
         Per-browser, like the notification switch: it's about this screen, not your reviews, so it
         lives here rather than in <code>{config.path}</code>.
+      </p>
+
+      <h1>Review page</h1>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={stickyChapters}
+          onChange={(e) => setStickyChapters(e.target.checked)}
+        />{" "}
+        keep chapter titles and file headers pinned while scrolling
+      </label>
+      <p className="muted">
+        Ten files into a chapter you still see which one you're in, and the pinned title can open
+        the chapter's explanation. Deep in a long file its name and Viewed box stay in reach.
+        Per-browser, like the theme.
       </p>
 
       <h1>Trusted PRs</h1>

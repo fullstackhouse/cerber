@@ -128,3 +128,28 @@ export function unclaimedFiles(diff: string, chapters: { files: string[] }[]): s
 export function diffLineCounts(diff: string): Map<string, number> {
   return new Map(splitDiffByFile(diff).map((p) => [p.path, p.patch.split("\n").length]));
 }
+
+/**
+ * What a file's change says, reduced to a short hash — the thing a "viewed"
+ * mark remembers, so a new push that changes the file unticks it.
+ *
+ * Only the changed and context lines count: a rebase that moves the hunk
+ * headers or the blob ids changes nothing you read. A patch with no such lines
+ * (a binary, a pure rename) falls back to the whole patch, whose `index` line
+ * is then the only thing that tells two versions apart.
+ */
+export function fileFingerprint(patch: string): string {
+  const lines = patch.split("\n");
+  // `---`/`+++` are file headers only before the first hunk; inside one they
+  // are a removed `-- comment` or an added `++ line`, and those are changes.
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  const content = firstHunk < 0 ? [] : lines.slice(firstHunk).filter((l) => /^[+\- ]/.test(l));
+  const text = (content.length > 0 ? content : lines).join("\n");
+  // FNV-1a, 32-bit.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}

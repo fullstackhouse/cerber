@@ -368,6 +368,12 @@ export const ArtifactSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * Files the user marked as viewed: path → `fileFingerprint` of the file's
+   * patch at the time. A mark whose fingerprint no longer matches the diff is
+   * a file that changed since, and reads as not viewed. Absent: none yet.
+   */
+  viewed: z.record(z.string(), z.string()).optional(),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),

@@ -286,6 +286,12 @@ describe("mergeConcurrentEdits", () => {
     expect(merged.comments.map((c) => c.id)).toEqual(["c1", "mine"]);
   });
 
+  it("keeps a file the user marked as viewed while the turn was running", () => {
+    const b = before();
+    const viewed = { "src/a.ts": "0badf00d" };
+    expect(mergeConcurrentEdits(b, b, artifact({ viewed })).viewed).toEqual(viewed);
+  });
+
   it("keeps a comment the turn added", () => {
     const b = before();
     const { artifact: after } = applyRevisions(
