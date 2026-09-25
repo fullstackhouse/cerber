@@ -23,6 +23,9 @@ That gate is the whole point, and the reason this is not another review bot:
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
 
+Why it exists, and the four things I tried first:
+[AI drafts the review. I decide what gets sent.](https://www.fullstack.house/blog/cerber?utm_source=github&utm_medium=readme)
+
 **The whole loop in seventeen seconds** — five PRs already drafted when you sit
 down, the one that isn't an approval, straight to its blocker, arguing with the
 reviewer until it rewrites its own finding, dropping the comment you disagree
