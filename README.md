@@ -49,7 +49,8 @@ requests.*
 
 Requires Node 20+, an authenticated [`gh`](https://cli.github.com/), `git`, and
 a logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no
-config, no database.
+config, no database. The cockpit wants a browser from 2024 on (Chrome/Edge 123,
+Safari 17.5, Firefox 120).
 
 **Claude Code is a hard requirement, and a paid one.** Cerber drafts reviews by
 running `claude` as you: it rides your existing Claude Code login and draws on

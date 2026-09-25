@@ -5,10 +5,10 @@
 // rather than in config.json.
 //
 // index.html applies the stored choice before the first paint, so a pinned
-// dark cockpit never flashes white on reload. Keep its key and values in step
-// with these.
+// dark cockpit never flashes white on reload. It can't import from here, so it
+// repeats the key and the values; theme.test.ts fails if the two drift.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
@@ -33,16 +33,49 @@ export function applyTheme(choice: ThemeChoice, root: HTMLElement = document.doc
   else root.dataset.theme = choice;
 }
 
+/**
+ * Store a choice. "system" clears the key rather than storing a value, so an
+ * absent key and the default are one state. Storage that refuses (private
+ * mode, a locked-down profile) is not an error: the switch still applies to
+ * this tab, and a reload just follows the machine again.
+ */
+export function saveTheme(choice: ThemeChoice, storage?: Pick<Storage, "setItem" | "removeItem">): void {
+  try {
+    // Inside the try: with site data blocked, merely reading
+    // `window.localStorage` throws.
+    const store = storage ?? localStorage;
+    if (choice === "system") store.removeItem(THEME_KEY);
+    else store.setItem(THEME_KEY, choice);
+  } catch {
+    // See above.
+  }
+}
+
+/**
+ * Keep every open tab on the pin: a switch flipped in one tab reaches the
+ * others through the `storage` event, which fires everywhere but the tab
+ * that wrote it. Called once at startup, so it works on every screen.
+ */
+export function followOtherTabs(): void {
+  onOtherTabPin(applyTheme);
+}
+
+/** A pin written by another tab; `key === null` is that tab clearing all storage. */
+function onOtherTabPin(then: (choice: ThemeChoice) => void): () => void {
+  const listener = (e: StorageEvent) => {
+    if (e.key === THEME_KEY || e.key === null) then(parseTheme(e.newValue));
+  };
+  window.addEventListener("storage", listener);
+  return () => window.removeEventListener("storage", listener);
+}
+
 export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
   const [choice, setChoice] = useState<ThemeChoice>(stored);
+  // A Settings screen open in another tab moves its radios with the page, or
+  // it shows the old choice and clicking that radio does nothing.
+  useEffect(() => onOtherTabPin(setChoice), []);
   const set = (next: ThemeChoice) => {
-    try {
-      if (next === "system") localStorage.removeItem(THEME_KEY);
-      else localStorage.setItem(THEME_KEY, next);
-    } catch {
-      // Storage refused (private mode, a locked-down profile). The switch still
-      // applies to this tab; a reload just follows the machine again.
-    }
+    saveTheme(next);
     applyTheme(next);
     setChoice(next);
   };

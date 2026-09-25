@@ -145,18 +145,20 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         )}
       </p>
 
-      <h1>Appearance</h1>
-      {THEMES.map(({ choice, label }) => (
-        <label key={choice} className="inbox-toggle">
-          <input
-            type="radio"
-            name="theme"
-            checked={theme === choice}
-            onChange={() => setTheme(choice)}
-          />{" "}
-          {label}
-        </label>
-      ))}
+      <h1 id="appearance">Appearance</h1>
+      <div role="radiogroup" aria-labelledby="appearance">
+        {THEMES.map(({ choice, label }) => (
+          <label key={choice} className="inbox-toggle">
+            <input
+              type="radio"
+              name="theme"
+              checked={theme === choice}
+              onChange={() => setTheme(choice)}
+            />{" "}
+            {label}
+          </label>
+        ))}
+      </div>
       <p className="muted">
         Per-browser, like the notification switch: it's about this screen, not your reviews, so it
         lives here rather than in <code>{config.path}</code>.
