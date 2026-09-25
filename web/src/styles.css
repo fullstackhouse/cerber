@@ -1222,6 +1222,11 @@ button {
   font-weight: 500;
 }
 
+/* The chapter you are scrolled into. */
+.rail-item-here {
+  color: var(--accent);
+}
+
 .rail-group {
   margin-bottom: 2px;
 }
@@ -1358,7 +1363,9 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin-bottom: 10px;
-  overflow: hidden;
+  /* clip, not hidden: hidden makes the chapter a scroll container, and a
+     sticky title inside one never sticks. */
+  overflow: clip;
 }
 
 .chapter-head {
@@ -1368,6 +1375,37 @@ button {
   padding: 11px 16px;
   cursor: pointer;
   user-select: none;
+}
+
+.chapter-head-sticky {
+  position: sticky;
+  top: var(--top-h, 0px);
+  z-index: 4;
+  flex-wrap: wrap;
+  background: var(--surface);
+}
+
+.chapter-head-stuck {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Holds its room while the title isn't pinned, so the bar doesn't grow the
+   moment it sticks. */
+.chapter-about-idle {
+  visibility: hidden;
+}
+
+.chapter-head-about {
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+  cursor: auto;
+  user-select: text;
+}
+
+/* A comment jumped to inside a pinned chapter must clear its title too. */
+.chapter-sticky .comment {
+  scroll-margin-top: calc(var(--top-h, 0px) + 60px);
 }
 
 .chapter-body {

@@ -24,6 +24,7 @@ import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
 import { MdBlock, MdDocument, isMarkdownPath, readMarkdown } from "./mdblocks";
 import { walkFrom } from "./inbox";
+import { useStickyChapters } from "./sticky-chapters";
 import {
   EVENT_LABEL,
   EVENT_TONE,
@@ -959,6 +960,8 @@ function ChapterSection({
   readOnly,
   anchorRef,
   flash,
+  sticky,
+  stuck,
 }: {
   chapter: Chapter;
   n: number;
@@ -978,7 +981,23 @@ function ChapterSection({
   chatBusy: boolean;
   readOnly: boolean;
   anchorRef: (el: HTMLElement | null) => void;
+  /** The title stays pinned while the chapter scrolls under it. */
+  sticky: boolean;
+  /** The title is pinned right now — the chapter's top has scrolled past. */
+  stuck: boolean;
 }) {
+  const [about, setAbout] = useState(false);
+  useEffect(() => {
+    if (!stuck) setAbout(false);
+  }, [stuck]);
+  const pinned = sticky && stuck && open;
+  const sectionEl = useRef<HTMLElement | null>(null);
+  // Folding a pinned chapter removes everything above the fold line you had
+  // scrolled past, so without this you'd land somewhere in a later chapter.
+  const toggle = () => {
+    onToggle();
+    if (pinned) requestAnimationFrame(() => sectionEl.current?.scrollIntoView({ block: "start" }));
+  };
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
   // Comments that can be anchored render inline under the line they point at
   // (like GitHub). One that can't still belongs to its file — a comment on a
@@ -1003,8 +1022,17 @@ function ChapterSection({
   );
 
   return (
-    <section className="chapter" ref={anchorRef}>
-      <header className="chapter-head" onClick={onToggle}>
+    <section
+      className={`chapter${sticky ? " chapter-sticky" : ""}`}
+      ref={(el) => {
+        sectionEl.current = el;
+        anchorRef(el);
+      }}
+    >
+      <header
+        className={`chapter-head${sticky ? " chapter-head-sticky" : ""}${pinned ? " chapter-head-stuck" : ""}`}
+        onClick={toggle}
+      >
         <span className="faint">{open ? "▾" : "▸"}</span>
         <h3>
           {n} · {chapter.title}
@@ -1021,6 +1049,18 @@ function ChapterSection({
           )}
         </span>
         <span className="grow" />
+        {sticky && open && (
+          <button
+            className={`btn btn-sm${pinned ? "" : " chapter-about-idle"}`}
+            aria-expanded={about}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAbout((a) => !a);
+            }}
+          >
+            {about ? "hide explanation" : "what this chapter is about"}
+          </button>
+        )}
         {onDiscuss && (
           <button
             className="btn btn-sm"
@@ -1032,6 +1072,11 @@ function ChapterSection({
             <Icon name="comment" />
             discuss
           </button>
+        )}
+        {pinned && about && (
+          <div className="chapter-head-about" onClick={(e) => e.stopPropagation()}>
+            <Markdown className="prose" text={chapter.explanation} />
+          </div>
         )}
       </header>
       {open && (
@@ -1891,6 +1936,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
+  const [stickyChapters] = useStickyChapters();
+  // The chapter under the top bar right now, and whether its title is pinned.
+  const [here, setHere] = useState<{ id: string; stuck: boolean } | null>(null);
   const verdictEl = useRef<HTMLDivElement | null>(null);
   const summaryEl = useRef<HTMLDivElement | null>(null);
   const whyEl = useRef<HTMLDivElement | null>(null);
@@ -2036,6 +2084,39 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         ]
       : artifact.chapters;
   }, [artifact]);
+
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const topH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--top-h")) || 0;
+      // A jump leaves a chapter 12px below the top bar (its scroll margin),
+      // and that chapter is still the one you're in.
+      const line = topH + 16;
+      let next: { id: string; stuck: boolean } | null = null;
+      for (const ch of chapters) {
+        const rect = chapterEls.current.get(ch.id)?.getBoundingClientRect();
+        if (rect && rect.top <= line && rect.bottom > line) next = { id: ch.id, stuck: rect.top < topH - 1 };
+      }
+      setHere((prev) => (prev?.id === next?.id && prev?.stuck === next?.stuck ? prev : next));
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    // Folding a chapter or the top bar changing height moves the page
+    // without a scroll event.
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.body);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      observer.disconnect();
+    };
+  }, [chapters]);
 
   /**
    * How many diff lines each chapter is asking the browser to draw.
@@ -2408,7 +2489,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               {chapters.map((ch, i) => (
                 <div key={ch.id} className="rail-group">
                   <button
-                    className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}`}
+                    className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}${here?.id === ch.id ? " rail-item-here" : ""}`}
                     onClick={() => goChapter(i)}
                   >
                     <span className="grow">
@@ -2537,6 +2618,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               chatBusy={chatBusy}
               readOnly={readOnly}
               flash={flash}
+              sticky={stickyChapters}
+              stuck={here?.id === ch.id && here.stuck}
               anchorRef={(el) => {
                 if (el) chapterEls.current.set(ch.id, el);
                 else chapterEls.current.delete(ch.id);

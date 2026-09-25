@@ -1555,6 +1555,16 @@ on screen: the detail view clears the artifact and the load error when the key
 changes, so no review is ever drawn under another's URL and no failure to load
 one is reported over the next.
 
+While you scroll through an open chapter its title stays pinned under the top
+bar, so ten files in you still know which chapter you are in. The pinned title
+offers the chapter's explanation, folded by default; the explanation in the
+chapter body stays where it is. Folding a pinned chapter returns to its top.
+The pin is on by default and a browser MAY switch it off from Settings; like
+the theme (§17.8) that is browser state, stored in localStorage
+(`cerber.stickyChapters`, `off`; anything else, or nothing, is on), not in
+`config.json`. Independently of the pin, the rail marks the chapter you are
+scrolled into.
+
 ### 17.6 Truth-Telling Surfaces
 
 - The verdict cell shows recommendation + confidence; the blocker count is
