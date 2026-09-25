@@ -111,7 +111,7 @@ Each review is a plain JSON artifact in `~/.cerber/reviews/` (override with
   the token spend as an API-rate equivalent
 
 The cockpit (`cerber serve`) renders the queue and the per-PR walkthrough with
-diffs. Draft comments sit inline in the diff, anchored to the line they're
+diffs, light or dark after your system (Settings can pin either, per browser). Draft comments sit inline in the diff, anchored to the line they're
 about, each waiting for you to keep, rewrite, or drop it:
 
 ![A chapter of the walkthrough: the diff with a draft comment card anchored under the line it discusses, explaining the finding in plain words.](docs/comment.png)

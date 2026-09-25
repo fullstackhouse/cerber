@@ -172,7 +172,10 @@ left unwritten. Code and tests win when they disagree.
   since that machine's tap lands where nobody is looking. `favicon.ts` is the
   quiet half of the same job: a dot on the tab icon while the inbox holds
   anything, re-derived on every read of the queue (`fetchReviews`) so no screen
-  can leave it stale. `mdblocks.ts` turns a markdown file's patch back into the
+  can leave it stale. `theme.ts` is the light/dark pin: the stylesheet's tokens
+  are `light-dark()` pairs that follow the machine on their own, and a pin is
+  browser state beside the bell's, applied before paint by `index.html`.
+  `mdblocks.ts` turns a markdown file's patch back into the
   document, in blocks that keep their source line numbers — a file the PR adds
   opens that way, since there the diff is the file with `+` in front of every
   line, and the block numbers are what let the review's comments stay where
