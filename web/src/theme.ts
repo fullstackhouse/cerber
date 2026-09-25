@@ -5,8 +5,8 @@
 // rather than in config.json.
 //
 // index.html applies the stored choice before the first paint, so a pinned
-// dark cockpit never flashes white on reload. Keep its key and values in step
-// with these.
+// dark cockpit never flashes white on reload. It can't import from here, so it
+// repeats the key and the values; theme.test.ts fails if the two drift.
 
 import { useState } from "react";
 
@@ -33,16 +33,36 @@ export function applyTheme(choice: ThemeChoice, root: HTMLElement = document.doc
   else root.dataset.theme = choice;
 }
 
+/**
+ * Store a choice. "system" clears the key rather than storing a value, so an
+ * absent key and the default are one state. Storage that refuses (private
+ * mode, a locked-down profile) is not an error: the switch still applies to
+ * this tab, and a reload just follows the machine again.
+ */
+export function saveTheme(choice: ThemeChoice, storage: Pick<Storage, "setItem" | "removeItem"> = localStorage): void {
+  try {
+    if (choice === "system") storage.removeItem(THEME_KEY);
+    else storage.setItem(THEME_KEY, choice);
+  } catch {
+    // See above.
+  }
+}
+
+/**
+ * Keep every open tab on the pin: a switch flipped in one tab reaches the
+ * others through the `storage` event, which fires everywhere but the tab
+ * that wrote it. Called once at startup, so it works on every screen.
+ */
+export function followOtherTabs(): void {
+  window.addEventListener("storage", (e) => {
+    if (e.key === THEME_KEY || e.key === null) applyTheme(parseTheme(e.newValue));
+  });
+}
+
 export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
   const [choice, setChoice] = useState<ThemeChoice>(stored);
   const set = (next: ThemeChoice) => {
-    try {
-      if (next === "system") localStorage.removeItem(THEME_KEY);
-      else localStorage.setItem(THEME_KEY, next);
-    } catch {
-      // Storage refused (private mode, a locked-down profile). The switch still
-      // applies to this tab; a reload just follows the machine again.
-    }
+    saveTheme(next);
     applyTheme(next);
     setChoice(next);
   };

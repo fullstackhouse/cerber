@@ -1646,6 +1646,10 @@ Settings; the pin is browser state, stored in localStorage (`cerber.theme`,
 pinned theme MUST apply before the first paint, so a reload never flashes the
 other one.
 
+Colours are CSS `light-dark()` pairs, so the cockpit needs a browser that has
+it: Chrome/Edge 123, Safari 17.5, Firefox 120 or newer. An older one draws the
+page without its colours.
+
 ## 18. CLI
 
 `cerber` (version derived from the package — see Appendix B.1):
@@ -1926,7 +1930,7 @@ An implementation conforms when all of the following hold:
 | §14 GitHub | `src/core/gh.ts`, `src/core/trust.ts`, `src/core/send.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
-| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `Markdown.tsx`, `mdblocks.ts` |
+| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `Markdown.tsx`, `mdblocks.ts`, `theme.ts`, `styles.css` |
 | §18 CLI | `src/cli/index.ts` |
 
 ## Appendix B. Known Divergences in the Reference Implementation (non-normative)

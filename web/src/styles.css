@@ -89,7 +89,7 @@
   --d2h-info-bg-color: light-dark(#f8fafd, rgba(56, 139, 253, 0.1));
   --d2h-info-border-color: light-dark(#d5e4f2, rgba(56, 139, 253, 0.4));
   --d2h-change-label-color: light-dark(#d0b44c, #d29922);
-  --d2h-moved-label-color: light-dark(#3572b0, #3572b0);
+  --d2h-moved-label-color: light-dark(#3572b0, #58a6ff);
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
