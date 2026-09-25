@@ -3,6 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // A pinned light/dark (Settings, src/theme.ts), applied before the first
+      // paint so a dark cockpit never flashes white on reload.
+      try {
+        var theme = localStorage.getItem("cerber.theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch (e) {}
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>cerber</title>
   </head>
