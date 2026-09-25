@@ -5,24 +5,91 @@
  * (`.prose`).
  */
 
+/*
+ * Every colour is a token, and every token is a `light-dark()` pair: the page
+ * follows the machine's light or dark setting, and `data-theme` on <html> pins
+ * one (Settings, per browser - see theme.ts). The dark side is composed, not
+ * inverted: raised surfaces get lighter rather than shadowed, and colours that
+ * carry white text get their own deeper `-fill` so the text stays legible. A
+ * literal colour below this block would stay light in the dark - add a token.
+ */
 :root {
-  --bg: #fcfcfd;
-  --surface: #ffffff;
-  --fg: #14171a;
-  --fg-2: #3a3f45;
-  --fg-3: #4a5058;
-  --muted: #6b7178;
-  --faint: #9aa0a8;
-  --fainter: #b6bbc1;
-  --line: #e6e8eb;
-  --line-2: #dcdfe4;
-  --line-3: #eef0f2;
-  --accent: #3d4fd6;
-  --accent-dark: #2c3aa8;
-  --accent-wash: #f4f5ff;
-  --green: #1a7f5a;
-  --amber: #a06a00;
-  --red: #c2314a;
+  color-scheme: light dark;
+
+  --bg: light-dark(#fcfcfd, #0f1115);
+  --surface: light-dark(#ffffff, #161920);
+  --sunken: light-dark(#f7f8fa, #13161b);
+  --sunken-2: light-dark(#f0f1f3, #1e2229);
+  --raised: light-dark(#fbfbfc, #1a1d24);
+  --fg: light-dark(#14171a, #e6e8eb);
+  --fg-2: light-dark(#3a3f45, #c9cdd3);
+  --fg-3: light-dark(#4a5058, #b1b7bf);
+  --muted: light-dark(#6b7178, #8f959e);
+  --faint: light-dark(#9aa0a8, #737a84);
+  --fainter: light-dark(#b6bbc1, #50565f);
+  --line: light-dark(#e6e8eb, #262a31);
+  --line-2: light-dark(#dcdfe4, #31363e);
+  --line-3: light-dark(#eef0f2, #1d2026);
+  --accent: light-dark(#3d4fd6, #8b96ee);
+  --accent-dark: light-dark(#2c3aa8, #aeb6f5);
+  --accent-wash: light-dark(#f4f5ff, #1a1e36);
+  --accent-ink: light-dark(#26307a, #c3c9f8);
+  --green: light-dark(#1a7f5a, #4cc38a);
+  --amber: light-dark(#a06a00, #e0a53a);
+  --amber-ink: light-dark(#57430a, #ecd29a);
+  --red: light-dark(#c2314a, #f07087);
+
+  /* Fills behind white text. In the light theme they are the colours
+     themselves; in the dark the text colours above are too pale to carry
+     white, so the fills stay deep. */
+  --on-fill: #fff;
+  --accent-fill: light-dark(#3d4fd6, #4b58d6);
+  --green-fill: light-dark(#1a7f5a, #1b7453);
+  --amber-fill: light-dark(#a06a00, #8f5f00);
+  --red-fill: light-dark(#c2314a, #b52d45);
+
+  /* Syntax colours: GitHub's light and dark palettes, one token per role. */
+  --syn-keyword: light-dark(#d73a49, #ff7b72);
+  --syn-entity: light-dark(#6f42c1, #d2a8ff);
+  --syn-constant: light-dark(#005cc5, #79c0ff);
+  --syn-string: light-dark(#032f62, #a5d6ff);
+  --syn-variable: light-dark(#e36209, #ffa657);
+  --syn-comment: light-dark(#6a737d, #8b949e);
+  --syn-tag: light-dark(#22863a, #7ee787);
+  --syn-heading: light-dark(#005cc5, #79c0ff);
+  --syn-bullet: light-dark(#735c0f, #f2cc60);
+  --syn-ins: light-dark(#22863a, #aff5b4);
+  --syn-ins-bg: light-dark(#f0fff4, #033a16);
+  --syn-del: light-dark(#b31d28, #ffdcd7);
+  --syn-del-bg: light-dark(#ffeef0, #67060c);
+
+  /* diff2html reads these (its own light set). The dark side is its own dark
+     set, with the surfaces and rules swapped for ours so the diff sits in the
+     page rather than on GitHub's near-black - and it follows the page without
+     diff2html's colour-scheme option. */
+  --d2h-bg-color: light-dark(#fff, #161920);
+  --d2h-border-color: light-dark(#ddd, #31363e);
+  --d2h-dim-color: light-dark(rgba(0, 0, 0, 0.3), #6e7681);
+  --d2h-line-border-color: light-dark(#eee, #262a31);
+  --d2h-file-header-bg-color: light-dark(#f7f7f7, #1a1d24);
+  --d2h-file-header-border-color: light-dark(#d8d8d8, #31363e);
+  --d2h-empty-placeholder-bg-color: light-dark(#f1f1f1, hsla(215, 8%, 47%, 0.1));
+  --d2h-empty-placeholder-border-color: light-dark(#e1e1e1, #31363e);
+  --d2h-selected-color: light-dark(#c8e1ff, rgba(56, 139, 253, 0.1));
+  --d2h-ins-bg-color: light-dark(#dfd, rgba(46, 160, 67, 0.15));
+  --d2h-ins-border-color: light-dark(#b4e2b4, rgba(46, 160, 67, 0.4));
+  --d2h-ins-highlight-bg-color: light-dark(#97f295, rgba(46, 160, 67, 0.4));
+  --d2h-ins-label-color: light-dark(#399839, #3fb950);
+  --d2h-del-bg-color: light-dark(#fee8e9, rgba(248, 81, 73, 0.1));
+  --d2h-del-border-color: light-dark(#e9aeae, rgba(248, 81, 73, 0.4));
+  --d2h-del-highlight-bg-color: light-dark(#ffb6ba, rgba(248, 81, 73, 0.4));
+  --d2h-del-label-color: light-dark(#c33, #f85149);
+  --d2h-change-del-color: light-dark(#fdf2d0, rgba(210, 153, 34, 0.2));
+  --d2h-change-ins-color: light-dark(#ded, rgba(46, 160, 67, 0.25));
+  --d2h-info-bg-color: light-dark(#f8fafd, rgba(56, 139, 253, 0.1));
+  --d2h-info-border-color: light-dark(#d5e4f2, rgba(56, 139, 253, 0.4));
+  --d2h-change-label-color: light-dark(#d0b44c, #d29922);
+  --d2h-moved-label-color: light-dark(#3572b0, #3572b0);
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
@@ -30,6 +97,14 @@
   /* How wide the console gets. Rows and diffs want the room a big display has;
      prose caps itself at a readable measure regardless (see .prose). */
   --measure: 1560px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
@@ -42,6 +117,16 @@ body {
   font-size: 12px;
   color: var(--fg);
   background: var(--bg);
+}
+
+/* The parts the browser draws itself - checkboxes, the selection - take the
+   accent too, or they stay the platform's blue in both themes. */
+:root {
+  accent-color: var(--accent);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 a {
@@ -157,8 +242,8 @@ h3 {
 
 .error {
   color: var(--red);
-  background: rgba(194, 49, 74, 0.06);
-  border: 1px solid rgba(194, 49, 74, 0.3);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
   padding: 8px 12px;
   border-radius: 4px;
   margin: 10px 0;
@@ -218,22 +303,22 @@ button {
 
 .btn-accent {
   color: var(--accent);
-  border-color: rgba(61, 79, 214, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .btn-keep-on {
-  color: #fff;
-  background: var(--green);
-  border-color: var(--green);
+  color: var(--on-fill);
+  background: var(--green-fill);
+  border-color: var(--green-fill);
 }
 
 .btn-drop-on {
   color: var(--red);
-  border-color: rgba(194, 49, 74, 0.4);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
 }
 
 .btn-dark {
-  color: #fff;
+  color: var(--bg);
   background: var(--fg);
   border-color: var(--fg);
   font-size: 11.5px;
@@ -242,7 +327,7 @@ button {
 
 .btn-dark:disabled {
   color: var(--faint);
-  background: #f0f1f3;
+  background: var(--sunken-2);
   border-color: var(--line-2);
 }
 
@@ -268,15 +353,15 @@ button {
   padding: 0 14px;
   font-size: 12px;
   font-weight: 500;
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--on-fill);
+  background: var(--accent-fill);
+  border: 1px solid var(--accent-fill);
   border-radius: 4px;
 }
 
 .btn-primary .key {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.75);
+  border-color: color-mix(in srgb, var(--on-fill) 30%, transparent);
+  color: color-mix(in srgb, var(--on-fill) 75%, transparent);
   background: transparent;
 }
 
@@ -387,7 +472,7 @@ button {
 
 .daemon-bar {
   border-bottom: 1px solid var(--line);
-  background: #f7f8fa;
+  background: var(--sunken);
   font-size: 11px;
   color: var(--muted);
 }
@@ -542,7 +627,7 @@ button {
 }
 
 .row:hover {
-  background: #f7f8fa;
+  background: var(--sunken);
 }
 
 .row-on {
@@ -572,7 +657,7 @@ button {
 .tag-awaiting {
   flex-shrink: 0;
   color: var(--amber);
-  background: rgba(160, 106, 0, 0.1);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
 }
 
 /* The paste-a-PR box. Sits at the end of the tab strip and in the empty state,
@@ -658,7 +743,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(20, 23, 26, 0.08);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 /* A draft that still wants your review. Deliberately quiet: it qualifies the
@@ -891,7 +976,7 @@ button {
 }
 
 .walk-btn:disabled {
-  color: #d4d7db;
+  color: var(--fainter);
   border-color: var(--line-3);
   cursor: default;
 }
@@ -954,7 +1039,7 @@ button {
 }
 
 .verdict-pick-on {
-  background: #f0f1f3;
+  background: var(--sunken-2);
   border-color: var(--line-2);
   font-weight: 500;
 }
@@ -1200,7 +1285,7 @@ button {
   0%,
   60% {
     background: var(--accent-wash);
-    box-shadow: inset 0 0 0 2px rgba(61, 79, 214, 0.45);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 }
 
@@ -1336,7 +1421,7 @@ button {
 .comment {
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fbfbfc;
+  background: var(--raised);
   padding: 12px 14px;
   margin: 8px 0;
 }
@@ -1417,7 +1502,7 @@ button {
 .file-comments:not(:empty) {
   padding: 8px 12px 0;
   border-bottom: 1px solid var(--line);
-  background: #fbfbfc;
+  background: var(--raised);
 }
 
 .file-comments .comment {
@@ -1432,7 +1517,7 @@ button {
 /* Comments injected inline under the diff row they point at (GitHub-style). */
 .inline-comment-row td {
   padding: 0;
-  background: #fbfbfc;
+  background: var(--raised);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   white-space: normal;
@@ -1520,8 +1605,8 @@ button {
   width: 13px;
   height: 13px;
   border-radius: 3px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-fill);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
@@ -1578,12 +1663,83 @@ button {
   color: inherit;
 }
 
+/* highlight.js's GitHub theme, drawn from the --syn-* tokens rather than
+   imported, so the same classes follow the page into the dark. */
+.hljs-doctag,
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  color: var(--syn-keyword);
+}
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-title.function_ {
+  color: var(--syn-entity);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--syn-constant);
+}
+.hljs-regexp,
+.hljs-string,
+.hljs-meta .hljs-string {
+  color: var(--syn-string);
+}
+.hljs-built_in,
+.hljs-symbol {
+  color: var(--syn-variable);
+}
+.hljs-comment,
+.hljs-code,
+.hljs-formula {
+  color: var(--syn-comment);
+}
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo {
+  color: var(--syn-tag);
+}
+.hljs-section {
+  color: var(--syn-heading);
+  font-weight: bold;
+}
+.hljs-bullet {
+  color: var(--syn-bullet);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: bold;
+}
+.hljs-addition {
+  color: var(--syn-ins);
+  background-color: var(--syn-ins-bg);
+}
+.hljs-deletion {
+  color: var(--syn-del);
+  background-color: var(--syn-del-bg);
+}
+
 /* ---- freshness ---- */
 
 .freshness {
-  background: rgba(160, 106, 0, 0.07);
-  border: 1px solid rgba(160, 106, 0, 0.3);
-  color: #57430a;
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+  color: var(--amber-ink);
   padding: 10px 12px;
   border-radius: 4px;
   margin-bottom: 10px;
@@ -1592,15 +1748,15 @@ button {
 }
 
 .freshness code {
-  background: rgba(0, 0, 0, 0.06);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
   padding: 1px 4px;
   border-radius: 3px;
 }
 
 .freshness-running {
-  background: rgba(61, 79, 214, 0.06);
-  border-color: rgba(61, 79, 214, 0.3);
-  color: #26307a;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent-ink);
 }
 
 .freshness .btn {
@@ -1759,7 +1915,7 @@ button {
 .chat-refs-pending .chat-ref {
   cursor: pointer;
   color: var(--accent);
-  border-color: rgba(61, 79, 214, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .chat-actions {
@@ -1774,7 +1930,7 @@ button {
 .send-panel {
   border: 1px solid var(--line-2);
   border-radius: 4px;
-  background: #f7f8fa;
+  background: var(--sunken);
   padding: 16px 18px;
 }
 
@@ -1814,10 +1970,10 @@ button {
   padding: 0 20px;
   font-size: 13px;
   font-weight: 500;
-  color: #fff;
+  color: var(--on-fill);
   border: none;
   border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(20, 23, 26, 0.12);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
 .send-btn:disabled {
@@ -1826,8 +1982,8 @@ button {
 }
 
 .send-btn .key {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.8);
+  border-color: color-mix(in srgb, var(--on-fill) 30%, transparent);
+  color: color-mix(in srgb, var(--on-fill) 80%, transparent);
   background: transparent;
 }
 
@@ -1909,8 +2065,8 @@ button {
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
-  border: 1px solid rgba(26, 127, 90, 0.4);
-  background: rgba(26, 127, 90, 0.07);
+  border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
   border-radius: 4px;
   padding: 14px 16px;
   font-size: 11.5px;
@@ -2031,8 +2187,8 @@ button {
   padding: 0;
   border: none;
   border-radius: 3px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-fill);
   cursor: pointer;
   opacity: 0;
   transition: opacity 90ms;
@@ -2087,13 +2243,13 @@ button {
 .md code {
   font-family: var(--mono);
   font-size: 0.9em;
-  background: #f0f2f5;
+  background: var(--sunken-2);
   padding: 1px 5px;
   border-radius: 3px;
 }
 
 .md pre {
-  background: #f7f8fa;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 10px 12px;
@@ -2200,7 +2356,7 @@ button {
 .settings code {
   font-family: var(--mono);
   font-size: 0.92em;
-  background: #f0f2f5;
+  background: var(--sunken-2);
   padding: 1px 5px;
   border-radius: 3px;
 }
@@ -2270,13 +2426,13 @@ button {
 }
 
 .tone-bg-approve {
-  background: var(--green);
+  background: var(--green-fill);
 }
 .tone-bg-comment {
-  background: var(--amber);
+  background: var(--amber-fill);
 }
 .tone-bg-changes {
-  background: var(--red);
+  background: var(--red-fill);
 }
 
 .tone-border-approve {
@@ -2298,7 +2454,7 @@ button {
   padding: 3px 9px;
   border-radius: 3px;
   border: 1px solid currentColor;
-  background: rgba(20, 23, 26, 0.03);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
   white-space: nowrap;
 }
 
@@ -2311,7 +2467,7 @@ button {
 }
 
 .chip-btn:hover {
-  background: rgba(20, 23, 26, 0.07);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
 }
 
 .tag {
@@ -2320,30 +2476,30 @@ button {
   padding: 1px 6px;
   border-radius: 3px;
   color: var(--muted);
-  background: #f0f1f3;
+  background: var(--sunken-2);
   white-space: nowrap;
 }
 
 .tag-yours {
   color: var(--accent);
-  background: rgba(61, 79, 214, 0.09);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
 .tag-kept {
   color: var(--green);
-  background: rgba(26, 127, 90, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .tag-drift {
   color: var(--amber);
-  background: rgba(160, 106, 0, 0.1);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
 }
 
 /* The same claim diff2html's own ADDED badge makes, for a file drawn without
    one. */
 .tag-added {
   color: var(--green);
-  background: rgba(26, 127, 90, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 /* "🚨 1 blocker · 🎨 2 nits · 72% sure of the findings" beside the verdict's
@@ -2365,9 +2521,9 @@ button {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  background: rgba(160, 106, 0, 0.07);
-  border: 1px solid rgba(160, 106, 0, 0.3);
-  color: #57430a;
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+  color: var(--amber-ink);
   padding: 10px 12px;
   border-radius: 4px;
 }

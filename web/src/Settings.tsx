@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchConfig, updateCockpitConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
+import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
 
 const EXAMPLES = [
@@ -22,8 +23,15 @@ const NOTIFY_LABEL: Record<NotifyState, string> = {
   on: "tell me when a review is ready for me",
 };
 
+const THEMES: { choice: ThemeChoice; label: string }[] = [
+  { choice: "system", label: "follow this machine" },
+  { choice: "light", label: "light" },
+  { choice: "dark", label: "dark" },
+];
+
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
+  const [theme, setTheme] = useTheme();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +143,23 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
             the cockpit.
           </>
         )}
+      </p>
+
+      <h1>Appearance</h1>
+      {THEMES.map(({ choice, label }) => (
+        <label key={choice} className="inbox-toggle">
+          <input
+            type="radio"
+            name="theme"
+            checked={theme === choice}
+            onChange={() => setTheme(choice)}
+          />{" "}
+          {label}
+        </label>
+      ))}
+      <p className="muted">
+        Per-browser, like the notification switch: it's about this screen, not your reviews, so it
+        lives here rather than in <code>{config.path}</code>.
       </p>
 
       <h1>Review page</h1>
