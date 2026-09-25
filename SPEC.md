@@ -99,7 +99,7 @@ read-only.
 8. **HTTP server** — a local API plus static serving for the cockpit; long AI
    work is detached behind `202` responses (§16).
 9. **Cockpit** — a browser SPA: queue, review detail, settings, arrival bell,
-   favicon badge (§17).
+   favicon badge, light and dark themes (§17).
 10. **CLI** — `review`, `list`, `export`, `send`, `trust`, `prune`, `stats`,
     and the default `serve` (§18).
 
@@ -1635,6 +1635,16 @@ And it MUST NOT pass off a fragment as the whole:
   since everything is new.
 - What the PR **removed** is not in the document at all. The diff is one click
   away and is where that question is answered.
+
+### 17.8 Light and Dark
+
+The cockpit MUST follow the machine's light or dark setting
+(`prefers-color-scheme`) with no configuration. A browser MAY pin one from
+Settings; the pin is browser state, stored in localStorage (`cerber.theme`,
+`light` or `dark`; anything else, or nothing, follows the machine), not in
+`config.json`, because it is about that screen rather than about reviews. A
+pinned theme MUST apply before the first paint, so a reload never flashes the
+other one.
 
 ## 18. CLI
 
