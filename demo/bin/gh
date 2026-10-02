@@ -279,6 +279,11 @@ if (argv[0] === "api") {
   // that with `--jq`, and a stub that answered a different shape would be
   // testing the parser against something nothing ever sends it.
   if (endpoint?.match(/^repos\/[^/]+\/[^/]+\/assignees/)) {
+    // A read, and only a read. `gh api` quietly switches the method to POST as
+    // soon as a `-f`/`-F` field is present, and real GitHub answers that with a
+    // 404 — which showed up in the dialog as "this repo has nobody in it".
+    // A stub that answered anyway is a stub that hides the next one.
+    if (method && method !== "GET") unsupported(`assignees is a read; got --method ${method}`);
     const people = readJson(path.join(FIXTURES, "people.json"));
     out(
       people

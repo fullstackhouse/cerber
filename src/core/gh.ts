@@ -610,10 +610,12 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
 export async function fetchAssignableUsers(ref: PrRef): Promise<string[]> {
   const out = await gh([
     "api",
-    `repos/${ref.owner}/${ref.repo}/assignees`,
+    // The page size goes in the path, not in a `-f`/`-F` field: `gh api`
+    // switches the method to POST the moment any field is present, and
+    // `POST …/assignees` is a 404. A query string keeps this the GET it is,
+    // and `--paginate` carries it onto every following page.
+    `repos/${ref.owner}/${ref.repo}/assignees?per_page=100`,
     "--paginate",
-    "-F",
-    "per_page=100",
     "--jq",
     '.[] | select(.type != "Bot") | .login',
   ]);

@@ -585,13 +585,22 @@ describe("fetchAssignableUsers", () => {
     void fetchAssignableUsers({ owner: "o", repo: "r", number: 7 });
     expect(exec.mock.calls[0]?.[1]).toEqual([
       "api",
-      "repos/o/r/assignees",
+      "repos/o/r/assignees?per_page=100",
       "--paginate",
-      "-F",
-      "per_page=100",
       "--jq",
       '.[] | select(.type != "Bot") | .login',
     ]);
+  });
+
+  it("keeps the page size out of the fields, where it would make this a POST", () => {
+    // `gh api` switches the method the moment a `-f`/`-F` is present, and
+    // `POST …/assignees` is a 404 — which read, in the dialog, as "this repo
+    // has nobody in it" on a repo with six people in it.
+    exec.mockResolvedValue({ stdout: "" });
+    void fetchAssignableUsers({ owner: "o", repo: "r", number: 7 });
+    const args = exec.mock.calls[0]?.[1] as string[];
+    expect(args).not.toContain("-f");
+    expect(args).not.toContain("-F");
   });
 
   it("reads back one login per line", async () => {
