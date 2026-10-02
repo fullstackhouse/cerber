@@ -11,6 +11,7 @@ import {
   fetchReview,
   fetchReviews,
   fetchSendPreview,
+  handOffReview,
   patchComment,
   patchReview,
   refreshReview,
@@ -19,6 +20,7 @@ import {
   sendReview,
   startChatTurn,
 } from "./api";
+import { isLogin, recentHandoffs, rememberHandoff } from "./handoff";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
@@ -1443,6 +1445,165 @@ function BodyEditor({
   );
 }
 
+/** What the note says unless you write your own: who has it, and that it moved. */
+const suggestedNote = (login: string) =>
+  login ? `@${login} — handing this review over to you.` : "";
+
+/** A login as typed: a leading `@` is how people write one, and not part of it. */
+const asLogin = (typed: string) => typed.trim().replace(/^@/, "");
+
+/**
+ * Give this review to somebody else.
+ *
+ * Two things leave this machine when the button is pressed — GitHub's review
+ * request moves to them, and the note goes up as a plain comment — so the panel
+ * names both before either happens. What it does not do is post the draft:
+ * handing a PR over is deciding not to review it, and Send stays the only way a
+ * review of yours reaches anybody.
+ */
+function HandoffPanel({
+  artifact,
+  onConfirm,
+  onCancel,
+}: {
+  artifact: Artifact;
+  /** Resolves once the handoff landed; rejects with the reason it did not. */
+  onConfirm: (to: string, note: string) => Promise<unknown>;
+  onCancel: () => void;
+}) {
+  // Read once, on open: the list is re-sorted by this very handoff, and a
+  // suggestion strip that reshuffled under the cursor would move the name you
+  // were about to click.
+  const [recent] = useState(recentHandoffs);
+  const [to, setTo] = useState(recent[0] ?? "");
+  const [note, setNote] = useState(() => suggestedNote(recent[0] ?? ""));
+  // Once you have typed in the note it is yours, and changing the name must not
+  // overwrite it. Until then it follows the name, so the ordinary case — pick a
+  // person, hand it over — needs nothing typed at all.
+  const [ownNote, setOwnNote] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const box = useGrowToFit(note);
+  const login = asLogin(to);
+  const ready = isLogin(login);
+  // Something worth passing on, that nobody has passed on yet.
+  const draftToOffer = !artifact.sent && (artifact.summary !== "" || artifact.comments.length > 0);
+
+  const pickLogin = (typed: string) => {
+    setTo(typed);
+    if (!ownNote) setNote(suggestedNote(asLogin(typed)));
+  };
+
+  const confirm = () => {
+    // The button is disabled for both, but Enter in the name box is not.
+    if (busy || !ready) return;
+    setBusy(true);
+    setError(null);
+    // Only the failure path comes back here — a handoff that lands closes this
+    // panel, so a `finally` would be writing state into something unmounted.
+    onConfirm(login, note.trim()).catch((e) => {
+      setError(String(e?.message ?? e));
+      setBusy(false);
+    });
+  };
+
+  return (
+    <div className="handoff-panel">
+      <div className="send-top">
+        <span className="lab">hand off to</span>
+        <span className="grow" />
+        <span className="faint">moves GitHub’s review request — your draft stays here</span>
+      </div>
+
+      <div className="handoff-who">
+        <span className="handoff-at">@</span>
+        <input
+          className="handoff-login"
+          autoFocus
+          value={to}
+          spellCheck={false}
+          placeholder="github login"
+          onChange={(e) => pickLogin(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirm();
+            if (e.key === "Escape" && !busy) onCancel();
+          }}
+        />
+        {recent.length > 0 && (
+          <span className="faint handoff-recent">
+            recently
+            {recent.map((r) => (
+              <button key={r} className="link" onClick={() => pickLogin(r)} disabled={busy}>
+                @{r}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+
+      <textarea
+        ref={box}
+        className="body-edit handoff-note"
+        rows={2}
+        value={note}
+        onChange={(e) => {
+          setOwnNote(true);
+          setNote(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Or the browser types the newline into the box on the way out.
+            e.preventDefault();
+            confirm();
+          }
+          if (e.key === "Escape" && !busy) onCancel();
+        }}
+      />
+      <div className="body-source">
+        <span className="faint">
+          {note.trim()
+            ? "goes on the PR as a plain comment, not a review"
+            : "nothing will be posted — only the review request moves"}
+        </span>
+        {note.trim() !== "" && (
+          <button
+            className="link"
+            onClick={() => {
+              setOwnNote(true);
+              setNote("");
+            }}
+            disabled={busy}
+          >
+            post no note
+          </button>
+        )}
+      </div>
+
+      {error && <p className="error">{error}</p>}
+
+      <p className="faint handoff-says">
+        {ready ? <>@{login}</> : "They"} will be asked for this review and you will be taken off it.{" "}
+        {artifact.sent
+          ? "This row stays under sent."
+          : "This row is filed under settled, and comes back if anybody asks you again."}{" "}
+        The draft is not posted
+        {draftToOffer ? " — send it as a comment first if you want them to have it" : ""}.
+      </p>
+
+      <div className="card-actions">
+        <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready}>
+          <Icon name="arrowRight" />
+          {busy ? "handing over…" : ready ? `hand off to @${login}` : "hand off"}
+          <Key>⌘↵</Key>
+        </button>
+        <button className="btn btn-sm" onClick={onCancel} disabled={busy}>
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The one place anything reaches GitHub.
  *
@@ -1802,6 +1963,45 @@ function HistoryCard({
   );
 }
 
+/**
+ * Where this review went, on a row you gave away.
+ *
+ * Leads with what GitHub says now, because that is the half of a handoff that
+ * left this machine — then with what became of the draft, which is nothing, and
+ * is the part a reader is most likely to assume otherwise.
+ */
+function HandoffNote({ handoff }: { handoff: NonNullable<Artifact["handoff"]> }) {
+  const when = new Date(handoff.at).toLocaleDateString();
+  return (
+    <div>
+      <strong>
+        You handed this to @{handoff.to} on {when}.
+      </strong>{" "}
+      GitHub asks them for this review now
+      {handoff.withdrewYours
+        ? " and no longer asks you"
+        : " — but cerber could not take your own request off, so it is asking both of you"}
+      .{" "}
+      {handoff.note ? (
+        handoff.note.url ? (
+          <>
+            A{" "}
+            <a href={handoff.note.url} target="_blank" rel="noreferrer">
+              note
+            </a>{" "}
+            on the PR says so.
+          </>
+        ) : (
+          <>A note on the PR says so.</>
+        )
+      ) : (
+        <>No note was posted — only the request moved.</>
+      )}{" "}
+      The draft below was never sent. It is still yours to read, or to send.
+    </div>
+  );
+}
+
 function FreshnessBanner({
   artifact,
   freshness,
@@ -1828,10 +2028,14 @@ function FreshnessBanner({
     );
   }
   const filed = artifact.filed;
-  if (!closed && !movedHere && !filed) return null;
+  const handoff = artifact.handoff;
+  if (!closed && !movedHere && !filed && !handoff) return null;
 
   return (
     <div className="freshness">
+      {/* Yours first: a handoff is a decision you made, and it is why anything
+          cerber did to this row afterwards happened at all. */}
+      {handoff && <HandoffNote handoff={handoff} />}
       {filed && <FiledNote filed={filed} />}
       {closed && (
         <div>
@@ -1877,6 +2081,10 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // moment you make it without the rest of the list moving.
   const [settledHere, setSettledHere] = useState<Set<string>>(new Set());
   const markSettled = (key: string) => setSettledHere((s) => new Set(s).add(key));
+  // Whether the handoff panel is open. Not a route and not remembered: it is a
+  // GitHub write being composed, and one left open across a reload would be a
+  // half-typed name sitting over a review somebody came back to read.
+  const [handingOff, setHandingOff] = useState(false);
   // What the user has pointed at with "discuss this", waiting to be sent with
   // their next message. Lives here so a button anywhere in the walkthrough can
   // reach the one chat panel at the bottom.
@@ -2166,6 +2374,26 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         advance();
       })
       .catch((e) => setError(String(e)));
+  /**
+   * Give this review to somebody else. Rejects back into the panel, which is
+   * holding the only copy of the note — so a refusal from GitHub (not a
+   * collaborator, no permission to ask for reviews) lands next to the name that
+   * caused it, with nothing typed lost.
+   *
+   * A note that failed is a different thing: by then the request has already
+   * moved and the row is already settled, so there is nothing to retry that
+   * would not ask a second time. It is said here, and the page stays put so it
+   * can be read.
+   */
+  const handOff = (to: string, note: string) =>
+    handOffReview(reviewKey, { to, note }).then(({ artifact: handed, noteError }) => {
+      rememberHandoff(to);
+      setArtifact(handed);
+      setHandingOff(false);
+      markSettled(reviewKey);
+      if (noteError) setError(`Handed to @${to}, but the note did not post: ${noteError}`);
+      else advance();
+    });
   const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
     apply(patchComment(reviewKey, id, patch));
   const onDeleteComment = (id: string) => apply(deleteComment(reviewKey, id));
@@ -2627,7 +2855,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               anchorRef={sendEl}
               footer={
                 <>
-                  <span className="faint">not sending?</span>
+                  {/* The question only makes sense before a send. After one the
+                      sent strip above has already said what happened. */}
+                  {!readOnly && <span className="faint">not sending?</span>}
                   {!readOnly && (
                     <>
                       {/* Both mean "I'm done with this one" — so they move you on. */}
@@ -2653,6 +2883,18 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                       </button>
                     </>
                   )}
+                  {/* Outside the `readOnly` fence the other two sit behind: a
+                      review you have already sent can still be the one GitHub
+                      keeps asking you about, and passing it on is the answer. */}
+                  <button
+                    className="btn btn-sm"
+                    title="Move GitHub's review request to somebody else, and settle this row"
+                    onClick={() => setHandingOff(true)}
+                    disabled={handingOff}
+                  >
+                    <Icon name="arrowRight" />
+                    hand off
+                  </button>
                   <a className="btn btn-sm" href={exportUrl(reviewKey)}>
                     <Icon name="download" />
                     export .md
@@ -2660,6 +2902,16 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 </>
               }
             />
+            {/* Under the panel rather than inside its footer: it is a write to
+                GitHub being composed, and a row of "not sending?" buttons is no
+                place for one. */}
+            {handingOff && (
+              <HandoffPanel
+                artifact={artifact}
+                onConfirm={handOff}
+                onCancel={() => setHandingOff(false)}
+              />
+            )}
           </div>
         </aside>
       </div>

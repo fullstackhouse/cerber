@@ -39,7 +39,7 @@ queue, the same send path.
 
 | | |
 |---|---|
-| `bin/gh` | Answers every `gh` argv shape cerber uses, from `fixtures/`. The one write (`POST …/pulls/N/reviews`) is recorded to `$CERBER_HOME/sent/` and never leaves the machine. |
+| `bin/gh` | Answers every `gh` argv shape cerber uses, from `fixtures/`. The writes are recorded under `$CERBER_HOME/` and never leave the machine: a send to `sent/`, and a handoff's two to `handoffs/` (the review request moving) and `comments/` (its note). |
 | `bin/claude` | Reads the prompt on stdin, decides whether it is cerber's review prompt or its chat prompt, and replays the canned payload for that PR as `stream-json` events. |
 | `bin/package.json` | One line: `{"type": "module"}`. The stubs are extensionless so they can be named `gh` and `claude`; this is what tells Node they are ESM. |
 | `fixtures/` | The data. One directory per PR, plus one per PR of canned model output. |
@@ -137,4 +137,5 @@ curl -s 'localhost:4830/api/reviews/northwind__checkout__812/send-preview?event=
 ```
 
 Five rows, all `ready`, and three inline comments with nothing folded. Then
-press Send in the cockpit and read `demo/home/sent/`.
+press Send in the cockpit and read `demo/home/sent/` — or hand a review off and
+read `demo/home/handoffs/` and `demo/home/comments/`.

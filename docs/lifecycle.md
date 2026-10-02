@@ -27,7 +27,7 @@ Four things write the artifact, and most questions in this document are really
 | **the poll** | `src/server/daemon.ts` | create stubs, archive, file, reopen a settled row someone asked you about again, delete stubs, start drafts — and, with `--auto-send`, submit and mark `sent` |
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
-| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
+| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, hand off, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
 | **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `history` only reads, `prune` only clears checkouts, and there is no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
@@ -112,9 +112,15 @@ does not:
 
 ```
 any unsent row ──you mark it────────────────► reviewed | skipped  (+ `settledAt`)
+any row ───────────you hand it to somebody──► skipped  (+ `handoff`, `settledAt`)
 ready ──the poll finds GitHub moved past it─► reviewed  (+ `filed`, `settledAt`)
 ready ──Send / `cerber send` / auto-send────► sent
 ```
+
+A handoff on a row that was already `sent` is the one that settles nothing: the
+send is the stronger fact and already took the row out of the queue, so the
+status stays and only `handoff` is written. See "Handing it to somebody else"
+below.
 
 And the one way back out of settled without you pressing anything:
 
@@ -145,10 +151,13 @@ Notes on the edges that surprise people:
   GitHub has stopped asking about is never picked up *on its own*. You can
   always start one yourself — both forcing paths take any unsent status.
 - **Nothing *reaches GitHub* except by a deliberate human act — the cockpit's
-  Send button or `cerber send` — or by opt-in auto-send.** That is the one hard
-  rule of the product. The status field is held to it as well:
-  `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two that
-  are your decision, so nothing but the send path can write `sent`.
+  Send button, `cerber send`, or a handoff — or by opt-in auto-send.** That is
+  the one hard rule of the product, and Send is the only one of those that
+  speaks as a *review*: a handoff moves the request and posts a plain comment,
+  and auto-send cannot hand off at all. The status field is held to the same
+  line: `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two
+  that are your decision, so nothing but the send path can write `sent` and
+  nothing but `POST …/handoff` can write `handoff`.
 - **Neither will send a draft a run is rewriting.** The cockpit answers `409`,
   refusing on the artifact's status *and* on this process's own claim;
   `cerber send` prints the reason and exits non-zero, and goes on the status
@@ -261,6 +270,13 @@ settling here reaches nothing on GitHub; a sent row can land here too, when a
 review was submitted and someone then asked you for another one. Without it the cockpit would say "nothing
 awaits you" over a poll that had just counted two.
 
+A handoff is the one decision that *empties* this tab instead of filling it,
+because it takes your request off the PR rather than leaving it behind. A handed
+row still showing up here means the poll ran before the swap, or that somebody
+has asked you again since — so its tag names who has it now
+(`handoffTag`, ahead of `sent` and `filed`), which is also the only reading that
+does not send you back into a PR you deliberately passed on.
+
 **Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
 `reviewed`, `skipped`, `sent` — newest first inside each band. The `‹ ›` arrows
 walk `walkable()`: open, unsettled rows only. That list is fetched once, when
@@ -280,6 +296,9 @@ read their position from, and a send leaves you standing on it.
 | A pure stub leaves the awaiting search, PR still open | **deleted** — it held no work | `syncQueue` / `isPureStub` |
 | GitHub moved past a finished draft | status → `reviewed`, `filed` set | `fileIfSettledElsewhere` |
 | Auto-send is on and the draft qualified | status → `sent` (the **sent** tab) | `handleAutoSend` |
+
+(Handing a review to somebody else removes a row too, but that is you touching
+it — see below.)
 
 And the one that *adds* a row back: somebody asking for you again after you
 settled — the re-request button, or your name in a comment → status →
@@ -368,6 +387,57 @@ can prove the decision came after — cerber's own `filed.at`, or `run.finishedA
 (you cannot have skipped a draft before it existed). Both are lower bounds, so
 the cost of being wrong is one row coming back once; the alternative is that
 every row settled before this shipped stays unreachable forever.
+
+### Handing it to somebody else
+
+The way out that is not a decision about the *review* but about who does it.
+`POST /api/reviews/:key/handoff` (`src/server/index.ts`), from the **hand off**
+button in the cockpit's send panel.
+
+Two things reach GitHub, in this order and for this reason:
+
+1. **The request moves** (`handOffReview`, `src/core/gh.ts`) — they are asked,
+   then you are taken off. Asking first means a refusal (not a collaborator, no
+   permission to request reviews) leaves the PR exactly as it was, with you still
+   on the hook and nothing to undo; the reverse order could drop the request on
+   the floor and leave nobody looking at the PR. Nothing is written here and no
+   note is posted if this fails.
+2. **The note goes up** (`postIssueComment`) — a plain comment in the
+   conversation, prefilled with the person's name so they are notified, editable,
+   and clearable: an empty note posts nothing and the request still moves. It is
+   an *issue* comment on purpose. A `pulls/…/reviews` POST with a COMMENT event
+   reads the same in the thread and is a review everywhere that counts one, and
+   Send is the only thing in cerber that may speak as a review.
+
+Taking your own request off is allowed to fail on its own, because by then the
+other person is asked either way: the row records `withdrewYours: false` and
+says, in the cockpit and in the open-requests tag, that GitHub is asking both of
+you. So is the note: a failure there is reported next to the row rather than
+rolled back into a lie about where the PR is.
+
+**The draft is never posted.** Handing a PR over is deciding not to review it, so
+what the handoff announces is the handoff. The draft stays on disk, openable and
+still sendable — and the panel says so, with one line pointing at Send for anyone
+who wants the other person to have it.
+
+Locally the row becomes `skipped`, with `settledAt` and `handoff` set and `filed`
+cleared — your own decision cannot sit under cerber's account of why the row was
+filed. The exception is a row that was already `sent`: there the status and
+`settledAt` stay as they were and only `handoff` is written, because overwriting
+them would leave a row claiming no review was ever sent. And a second handoff
+passes `from: null`, skipping a withdrawal GitHub would refuse because the first
+one already happened.
+
+`handoff` outranks both the status and `filed` wherever the queue tags a row
+(`rowTag`, `requestTag`, `web/src/inbox.ts`): "skipped" alone reads as work
+dropped, where this is work passed on. Who you hand reviews to is remembered in
+`localStorage` (`web/src/handoff.ts`), beside the theme pin and the bell's
+announced-keys — a suggestion for the name box, not a fact about reviews, so
+`config.json` keeps out of it.
+
+Not supported, and refused in words rather than half-done: handing a review to a
+team. `@org/team` reaches GitHub through a different field, and "take your own
+request off" means nothing beside a room being asked.
 
 ### "Whose move is it"
 

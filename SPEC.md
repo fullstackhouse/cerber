@@ -35,11 +35,14 @@ artifact, and presents the drafts in a local web cockpit where the user reads,
 edits, discusses and finally — by an explicit click — sends the review to
 GitHub. Everything before that click is read-only with respect to GitHub.
 
-**The one hard boundary:** cerber never writes to GitHub except (a) an
-explicit, user-confirmed Send, or (b) daemon auto-send that the user explicitly
-enabled with `--auto-send` — approve-only, confidence-threshold-gated, every
-decision logged. No pending reviews, no comments, no reactions. Reviewing is
-read-only.
+**The one hard boundary:** nothing reaches GitHub without a deliberate human
+act, and only three things ever do: (a) an explicit, user-confirmed Send, (b)
+daemon auto-send that the user explicitly enabled with `--auto-send` —
+approve-only, confidence-threshold-gated, every decision logged, and (c) a
+handoff — one confirmed click that moves the review request to another person and
+posts the plain comment saying so (§14.6). Send is the only one of the three that
+speaks as a review; auto-send can never hand off. No pending reviews, no
+reactions. Reviewing itself is read-only.
 
 ## 2. Goals and Non-Goals
 
@@ -190,6 +193,7 @@ absent on read and materialize with the stated value.
 | `run` | RunInfo \| null | default `null` |
 | `sent` | SentInfo \| null | default `null` |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
+| `handoff` | HandoffInfo \| null | default `null`; set when the user gave the review away (§14.6). Mutually exclusive with `filed` |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
 | `notified` | `{ at, drafted }` \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a record = already announced and *what* was said, absent = never meant to be announced |
 | `refresh` | RefreshInfo \| null | default `null` |
@@ -258,8 +262,14 @@ first-shipped reason, so legacy artifacts keep their meaning); `review`
 reason is `own-review`; `reply` (`{at, url}`) set when `own-reply`; nothing
 extra for `request-withdrawn`.
 
+**HandoffInfo:** `at`, `to` (one GitHub login) REQUIRED; `withdrewYours`
+default `true` — false when the user's own review request could not be taken off
+the PR; `note` (`{body, url}`) default `null` — the comment posted announcing it,
+null when none was posted or posting failed (§14.6).
+
 **`settledAt`** dates the settling decision — marked `reviewed` or `skipped`
-by the user, or filed by the poll — and is null on anything not settled. It
+by the user, handed to somebody else, or filed by the poll — and is null on
+anything not settled. It
 exists because a settle answers the review request that was *open at the
 time*, and cannot have answered one that arrived afterwards; the poll needs to
 know which side of the decision a request falls on (§9.6). `updatedAt` cannot
@@ -538,7 +548,7 @@ Exactly one status at a time, and each status has one writer class:
 | `running` | an AI review run in flight | the runner (and the server, pre-202) |
 | `ready` | a draft exists, wants your reading | the runner |
 | `reviewed` | you are done with it — or the poll filed it | the user, or filing (§9.5) |
-| `skipped` | you decided not to review | the user |
+| `skipped` | you decided not to review — or handed it to somebody else (§14.6) | the user |
 | `sent` | the review reached GitHub | the send path |
 | `failed` | the run errored | the runner / startup reconciliation |
 
@@ -554,7 +564,8 @@ Derived sets used throughout:
 
 The status-set API (`PATCH`) MUST accept only `reviewed` and `skipped` — every
 other status is a claim about machine work that only the responsible machine
-path may make.
+path may make. The handoff route (§14.6) sets `skipped` too, and is the only
+other path to a status outside the runner and the send path.
 
 ### 8.2 Transitions
 
@@ -572,13 +583,16 @@ anything         ── `cerber review --force`                  ──▶ runni
 Leaving `running`: AI answered → `ready`; errored → `failed`; process
 restarted → `failed` (§5.3).
 
-Settling: the user marks any unsent row `reviewed`/`skipped`; the poll files a
-`ready` draft GitHub moved past (§9.5); Send/auto-send makes it `sent`.
-Skipping is offered on `awaiting`, `running` and `failed` too — settling needs
-no draft. Every settling path MUST stamp `settledAt`: the status route stamps
-it at the moment of the click (and clears any `filed` note — cerber's account
-of why the row was settled stops being true the moment the user settles it
-themselves), and filing stamps it with the filed time.
+Settling: the user marks any unsent row `reviewed`/`skipped`; the user hands a
+row to somebody else, which settles it `skipped` with a `handoff` record
+(§14.6); the poll files a `ready` draft GitHub moved past (§9.5); Send/auto-send
+makes it `sent`. Skipping is offered on `awaiting`, `running` and `failed` too —
+settling needs no draft. Every settling path MUST stamp `settledAt`: the status
+route stamps it at the moment of the click (and clears any `filed` note —
+cerber's account of why the row was settled stops being true the moment the user
+settles it themselves), filing stamps it with the filed time, and a handoff
+stamps it unless the row was already `sent`, where the send's own standing is
+left alone.
 
 Reopening — the one transition out of `SETTLED_BY_YOU` without a click:
 
@@ -1320,12 +1334,11 @@ no default identities, no user config, batch mode). This is credential
 hygiene, **not a sandbox**, and implementations MUST say so rather than imply
 one.
 
-### 14.4 Send — the Only Write
+### 14.4 Send — the Only Write That Speaks as a Review
 
-One GitHub write exists in the product: submitting a review (`POST
-…/pulls/N/reviews`), one shot — body, event and all inline comments in a
-single request, no retry, no partial send. Reachable from exactly three
-places: the cockpit send (requires `confirm: true` in the request), `cerber
+Submitting a review (`POST …/pulls/N/reviews`) is one shot — body, event and all
+inline comments in a single request, no retry, no partial send. Reachable from
+exactly three places: the cockpit send (requires `confirm: true` in the request), `cerber
 send` (interactive `[y/N]` unless `--yes`), and daemon auto-send (§15).
 
 Payload construction (pure, previewable without side effects):
@@ -1372,6 +1385,59 @@ confirmation; implementations MUST NOT stack a second "are you sure" on top.
 (A second confirmation on the action the user just chose is friction wearing
 safety's coat.) The `confirm: true` body field exists to keep a stray HTTP
 request from sending, not to double-ask a human.
+
+### 14.6 Handoff — Moving the Request to Another Person
+
+A reviewer may give a review away: GitHub's review request moves to another
+person, a plain comment in the conversation says so, and the row settles
+locally. `POST /api/reviews/:key/handoff`, `confirm: true` required; the daemon
+MUST NOT have a path to it.
+
+**The two writes, in this order, for this reason:**
+
+1. `POST …/pulls/N/requested_reviewers` with the recipient, then `DELETE` the
+   same endpoint with the user's own login. Asking first means a refusal — not a
+   collaborator, no permission to request reviews — leaves the PR exactly as it
+   was and nothing to undo. The reverse order could withdraw the user's request
+   without adding anybody's, leaving nobody asked at all.
+2. `POST …/issues/N/comments` with the note. The `issues` endpoint is
+   normative: a `pulls/…/reviews` POST with a COMMENT event reads identically in
+   the thread but is a review in the PR's review list and to `fetchOwnReview`,
+   and §14.4 is the only thing that may speak as a review.
+
+**Partial outcomes are recorded, not rolled back.** Withdrawing the user's own
+request MAY fail on its own — the recipient is asked either way — in which case
+`handoff.withdrewYours` is `false` and every surface that mentions the handoff
+MUST say GitHub is asking both of them. A note that fails to post likewise
+leaves `handoff.note` null and returns the error alongside the updated artifact;
+the request has already moved, so reporting beats pretending otherwise. A failure
+of (1) writes nothing and posts nothing.
+
+**The note.** Prefilled naming the recipient (so they are notified), editable,
+and clearable: an empty note posts nothing and the request still moves.
+
+**The draft is never posted.** Handing a PR over is deciding not to review it.
+The draft stays local, openable and still sendable, and the panel MUST say so
+rather than offering to post it — which would both post a review nobody vouched
+for and put a second control beside §14.4's.
+
+**Local effect.** Status becomes `skipped` with `settledAt` set, `filed` cleared
+(the user's own decision cannot sit under cerber's account of why a row was
+filed), and `handoff` written. A row that was already `sent` keeps its status
+and `settledAt` and only gains `handoff`: overwriting them would leave a row
+claiming no review was ever sent. A second handoff passes a null `from`, skipping
+a withdrawal GitHub would refuse.
+
+**Preconditions.** Not while a run is in flight (same OR as §14.4). The
+recipient MUST be a single GitHub login, MUST NOT be the user themselves, and a
+team (`@org/team`) MUST be refused rather than half-handled — it reaches GitHub
+through a different field and has no "withdraw yours" counterpart.
+
+**Precedence in the UI.** `handoff` outranks both the status and `filed`
+wherever a row is tagged (§17.6): a handed row is `skipped`, and "skipped" alone
+reads as work dropped where this is work passed on. In the open-requests tab
+(§17.2) it outranks `sent` too, because the handoff is the thing that changed the
+request that tab is about.
 
 ## 15. Auto-Send
 
@@ -1442,6 +1508,7 @@ static assets included. No CORS: same-origin only.
 | `GET …/export` | markdown export | standalone document; verdict basis = blockers + confidence |
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
 | `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified |
+| `POST …/handoff` | §14.6 | requires `{confirm: true}`; 400 on a team, a malformed login or yourself; 409 in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, noteError}` — `noteError` non-null when only the note failed |
 | `GET /*` | cockpit SPA | plain-text pointer when the web build is absent |
 
 ### 16.3 The 202-Detached Pattern
@@ -1483,7 +1550,11 @@ The daemon's published awaiting list (§9.1) drives one more tab: rows GitHub
 still requests that the local queue is hiding — settled locally, archived, or
 sent-then-re-requested. It deliberately overlaps every other tab; without it
 the cockpit would say "nothing awaits you" over a poll that just counted two.
-The whose-move label (§9.7) renders here and never filters.
+The whose-move label (§9.7) renders here and never filters. A handoff (§14.6) is
+the one local decision that *empties* this tab rather than filling it, since it
+takes the request off the PR; a handed row still listed here means the poll ran
+before the swap, or that somebody has asked again since, and MUST be tagged with
+who has it now rather than with the whose-move label.
 
 ### 17.3 One Walkable Set
 
@@ -1578,6 +1649,12 @@ one is reported over the next.
 - A sent review renders read-only. Rows filed by cerber are labeled with the
   filing reason ("reviewed on GitHub"), never with a bare "reviewed" that
   would read as a click the user never made.
+- A row the user handed to somebody else (§14.6) is labeled with who has it,
+  ahead of both its status and `filed`: it *is* `skipped`, and "skipped" alone
+  reads as work dropped where this is work passed on. The review itself states
+  what GitHub says now — who is asked, whether the user still is — and that the
+  draft was never sent. The handoff panel MUST name both writes before either
+  happens, and MUST say the draft stays local rather than offering to post it.
 - Opening a review triggers refresh (§13.2); a refresh failure is reported
   softly and the draft still reads.
 - Every box the user types markdown into (a comment being edited, a comment
@@ -1698,8 +1775,12 @@ rate-limit bookkeeping and the in-flight registry are deliberately lost.
 
 ## 20. Security Invariants (summary)
 
-1. **One write.** `submitReview` is the only GitHub write, reachable only via
-   explicit confirmed Send or opt-in auto-send. Everything else is read-only.
+1. **Three writes, one of them a review.** `submitReview` is the only GitHub
+   write that speaks as a review, reachable only via explicit confirmed Send or
+   opt-in auto-send. The other two are a handoff's (`handOffReview`,
+   `postIssueComment`), reachable only from `POST /api/reviews/:key/handoff`
+   with `confirm: true`, never from the daemon (§14.6). Everything else is
+   read-only.
 2. **Runs hold no credentials.** §14.3's environment is mandatory for every
    agent invocation. Not a sandbox; never claim one.
 3. **Trust is people, granted only by the user.** Repo-shaped trust is
@@ -1895,9 +1976,15 @@ An implementation conforms when all of the following hold:
       checkout.
 
 **GitHub**
-- [ ] `submitReview` is the only write, gated by explicit confirmation or
-      §15's full auto-send predicate; the payload folds unanchorable
-      comments and pins `commit_id`; every subprocess uses argv arrays.
+- [ ] `submitReview` is the only write that speaks as a review, gated by
+      explicit confirmation or §15's full auto-send predicate; the payload folds
+      unanchorable comments and pins `commit_id`; every subprocess uses argv
+      arrays.
+- [ ] A handoff's writes follow §14.6: `confirm: true`, never the daemon, the
+      request moved before the note is posted, a failed move writes and posts
+      nothing, a failed withdrawal or note is recorded and reported rather than
+      rolled back, the note is a plain issue comment, the draft is never posted,
+      and a team or the user themselves is refused.
 - [ ] Trust refuses repo-shaped rules; denials win; lookups fail closed.
 
 **Operator surface**
@@ -1926,7 +2013,7 @@ An implementation conforms when all of the following hold:
 | §14 GitHub | `src/core/gh.ts`, `src/core/trust.ts`, `src/core/send.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
-| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `Markdown.tsx`, `mdblocks.ts` |
+| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `handoff.ts`, `Markdown.tsx`, `mdblocks.ts` |
 | §18 CLI | `src/cli/index.ts` |
 
 ## Appendix B. Known Divergences in the Reference Implementation (non-normative)

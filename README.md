@@ -10,10 +10,11 @@ comments, and a verdict with a confidence score. You read it in a local web
 cockpit, keep or rewrite or drop each comment, then press Send when you agree
 with it.
 
-**Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
-write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
-reviewing is 100% local and read-only. Reviews go out under your own account,
-as your review, because you decided each line of it should.
+**Nothing reaches GitHub until you explicitly say so.** Reviewing is 100% local
+and read-only; three things can write, each one a click you make — the Send
+button, opt-in daemon auto-send you turn on yourself, and handing a review to
+somebody else. Only Send ever speaks as a *review*, and it goes out under your
+own account, as your review, because you decided each line of it should.
 
 That gate is the whole point, and the reason this is not another review bot:
 
@@ -86,6 +87,7 @@ and apply on the next poll.
 
 - [What a review looks like](#what-a-review-looks-like) — what Claude writes and how you walk it
 - [The inbox](#the-inbox) — what the queue shows, what settles a row, the notifications
+- [Handing a review to somebody else](#handing-a-review-to-somebody-else)
 - [It reviews the code, not just the diff](#it-reviews-the-code-not-just-the-diff)
 - [Trusted PRs: reviews that can run things](#trusted-prs-reviews-that-can-run-things)
 - [When the PR moves under you](#when-the-pr-moves-under-you)
@@ -152,7 +154,9 @@ all, since the repo is read-only and a review could never be sent.
 
 Settling a review is your decision, not GitHub's: skip a PR, or mark one
 reviewed without sending, and GitHub still holds its review request open,
-because nothing cerber does here reaches it. Those rows stay marked where they
+because nothing in that decision reaches it. (The one decision that does reach
+it is [handing the review to somebody else](#handing-a-review-to-somebody-else),
+which moves the request rather than leaving it behind.) Those rows stay marked where they
 sit, counted on the tab they went into, and named in place of the empty
 inbox — cerber never tells you nothing awaits you while its own poll says
 otherwise. It is a report, not a nag: what you decided here stands, and the
@@ -226,6 +230,36 @@ The tab itself says it too, without asking anyone: while the inbox holds
 anything, the favicon wears a red dot, and it goes away when the last review is
 dealt with. No permission, no switch — just the paw with a mark on it, so a
 glance at the tab strip answers "is there anything for me?".
+
+## Handing a review to somebody else
+
+Some reviews are not yours. Wrong part of the stack, wrong week, somebody else
+wrote half of it — and the honest answer is a name, not a skip. **Hand off** is
+in the send panel next to *mark reviewed* and *skip*: type a GitHub login, and
+
+- they are added as a requested reviewer and you are taken off,
+- a short note goes on the PR saying so — prefilled with their name so they get
+  the notification, editable, and clearable if you would rather say nothing,
+- the row is filed under settled here, tagged `handed to @them`.
+
+That is the whole of it, and it is the one thing on the queue that genuinely
+*finishes* a review request instead of just filing it: a skip leaves GitHub
+asking you forever, and this does not. If they run cerber too, their next poll
+picks the PR up and drafts a review for them — nothing has to be sent anywhere
+for that to work.
+
+**Your draft stays here.** Handing a PR over means deciding not to review it, so
+the handoff posts the note and nothing else; whatever Claude drafted is still on
+your disk, still openable, still sendable. If it is worth passing on, send it as
+a comment *before* you hand off — the panel says so, and does not do it for you,
+because a draft nobody has read is not something to post under your name.
+
+If GitHub refuses the swap — they are not a collaborator, or you cannot request
+reviews on that repo — nothing happens at all: no note on the PR, no change
+here. And if it moves them on but cannot take you off, the row says that too,
+rather than claiming you are done with it.
+
+Handing to a team isn't supported — a room being asked is not somebody taking it.
 
 ## It reviews the code, not just the diff
 

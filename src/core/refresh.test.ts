@@ -71,6 +71,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     calibration: null,
   chat: [],

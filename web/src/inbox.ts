@@ -5,7 +5,7 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
-import { DaemonStatus, Filed, FiledReason, Reply, ReviewListItem } from "./types";
+import { DaemonStatus, Filed, FiledReason, Handoff, Reply, ReviewListItem } from "./types";
 
 export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
 
@@ -39,7 +39,8 @@ export const TAB_META: Record<Tab, { label: string; title: string }> = {
   },
   settled: {
     label: "settled",
-    title: "You marked these reviewed or skipped. Nothing was sent to GitHub.",
+    title:
+      "You marked these reviewed or skipped, or handed them to somebody else. No review of yours was sent to GitHub.",
   },
   sent: { label: "sent", title: "Reviews that reached GitHub. Kept here as a record." },
   archived: { label: "archived", title: "PRs that have since been merged or closed." },
@@ -111,10 +112,12 @@ export function walkFrom(
  *
  * The queue lists what you have not dealt with locally; the daemon reports what
  * GitHub still asks you for. Those two stop matching the moment you skip a PR
- * or mark one reviewed without sending — cerber never writes to GitHub, so the
- * review request outlives your decision here. That is the state where the
- * cockpit used to say "nothing awaits your review" over the top of a poll that
- * had just counted two, and the work went missing.
+ * or mark one reviewed without sending: nothing in that decision reaches GitHub,
+ * so the review request outlives it. That is the state where the cockpit used to
+ * say "nothing awaits your review" over the top of a poll that had just counted
+ * two, and the work went missing. (Handing a review to somebody else is the one
+ * decision that does move the request — which is why it is also the one that
+ * empties this tab instead of filling it.)
  */
 export function hiddenAwaiting(list: ReviewListItem[], daemon: DaemonStatus | null): ReviewListItem[] {
   if (!daemon?.enabled || daemon.awaiting.length === 0) return [];
@@ -217,6 +220,10 @@ const FILED_COPY: Record<
  */
 export function rowTag(r: ReviewListItem): string | null {
   if (isArchived(r)) return r.pr.state?.toLowerCase() ?? null;
+  // Above the status and above `filed`, because it is the only one of the three
+  // that says where the PR went. A row handed to somebody else is `skipped`,
+  // and "skipped" alone reads as work dropped rather than work passed on.
+  if (r.handoff) return `handed to @${r.handoff.to}`;
   // Filed by cerber, not by you: "reviewed" here would read as a click you
   // never made, on the one row whose whole point is that you did it elsewhere.
   if (r.filed) return FILED_COPY[r.filed.reason].tag;
@@ -319,9 +326,39 @@ export function filedTag(filed: NonNullable<ReviewListItem["filed"]>): {
   };
 }
 
-/** The open-requests tag for a row: what cerber sent, or whose move the poll says it is. */
+/**
+ * The same, for a row you handed to somebody else.
+ *
+ * First of all of them, because a handoff is the one thing here that *changed*
+ * the request this tab is about — it took yours off the PR. So a row still
+ * listed is the search lagging the swap by a poll, or somebody having asked you
+ * again since, and either way the thing to say is who has it now. Without this
+ * the row would be tagged "you haven't replied" at a PR you deliberately passed
+ * on, which is the one reading that would send you back into it.
+ */
+export function handoffTag(handoff: Handoff): { label: string; title: string } {
+  const when = new Date(handoff.at).toLocaleDateString();
+  return {
+    label: `handed to @${handoff.to}`,
+    title: handoff.withdrewYours
+      ? `You handed this to @${handoff.to} on ${when} and cerber took your own review request off ` +
+        `the PR. GitHub still lists one for you — most likely the last inbox poll ran before the ` +
+        `swap, or somebody has asked you again since.`
+      : `You handed this to @${handoff.to} on ${when}, but cerber could not take your own review ` +
+        `request off the PR — so GitHub is asking both of you. Remove yourself on GitHub if that ` +
+        `is not what you wanted.`,
+  };
+}
+
+/** The open-requests tag for a row: who has it now, what cerber sent, or whose move the poll says it is. */
 export const requestTag = (r: ReviewListItem, reply: Reply) =>
-  r.sent ? sentTag(r.sent) : r.filed ? filedTag(r.filed) : replyTag(reply);
+  r.handoff
+    ? handoffTag(r.handoff)
+    : r.sent
+      ? sentTag(r.sent)
+      : r.filed
+        ? filedTag(r.filed)
+        : replyTag(reply);
 
 /**
  * What to say instead of "nothing awaits your review" when something does.
@@ -441,11 +478,17 @@ export function strip(
   }
 
   const meta = [readMode(r)];
-  // What you did with it, when that isn't "nothing yet".
-  if (r.filed) {
+  // What you did with it, when that isn't "nothing yet". A handoff goes first
+  // and stands in for the status, the way its tag does: the row is `skipped`,
+  // and "you skipped this" is the one thing that is not what happened.
+  if (r.handoff) {
+    meta.unshift(
+      `you handed this to @${r.handoff.to} on ${new Date(r.handoff.at).toLocaleDateString()}`,
+    );
+  } else if (r.filed) {
     meta.unshift(FILED_COPY[r.filed.reason].meta(new Date(filedOn(r.filed)).toLocaleDateString()));
   } else if (r.status === "reviewed") meta.unshift("you marked this reviewed");
-  if (r.status === "skipped") meta.unshift("you skipped this");
+  else if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
   meta.push(commentsPart(r));
   // Auto-send is approve-only, so the bar is only news on an approve verdict.
@@ -455,6 +498,15 @@ export function strip(
         ? `auto-send candidate at ${r.verdict.confidence}%`
         : `below the ${daemon.autoSendThreshold}% auto-send bar`,
     );
+  }
+  if (r.handoff) {
+    return {
+      reasoning:
+        `GitHub asks @${r.handoff.to} for this review now` +
+        `${r.handoff.withdrewYours ? " and no longer asks you" : " — and still asks you, because your own request could not be taken off"}. ` +
+        `The draft was never sent: it is still yours to read or send.`,
+      meta,
+    };
   }
   if (r.filed) return { reasoning: FILED_COPY[r.filed.reason].reasoning, meta };
   return { reasoning: r.verdict?.reasoning ?? "This review has a draft but no verdict.", meta };

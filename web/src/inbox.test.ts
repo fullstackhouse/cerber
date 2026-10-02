@@ -426,6 +426,56 @@ describe("a draft cerber filed rather than you", () => {
   });
 });
 
+describe("a review you handed to somebody else", () => {
+  const handed = (over: Partial<NonNullable<ReviewListItem["handoff"]>> = {}) =>
+    row({
+      status: "skipped",
+      handoff: { at: "2026-08-20T12:00:00.000Z", to: "maks", withdrewYours: true, note: null, ...over },
+    });
+
+  it("names who has it, rather than calling the row skipped", () => {
+    // A handed-off row *is* skipped, and "skipped" alone reads as work dropped
+    // rather than work passed on.
+    expect(rowTag(handed())).toBe("handed to @maks");
+  });
+
+  it("outranks cerber's own filing — you did this, cerber didn't", () => {
+    const both = handed();
+    both.filed = { at: "2026-08-20T13:00:00.000Z", reason: "request-withdrawn", review: null, reply: null };
+    expect(rowTag(both)).toBe("handed to @maks");
+  });
+
+  it("explains an open request GitHub has not caught up on", () => {
+    // The handoff took your request off the PR, so a row still listed is the
+    // search lagging the swap — or somebody asking you again since. Either way
+    // the thing to say is who has it, not "you haven't replied".
+    const tag = requestTag(handed(), "none");
+    expect(tag.label).toBe("handed to @maks");
+    expect(tag.title).toContain("took your own review request off");
+  });
+
+  it("says plainly when cerber could not take your own request off", () => {
+    const tag = requestTag(handed({ withdrewYours: false }), "none");
+    expect(tag.title).toContain("asking both of you");
+  });
+
+  it("does not call it skipped in the strip either", () => {
+    // The row *is* `skipped`, and "you skipped this" under a tag reading
+    // "handed to @maks" is the one thing that did not happen.
+    const { reasoning, meta } = strip(handed(), null);
+    expect(meta.join(" ")).toContain("you handed this to @maks");
+    expect(meta.join(" ")).not.toContain("you skipped this");
+    expect(reasoning).toContain("GitHub asks @maks for this review now");
+    expect(reasoning).toContain("never sent");
+  });
+
+  it("beats a send, because it is the thing that moved the request", () => {
+    const both = handed();
+    both.sent = { at: "2026-08-20T11:00:00.000Z", event: "COMMENT", url: null, auto: false };
+    expect(requestTag(both, "none").label).toBe("handed to @maks");
+  });
+});
+
 describe("sortReviews", () => {
   it("puts what wants you most on top, newest first inside a band", () => {
     const list = [

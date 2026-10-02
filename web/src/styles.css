@@ -2028,6 +2028,77 @@ button {
   font-size: 11px;
 }
 
+/* ---- handing a review to somebody else ---- */
+
+.handoff-panel {
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 14px 18px 16px;
+  margin-top: 10px;
+}
+
+/* Joined to the send panel when it follows one: both write to GitHub, and the
+   handoff is the one that writes something other than a review. On a sent
+   review there is no panel to join — the sent strip and its actions are in
+   between — so it stands on its own there. */
+.send-panel + .handoff-panel {
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  margin-top: 0;
+}
+
+.handoff-panel .send-top {
+  margin-bottom: 10px;
+}
+
+.handoff-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* The `@` belongs to the login, so it sits against the box rather than in it —
+   typed or not, the value reads the same way. */
+.handoff-at {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+.handoff-login {
+  width: 15ch;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg);
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--sunken);
+}
+
+.handoff-recent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  font-size: 11px;
+}
+
+.handoff-note {
+  max-width: 760px;
+}
+
+/* What the button is about to do, in the words of the thing it does. */
+.handoff-says {
+  max-width: 640px;
+  margin: 10px 0 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
 .sent-strip {
   display: flex;
   align-items: baseline;

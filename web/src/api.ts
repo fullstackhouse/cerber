@@ -143,6 +143,20 @@ export const sendReview = (key: string, event: string) =>
     body: JSON.stringify({ event, confirm: true }),
   });
 
+/**
+ * Give this review to somebody else: GitHub's review request moves to them, the
+ * note (when there is one) goes up as a plain comment, and the row settles here.
+ *
+ * Resolves with the row as it now stands and, separately, whatever went wrong
+ * with the note — because by then the request has already moved, so a note that
+ * failed to post is a thing to say rather than a reason to call this a failure.
+ */
+export const handOffReview = (key: string, body: { to: string; note: string }) =>
+  request<{ artifact: Artifact; noteError: string | null }>(
+    `/api/reviews/${encodeURIComponent(key)}/handoff`,
+    { method: "POST", body: JSON.stringify({ ...body, confirm: true }) },
+  );
+
 export const exportUrl = (key: string) => `/api/reviews/${encodeURIComponent(key)}/export`;
 
 export const fetchConfig = () => request<ConfigView>("/api/config");

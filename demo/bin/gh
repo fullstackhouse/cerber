@@ -144,8 +144,33 @@ if (argv[0] === "search" && argv[1] === "prs") {
 // ----------------------------------------------------------------- gh api
 
 if (argv[0] === "api") {
-  // THE ONLY WRITE. Record it; never leave the machine.
+  // THE WRITES. Record them; never leave the machine.
   const method = flag("--method");
+
+  /** Write one record per GitHub write into the scratch home, and say where. */
+  function record(kind, owner, repo, number, payload) {
+    const home = process.env.CERBER_HOME;
+    if (!home) unsupported(`CERBER_HOME is unset — refusing to record a ${kind} outside the scratch home`);
+    const dir = path.join(home, kind);
+    mkdirSync(dir, { recursive: true });
+    const at = new Date().toISOString();
+    const file = path.join(dir, `${keyOf(owner, repo, number)}-${at.replace(/[:.]/g, "-")}.json`);
+    writeFileSync(file, JSON.stringify({ at, ...payload }, null, 2) + "\n");
+    process.stderr.write(`demo gh stub: recorded the ${kind} at ${file}\n`);
+    return at;
+  }
+
+  /** `-f` is repeatable, so `flag()` (first match wins) cannot read a list. */
+  const fields = (name) => {
+    const found = [];
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "-f" && String(argv[i + 1] ?? "").startsWith(`${name}=`)) {
+        found.push(argv[i + 1].slice(name.length + 1));
+      }
+    }
+    return found;
+  };
+
   const reviewsWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(a));
   if (method === "POST" && reviewsWrite) {
     const [, owner, repo, , number] = reviewsWrite.split("/");
@@ -156,17 +181,11 @@ if (argv[0] === "api") {
     } catch {
       unsupported("send payload on stdin was not JSON");
     }
-    const home = process.env.CERBER_HOME;
-    if (!home) unsupported("CERBER_HOME is unset — refusing to record a send outside the scratch home");
-    const dir = path.join(home, "sent");
-    mkdirSync(dir, { recursive: true });
-    const at = new Date().toISOString();
-    const file = path.join(dir, `${keyOf(owner, repo, number)}-${at.replace(/[:.]/g, "-")}.json`);
-    writeFileSync(
-      file,
-      JSON.stringify({ at, endpoint: reviewsWrite, method: "POST", payload: parsed }, null, 2) + "\n",
-    );
-    process.stderr.write(`demo gh stub: recorded the review payload at ${file}\n`);
+    const at = record("sent", owner, repo, number, {
+      endpoint: reviewsWrite,
+      method: "POST",
+      payload: parsed,
+    });
     const id = 900000000 + Number(number);
     out(
       JSON.stringify({
@@ -175,6 +194,44 @@ if (argv[0] === "api") {
         html_url: `https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview-${id}`,
         submitted_at: at,
         body: parsed.body,
+      }),
+    );
+    process.exit(0);
+  }
+
+  // A handoff's half: the review request moving to somebody else, and off you.
+  const reviewers = argv.find((a) =>
+    /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/requested_reviewers$/.test(a),
+  );
+  if ((method === "POST" || method === "DELETE") && reviewers) {
+    const [, owner, repo, , number] = reviewers.split("/");
+    record("handoffs", owner, repo, number, {
+      endpoint: reviewers,
+      method,
+      reviewers: fields("reviewers[]"),
+    });
+    out(JSON.stringify({ number: Number(number) }));
+    process.exit(0);
+  }
+
+  // A handoff's other half: the note. Before the read below, which matches the
+  // same endpoint and would hand a write the fixture's existing comments back.
+  const commentWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(a));
+  if (method === "POST" && commentWrite) {
+    const [, owner, repo, , number] = commentWrite.split("/");
+    const body = fields("body")[0] ?? "";
+    const at = record("comments", owner, repo, number, {
+      endpoint: commentWrite,
+      method,
+      body,
+    });
+    const id = 800000000 + Number(number);
+    out(
+      JSON.stringify({
+        id,
+        html_url: `https://github.com/${owner}/${repo}/pull/${number}#issuecomment-${id}`,
+        created_at: at,
+        body,
       }),
     );
     process.exit(0);

@@ -592,9 +592,74 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
 }
 
 /**
- * THE ONLY GITHUB WRITE IN CERBER.
+ * Move the review request to somebody else: ask GitHub for their review, then
+ * take yours off.
+ *
+ * Order matters and is the whole of the error handling. Asking first means a
+ * refusal — not a collaborator, no permission to request reviews — leaves the
+ * PR exactly as it was, with you still on the hook and nothing to undo. The
+ * reverse order could drop the request on the floor: you off it, them never on
+ * it, and nobody looking at the PR at all.
+ *
+ * Withdrawing yours is then allowed to fail on its own, and says so rather than
+ * throwing. Two requested reviewers is a state GitHub already understands and
+ * the person you asked is asked either way, so unpicking a request that worked
+ * would be undoing the half that succeeded to tidy up the half that didn't.
+ */
+export async function handOffReview(
+  ref: PrRef,
+  to: string,
+  /**
+   * Your login, to take off the PR — or null when it is already off, which is
+   * the case on a second handoff. Asking GitHub to withdraw a request that does
+   * not exist would fail, and this would then report you still listed when the
+   * truth is that you were taken off the first time.
+   */
+  from: string | null,
+): Promise<{ withdrewYours: boolean; withdrawError: string | null }> {
+  const endpoint = `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/requested_reviewers`;
+  await gh(["api", endpoint, "--method", "POST", "-f", `reviewers[]=${to}`]);
+  if (from === null) return { withdrewYours: true, withdrawError: null };
+  try {
+    await gh(["api", endpoint, "--method", "DELETE", "-f", `reviewers[]=${from}`]);
+    return { withdrewYours: true, withdrawError: null };
+  } catch (err: unknown) {
+    return { withdrewYours: false, withdrawError: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Post a plain comment in the PR conversation.
+ *
+ * The `issues` endpoint on purpose: that is the one shape of writing on a PR
+ * that GitHub does not count as a review. A `pulls/…/reviews` POST with an
+ * event of COMMENT would look the same in the thread and be a review
+ * everywhere it matters — in the PR's review list, in `fetchOwnReview`, in
+ * whether the request is satisfied — and the only thing that may speak for a
+ * review here is Send.
+ */
+export async function postIssueComment(ref: PrRef, body: string): Promise<{ url: string | null }> {
+  const out = await gh([
+    "api",
+    `repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+  ]);
+  try {
+    return { url: JSON.parse(out).html_url ?? null };
+  } catch {
+    return { url: null };
+  }
+}
+
+/**
+ * THE ONLY GITHUB WRITE THAT SPEAKS AS A REVIEW.
  * Submits a review in one shot. Must only ever be called from an explicit
  * user action (cockpit Send button / `cerber send` after confirmation).
+ * The two writes above are the other things that reach GitHub — a handoff's
+ * request swap and its note — and neither of them is a review.
  */
 export async function submitReview(
   ref: PrRef,

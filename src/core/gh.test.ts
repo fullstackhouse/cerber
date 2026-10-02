@@ -6,9 +6,11 @@ import {
   currentLogin,
   lastMentionOfYou,
   fetchPrDiff,
+  handOffReview,
   lastRequestOf,
   latestOwnReview,
   mentionsYou,
+  postIssueComment,
   resetLoginCache,
 } from "./gh.js";
 import { newSideLineText, splitDiffByFile } from "./diff.js";
@@ -492,5 +494,82 @@ describe("fetchPrDiff", () => {
       "not authenticated",
     );
     expect(exec).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handOffReview", () => {
+  const REF = { owner: "o", repo: "r", number: 7 };
+  const endpoint = "repos/o/r/pulls/7/requested_reviewers";
+  const argsOf = (call: number) => exec.mock.calls[call]?.[1] as string[];
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("asks them first, then takes you off", async () => {
+    exec.mockResolvedValue({ stdout: "{}" });
+    expect(await handOffReview(REF, "maks", "jacek")).toEqual({
+      withdrewYours: true,
+      withdrawError: null,
+    });
+    // The order is the error handling: a refusal on the way in leaves the PR
+    // exactly as it was, with you still on the hook and nothing to undo.
+    expect(argsOf(0)).toEqual(["api", endpoint, "--method", "POST", "-f", "reviewers[]=maks"]);
+    expect(argsOf(1)).toEqual(["api", endpoint, "--method", "DELETE", "-f", "reviewers[]=jacek"]);
+  });
+
+  it("does not take you off a PR it could not put them on", async () => {
+    exec.mockRejectedValueOnce(
+      Object.assign(new Error("failed"), {
+        stderr: "gh: Reviews may only be requested from collaborators. (HTTP 422)",
+      }),
+    );
+    await expect(handOffReview(REF, "stranger", "jacek")).rejects.toThrow("collaborators");
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed withdrawal instead of unpicking the request that worked", async () => {
+    // Two requested reviewers is a state GitHub understands and @maks is asked
+    // either way — so this says what it managed and leaves the rest alone.
+    exec.mockResolvedValueOnce({ stdout: "{}" }).mockRejectedValueOnce(
+      Object.assign(new Error("failed"), { stderr: "gh: Not Found (HTTP 404)" }),
+    );
+    const res = await handOffReview(REF, "maks", "jacek");
+    expect(res.withdrewYours).toBe(false);
+    expect(res.withdrawError).toContain("404");
+  });
+
+  it("skips the withdrawal when you are already off the PR", async () => {
+    // A second handoff. Asking GitHub to withdraw a request that is not there
+    // would fail, and this would then report you still listed when you are not.
+    exec.mockResolvedValue({ stdout: "{}" });
+    expect(await handOffReview(REF, "ewa", null)).toEqual({
+      withdrewYours: true,
+      withdrawError: null,
+    });
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(argsOf(0)).toContain("POST");
+  });
+});
+
+describe("postIssueComment", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("posts on the issues endpoint, which is the one GitHub does not call a review", async () => {
+    exec.mockResolvedValue({ stdout: JSON.stringify({ html_url: "https://gh/c/1" }) });
+    expect(await postIssueComment({ owner: "o", repo: "r", number: 7 }, "over to you")).toEqual({
+      url: "https://gh/c/1",
+    });
+    expect(exec.mock.calls[0]?.[1]).toEqual([
+      "api",
+      "repos/o/r/issues/7/comments",
+      "--method",
+      "POST",
+      "-f",
+      "body=over to you",
+    ]);
+  });
+
+  it("still counts as posted when the response is not readable", async () => {
+    exec.mockResolvedValue({ stdout: "" });
+    expect(await postIssueComment({ owner: "o", repo: "r", number: 7 }, "hi")).toEqual({ url: null });
   });
 });

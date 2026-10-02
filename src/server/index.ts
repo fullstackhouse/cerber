@@ -17,7 +17,15 @@ import {
   artifactKey,
 } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
-import { fetchPrDiff, fetchPrInfo, parsePrRef, submitReview } from "../core/gh.js";
+import {
+  currentLogin,
+  fetchPrDiff,
+  fetchPrInfo,
+  handOffReview,
+  parsePrRef,
+  postIssueComment,
+  submitReview,
+} from "../core/gh.js";
 import { z } from "zod";
 import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
@@ -45,6 +53,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * own decision about a PR. Everything else is a fact some other path owns.
  */
 const SETTLEABLE = ["reviewed", "skipped"];
+
+/**
+ * What a handoff needs: one person, a note to post, and a confirmation.
+ *
+ * A login and not a team. `@org/team` reaches GitHub through a different field
+ * (`team_reviewers`), and "take your own request off" means nothing next to a
+ * room being asked — so it is refused in words rather than half-handled.
+ */
+const HandoffSchema = z.object({
+  to: z
+    .string()
+    .transform((s) => s.trim().replace(/^@/, ""))
+    .refine((s) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(s), {
+      message:
+        "`to` must be one GitHub login — a handoff names a person, and asking a team is a different thing cerber does not do yet",
+    }),
+  /** The comment to post on the PR. Blank or absent posts nothing. */
+  note: z.string().max(65536).optional(),
+  confirm: z.boolean().optional(),
+});
 
 /**
  * Is an AI run rewriting this draft right now?
@@ -235,6 +263,10 @@ export async function buildApp(
         sent: a.sent ? { at: a.sent.at, event: a.sent.event, url: a.sent.url, auto: a.sent.auto ?? false } : null,
         // Why a settled row is settled, when cerber settled it rather than you.
         filed: a.filed,
+        // And when it was settled by giving it away. Carried in the list because
+        // it is what the row's tag reads, and because an open request GitHub has
+        // not caught up on yet is explained by this and nothing else.
+        handoff: a.handoff,
       })),
     );
   });
@@ -337,6 +369,7 @@ export async function buildApp(
       sent: null,
       refresh: null,
       filed: null,
+      handoff: null,
       settledAt: null,
       calibration: null,
       chat: [],
@@ -800,6 +833,105 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     const event = (c.req.query("event") ?? "COMMENT") as ReviewEvent;
     return c.json(buildReviewPayload(artifact, event));
+  });
+
+  /**
+   * Give this review to somebody else: GitHub's review request moves to them, a
+   * note in the conversation says so, and the row settles here.
+   *
+   * Two writes, neither of them a review: Send stays the one path by which a
+   * review of yours reaches anybody, and the note this posts is a plain comment.
+   * The draft is never part of it either — handing a PR over is deciding not to
+   * review it, so what the note announces is the handoff.
+   */
+  app.post("/api/reviews/:key/handoff", async (c) => {
+    const parsed = HandoffSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json(
+        { error: parsed.error.issues.map((i) => i.message).join("; ") },
+        400,
+      );
+    }
+    const { to, confirm } = parsed.data;
+    const note = parsed.data.note?.trim() ?? "";
+    if (confirm !== true) {
+      return c.json({ error: "a handoff requires an explicit confirm: true" }, 400);
+    }
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    // Not while a run is rewriting the draft. The handoff doesn't post the
+    // draft, but it settles the row, and settling one out from under a run that
+    // is about to report on it is the same race the send path refuses.
+    if (inFlight(artifact)) {
+      return c.json({ error: "a review of this PR is running — wait for it to finish" }, 409);
+    }
+
+    let me: string;
+    try {
+      me = await currentLogin();
+    } catch (err: unknown) {
+      // Without this there is nobody to take off the PR, and a handoff that
+      // only adds a reviewer leaves you on the hook while the row says
+      // otherwise — so it does not happen at all.
+      return c.json(
+        { error: `cerber could not ask gh who you are: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    }
+    if (to.toLowerCase() === me.toLowerCase()) {
+      return c.json({ error: `@${to} is you — a handoff needs somebody else` }, 400);
+    }
+
+    const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+    let swap: Awaited<ReturnType<typeof handOffReview>>;
+    try {
+      swap = await handOffReview(ref, to, artifact.handoff?.withdrewYours ? null : me);
+    } catch (err: unknown) {
+      // Nothing was written here and nothing was posted: the request swap goes
+      // first precisely so its refusal — not a collaborator, no permission —
+      // leaves the PR and this row exactly as they were.
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+    if (swap.withdrawError) {
+      console.error(`[handoff ${artifact.id}] could not withdraw your request: ${swap.withdrawError}`);
+    }
+
+    // The note comes second and is allowed to fail on its own. The request has
+    // already moved by now — they are being asked for this review whether or not
+    // the conversation says why — so a failure here is recorded and reported
+    // rather than rolled back into a lie about where the PR is.
+    let noteError: string | null = null;
+    let posted: { body: string; url: string | null } | null = null;
+    if (note) {
+      try {
+        const { url } = await postIssueComment(ref, note);
+        posted = { body: note, url };
+      } catch (err: unknown) {
+        noteError = err instanceof Error ? err.message : String(err);
+        console.error(`[handoff ${artifact.id}] the note did not post: ${noteError}`);
+      }
+    }
+
+    const updated = await updateArtifactByKey(key, (a) => ({
+      ...a,
+      // A send is the stronger fact about this row and already took it out of
+      // the live queue, so a handoff after one records itself without
+      // overwriting a status that would then claim no review was ever sent.
+      status: a.sent ? a.status : ("skipped" as const),
+      settledAt: a.sent ? a.settledAt : new Date().toISOString(),
+      // Cerber's account of why a row is filed away cannot stand next to your
+      // own: you did this, and `handoff` is what the queue tags the row from.
+      filed: a.sent ? a.filed : null,
+      handoff: {
+        at: new Date().toISOString(),
+        to,
+        withdrewYours: swap.withdrewYours,
+        note: posted,
+      },
+    }));
+    if (!updated) return c.json({ error: "not found" }, 404);
+    return c.json({ artifact: updated, noteError });
   });
 
   // Static cockpit build. In the published package web/dist ships alongside dist/.

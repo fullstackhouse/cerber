@@ -86,6 +86,7 @@ function ready(comments: Comment[], headSha = "old-sha"): Artifact {
     run: null,
     sent: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     refresh: null,
     calibration: null,
