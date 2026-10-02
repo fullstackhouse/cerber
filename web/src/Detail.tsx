@@ -1490,7 +1490,7 @@ function HandoffDialog({
   artifact: Artifact;
   reviewKey: string;
   /** Resolves once the handoff landed; rejects with the reason it did not. */
-  onConfirm: (to: string, note: string) => Promise<unknown>;
+  onConfirm: (to: string, note: string, postReview: boolean) => Promise<unknown>;
   onCancel: () => void;
 }) {
   // Read once, on open: this very handoff re-sorts the list, and a set of
@@ -1510,6 +1510,12 @@ function HandoffDialog({
   // because the box works the same either way.
   const [people, setPeople] = useState<string[] | null>(null);
   const [peopleError, setPeopleError] = useState<string | null>(null);
+  // Send the draft along with it. Off to begin with, and deliberately: a
+  // handoff is reachable from a row you never opened, where the draft is
+  // whatever the poll wrote. Ticking it is the reading, and the body it posts
+  // is on screen before the button is.
+  const [withReview, setWithReview] = useState(false);
+  const [preview, setPreview] = useState<SendPreview | null>(null);
   const [listOpen, setListOpen] = useState(false);
   // Which suggestion the keyboard is on; -1 is none, and means Enter confirms
   // rather than picks.
@@ -1520,6 +1526,20 @@ function HandoffDialog({
   const ready = isLogin(login);
   // Something worth passing on, that nobody has passed on yet.
   const draftToOffer = !artifact.sent && (artifact.summary !== "" || artifact.comments.length > 0);
+
+  // What the draft would post. Fetched when it is asked for and not before —
+  // the common handoff posts nothing, and composing a body for it would be work
+  // for a string nobody reads.
+  useEffect(() => {
+    if (!withReview) return;
+    let stale = false;
+    fetchSendPreview(reviewKey, "COMMENT")
+      .then((p) => !stale && setPreview(p))
+      .catch(() => !stale && setPreview(null));
+    return () => {
+      stale = true;
+    };
+  }, [withReview, reviewKey]);
 
   const all = useMemo(() => candidates(people ?? [], recent), [people, recent]);
   const shown = useMemo(() => matchCandidates(all, to), [all, to]);
@@ -1570,7 +1590,7 @@ function HandoffDialog({
     setError(null);
     // Only the failure path comes back here — a handoff that lands closes this
     // panel, so a `finally` would be writing state into something unmounted.
-    onConfirm(login, note.trim()).catch((e) => {
+    onConfirm(login, note.trim(), withReview).catch((e) => {
       setError(String(e?.message ?? e));
       setBusy(false);
     });
@@ -1729,16 +1749,49 @@ function HandoffDialog({
           )}
         </div>
 
+        {/* Offered only where there is a draft nobody has posted yet: a row
+            already sent has its review on GitHub, and one with nothing drafted
+            has nothing to offer. */}
+        {draftToOffer && (
+          <div className="handoff-with-review">
+            <label>
+              <input
+                type="checkbox"
+                checked={withReview}
+                disabled={busy}
+                onChange={(e) => setWithReview(e.target.checked)}
+              />
+              <span>
+                also post the review — <span className="faint">{payloadSummary(artifact)}</span>
+              </span>
+            </label>
+            {withReview && (
+              <>
+                <p className="faint">
+                  Posts as a <strong>comment</strong>, never an approval or a change request: you
+                  are handing over the verdict, so it is @{ready ? login : "them"}'s to make. The
+                  findings keep their grades.
+                </p>
+                {preview ? (
+                  <pre className="body-preview">{preview.body}</pre>
+                ) : (
+                  <p className="faint">building the body…</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {error && <p className="error">{error}</p>}
 
         <p className="faint handoff-says">
           {ready ? <>@{login}</> : "They"} will be asked for this review and you will be taken off
           it.{" "}
-          {artifact.sent
-            ? "This row stays under sent."
-            : "This row is filed under settled, and comes back if anybody asks you again."}{" "}
-          The draft is not posted
-          {draftToOffer ? " — send it as a comment first if you want them to have it" : ""}.
+          {withReview
+            ? "This row goes under sent, with the review on the PR."
+            : artifact.sent
+              ? "This row stays under sent."
+              : "This row is filed under settled, and comes back if anybody asks you again."}
         </p>
 
         <div className="card-actions">
@@ -2122,7 +2175,13 @@ function HistoryCard({
  * left this machine — then with what became of the draft, which is nothing, and
  * is the part a reader is most likely to assume otherwise.
  */
-function HandoffNote({ handoff }: { handoff: NonNullable<Artifact["handoff"]> }) {
+function HandoffNote({
+  handoff,
+  sent,
+}: {
+  handoff: NonNullable<Artifact["handoff"]>;
+  sent: Artifact["sent"];
+}) {
   const when = new Date(handoff.at).toLocaleDateString();
   return (
     <div>
@@ -2149,7 +2208,13 @@ function HandoffNote({ handoff }: { handoff: NonNullable<Artifact["handoff"]> })
       ) : (
         <>No note was posted — only the request moved.</>
       )}{" "}
-      The draft below was never sent. It is still yours to read, or to send.
+      {sent ? (
+        // Said without dating it: the review may have gone with the handoff, or
+        // long before it, and the strip further down carries the when.
+        <>Your review of it is on the PR — the draft below is what went.</>
+      ) : (
+        <>The draft below was never sent. It is still yours to read, or to send.</>
+      )}
     </div>
   );
 }
@@ -2187,7 +2252,7 @@ function FreshnessBanner({
     <div className="freshness">
       {/* Yours first: a handoff is a decision you made, and it is why anything
           cerber did to this row afterwards happened at all. */}
-      {handoff && <HandoffNote handoff={handoff} />}
+      {handoff && <HandoffNote handoff={handoff} sent={artifact.sent} />}
       {filed && <FiledNote filed={filed} />}
       {closed && (
         <div>
@@ -2532,20 +2597,30 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
    * collaborator, no permission to ask for reviews) lands next to the name that
    * caused it, with nothing typed lost.
    *
-   * A note that failed is a different thing: by then the request has already
-   * moved and the row is already settled, so there is nothing to retry that
-   * would not ask a second time. It is said here, and the page stays put so it
-   * can be read.
+   * The halves that come after it are different: by then the request has moved
+   * and the row is settled, so there is nothing to retry that would not ask a
+   * second time. A review or a note that did not post is said here, and the
+   * page stays put so it can be read.
    */
-  const handOff = (to: string, note: string) =>
-    handOffReview(reviewKey, { to, note }).then(({ artifact: handed, noteError }) => {
-      rememberHandoff(to);
-      setArtifact(handed);
-      setHandingOff(false);
-      markSettled(reviewKey);
-      if (noteError) setError(`Handed to @${to}, but the note did not post: ${noteError}`);
-      else advance();
-    });
+  const handOff = (to: string, note: string, postReview: boolean) =>
+    handOffReview(reviewKey, { to, note, postReview }).then(
+      ({ artifact: handed, noteError, sendError }) => {
+        rememberHandoff(to);
+        setArtifact(handed);
+        setHandingOff(false);
+        markSettled(reviewKey);
+        // The request has moved either way, so a half that failed is said here
+        // and the page stays put to be read. The review first: it is the half
+        // somebody was waiting for.
+        const missed = sendError
+          ? `the review did not post: ${sendError}`
+          : noteError
+            ? `the note did not post: ${noteError}`
+            : null;
+        if (missed) setError(`Handed to @${to}, but ${missed}`);
+        else advance();
+      },
+    );
   const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
     apply(patchComment(reviewKey, id, patch));
   const onDeleteComment = (id: string) => apply(deleteComment(reviewKey, id));

@@ -243,6 +243,7 @@ rather than typing one. Then:
 - they are added as a requested reviewer and you are taken off,
 - a short note goes on the PR saying so — prefilled with their name so they get
   the notification, editable, and clearable if you would rather say nothing,
+- the drafted review goes up with it, if you tick the box for it (below),
 - the row is filed under settled here, tagged `handed to @them`.
 
 That is the whole of it, and it is the one thing on the queue that genuinely
@@ -251,11 +252,21 @@ asking you forever, and this does not. If they run cerber too, their next poll
 picks the PR up and drafts a review for them — nothing has to be sent anywhere
 for that to work.
 
-**Your draft stays here.** Handing a PR over means deciding not to review it, so
-the handoff posts the note and nothing else; whatever Claude drafted is still on
-your disk, still openable, still sendable. If it is worth passing on, send it as
-a comment *before* you hand off — the dialog says so, and does not do it for you,
-because a draft nobody has read is not something to post under your name.
+**You can send the draft with it.** Tick *also post the review* and what Claude
+found goes up at the same time — the same body and the same inline comments the
+Send button would post, so the next reviewer and the author start from something
+rather than nothing.
+
+It posts as a **comment**, never an approval or a change request. You are handing
+the judgement over, so making it on the way out would be odd. The findings keep
+their grades, so a blocker still reads as a blocker — what that means for the
+merge is now the next reviewer's call.
+
+That box starts unticked, and it is the one thing here that isn't on by default.
+You can hand off a PR you never opened, where the draft is whatever the overnight
+poll wrote, and publishing that under your name is the thing the Send button
+exists to prevent. Ticking it shows you the body first. Leave it alone and the
+draft just stays here, openable and still sendable.
 
 If GitHub refuses the swap — they are not a collaborator, or you cannot request
 reviews on that repo — nothing happens at all: no note on the PR, no change

@@ -8,6 +8,7 @@ import {
   fetchAssignableUsers,
   handOffReview,
   postIssueComment,
+  submitReview,
 } from "../core/gh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { buildApp } from "./index.js";
@@ -20,6 +21,7 @@ vi.mock("../core/gh.js", async (orig) => ({
   handOffReview: vi.fn(),
   postIssueComment: vi.fn(),
   fetchAssignableUsers: vi.fn(),
+  submitReview: vi.fn(),
   currentLogin: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchPrDiff: vi.fn(),
@@ -30,6 +32,7 @@ const swap = handOffReview as Mock;
 const comment = postIssueComment as Mock;
 const login = currentLogin as Mock;
 const assignable = fetchAssignableUsers as Mock;
+const submit = submitReview as Mock;
 
 const home = mkdtempSync(path.join(os.tmpdir(), "cerber-handoff-"));
 process.env.CERBER_HOME = home;
@@ -102,6 +105,7 @@ beforeEach(async () => {
   swap.mockResolvedValue({ withdrewYours: true, withdrawError: null });
   comment.mockResolvedValue({ url: "https://github.com/acme/widgets/pull/42#c1" });
   assignable.mockResolvedValue(["maks", "jacek", "someone", "ada"]);
+  submit.mockResolvedValue({ url: "https://github.com/acme/widgets/pull/42#r1" });
   const { promises: fs } = await import("node:fs");
   await fs.rm(path.join(home, "reviews"), { recursive: true, force: true });
 });
@@ -268,6 +272,112 @@ describe("POST /api/reviews/:key/handoff — giving a review away", () => {
     });
     expect(res.status).toBe(404);
     expect(swap).not.toHaveBeenCalled();
+  });
+});
+
+describe("handing the draft over with it", () => {
+  // A real hunk, so the comment anchors inline rather than folding into the
+  // body — the inline path is the one that carries a grade onto GitHub.
+  const DIFF = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -0,0 +1,2 @@",
+    "+const a = 1;",
+    "+const b = 2;",
+    "",
+  ].join("\n");
+
+  const withComment = (over = {}) =>
+    artifact({
+      diff: DIFF,
+      comments: [
+        {
+          id: "c1",
+          path: "src/a.ts",
+          line: 1,
+          body: "this leaks",
+          chapterId: null,
+          severity: "blocker" as const,
+          origin: "ai" as const,
+          status: "draft" as const,
+          originalLine: null,
+          drifted: false,
+          editedByUser: false,
+        },
+      ],
+      ...over,
+    });
+
+  it("does not post the draft unless it was asked for", async () => {
+    // A handoff is reachable from a row nobody has opened, where the draft is
+    // whatever the poll wrote.
+    await saveArtifact(withComment());
+    await handoff({ to: "maks", confirm: true });
+    expect(submit).not.toHaveBeenCalled();
+    expect((await loadArtifact(ID))?.status).toBe("skipped");
+  });
+
+  it("sends it as a comment, never as the verdict it was drafted with", async () => {
+    // Handing a PR over hands the judgement over with it, so an approve or a
+    // change request here would be cerber ruling on a review it is giving away.
+    await saveArtifact(
+      withComment({ verdict: { recommendation: "request_changes", confidence: 90, reasoning: "no" } }),
+    );
+    const res = await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[1].event).toBe("COMMENT");
+    expect((await res.json()).sendError).toBeNull();
+  });
+
+  it("keeps the grades on the findings it posts", async () => {
+    // The verdict is what is being handed over; what each finding *is* stays
+    // exactly as the review graded it.
+    await saveArtifact(withComment());
+    await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(submit.mock.calls[0]?.[1].comments[0].body).toContain("blocker");
+  });
+
+  it("lands the row under sent, with the handoff on top of it", async () => {
+    await saveArtifact(withComment());
+    await handoff({ to: "maks", postReview: true, confirm: true });
+    const saved = await loadArtifact(ID);
+    expect(saved?.status).toBe("sent");
+    expect(saved?.sent).toMatchObject({ event: "COMMENT", auto: false });
+    expect(saved?.settledAt).toBeNull();
+    expect(saved?.handoff?.to).toBe("maks");
+    // The send's own record of what the AI proposed against what went.
+    expect(saved?.calibration?.sentEvent).toBe("COMMENT");
+  });
+
+  it("hands off anyway when the review would not post, and says which half failed", async () => {
+    // The request has moved by then. Rolling that back to tidy up a failed
+    // submission would undo the half that worked.
+    await saveArtifact(withComment());
+    submit.mockRejectedValue(new Error("gh api reviews failed: Unprocessable Entity"));
+    const res = await handoff({ to: "maks", note: "over to you", postReview: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect((await res.json()).sendError).toContain("Unprocessable");
+    const saved = await loadArtifact(ID);
+    expect(saved?.status).toBe("skipped");
+    expect(saved?.sent).toBeNull();
+    expect(saved?.handoff).toMatchObject({ to: "maks", note: { body: "over to you" } });
+  });
+
+  it("never submits a second review on a row that already sent one", async () => {
+    await saveArtifact(
+      withComment({
+        status: "sent",
+        sent: { at: "2026-08-21T11:00:00.000Z", event: "APPROVE", url: null, auto: false },
+      }),
+    );
+    await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(submit).not.toHaveBeenCalled();
+    const saved = await loadArtifact(ID);
+    expect(saved?.sent?.event).toBe("APPROVE");
+    expect(saved?.handoff?.to).toBe("maks");
   });
 });
 

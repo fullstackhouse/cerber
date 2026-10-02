@@ -155,12 +155,18 @@ export const fetchHandoffCandidates = (key: string) =>
  * Give this review to somebody else: GitHub's review request moves to them, the
  * note (when there is one) goes up as a plain comment, and the row settles here.
  *
+ * `postReview` sends the draft along with it as a COMMENT review — the ordinary
+ * send path, asked for from here.
+ *
  * Resolves with the row as it now stands and, separately, whatever went wrong
- * with the note — because by then the request has already moved, so a note that
- * failed to post is a thing to say rather than a reason to call this a failure.
+ * with the review and the note — because by then the request has already moved,
+ * so either failing is a thing to say rather than a reason to call this one.
  */
-export const handOffReview = (key: string, body: { to: string; note: string }) =>
-  request<{ artifact: Artifact; noteError: string | null }>(
+export const handOffReview = (
+  key: string,
+  body: { to: string; note: string; postReview: boolean },
+) =>
+  request<{ artifact: Artifact; noteError: string | null; sendError: string | null }>(
     `/api/reviews/${encodeURIComponent(key)}/handoff`,
     { method: "POST", body: JSON.stringify({ ...body, confirm: true }) },
   );

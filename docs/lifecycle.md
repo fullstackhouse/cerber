@@ -396,7 +396,7 @@ button in the cockpit's send panel, which opens a modal dialog: the page behind
 it is a review you are deciding not to read, and a GitHub write being composed
 should have the keys to itself.
 
-Two things reach GitHub, in this order and for this reason:
+Up to three things reach GitHub, in this order and for this reason:
 
 1. **The request moves** (`handOffReview`, `src/core/gh.ts`) — they are asked,
    then you are taken off. Asking first means a refusal (not a collaborator, no
@@ -404,31 +404,59 @@ Two things reach GitHub, in this order and for this reason:
    on the hook and nothing to undo; the reverse order could drop the request on
    the floor and leave nobody looking at the PR. Nothing is written here and no
    note is posted if this fails.
-2. **The note goes up** (`postIssueComment`) — a plain comment in the
+2. **The draft, if you ticked it** (`submitReview`, through `buildReviewPayload`
+   — §"The draft" below).
+3. **The note goes up** (`postIssueComment`) — a plain comment in the
    conversation, prefilled with the person's name so they are notified, editable,
    and clearable: an empty note posts nothing and the request still moves. It is
    an *issue* comment on purpose. A `pulls/…/reviews` POST with a COMMENT event
-   reads the same in the thread and is a review everywhere that counts one, and
-   Send is the only thing in cerber that may speak as a review.
+   reads the same in the thread and *is* a review everywhere that counts one —
+   which is a thing the handoff may do, deliberately and on request, but never by
+   accident in place of a note.
 
 Taking your own request off is allowed to fail on its own, because by then the
 other person is asked either way: the row records `withdrewYours: false` and
 says, in the cockpit and in the open-requests tag, that GitHub is asking both of
-you. So is the note: a failure there is reported next to the row rather than
-rolled back into a lie about where the PR is.
+you. So are the two posts: a failure in either is reported next to the row rather
+than rolled back into a lie about where the PR is. Only step 1 failing stops
+everything, because only step 1 has nothing behind it yet.
 
-**The draft is never posted.** Handing a PR over is deciding not to review it, so
-what the handoff announces is the handoff. The draft stays on disk, openable and
-still sendable — and the dialog says so, with one line pointing at Send for anyone
-who wants the other person to have it.
+### The draft
 
-Locally the row becomes `skipped`, with `settledAt` and `handoff` set and `filed`
-cleared — your own decision cannot sit under cerber's account of why the row was
-filed. The exception is a row that was already `sent`: there the status and
-`settledAt` stay as they were and only `handoff` is written, because overwriting
-them would leave a row claiming no review was ever sent. And a second handoff
-passes `from: null`, skipping a withdrawal GitHub would refuse because the first
-one already happened.
+A handoff can carry it. Tick **also post the review** and the draft goes up
+through the ordinary send path — `buildReviewPayload` composes it exactly as the
+send panel would, `bodyOverride` and all, and `submitReview` posts it. One way
+to build a review, one way to post one, reached from a second place.
+
+It posts as a **comment**. Always, whatever the draft's verdict says: handing a
+PR over hands the judgement over with it, so approving or requesting changes on
+the way out would be cerber ruling on a review it is giving away. The grades stay
+on the findings, where they were a fact about each one rather than a verdict —
+so `🚨 blocker` still reaches the author, and what it *means* for the merge is
+the next reviewer's call. The `calibration` record keeps both halves: what the
+AI recommended, and the COMMENT that actually went.
+
+It is **off unless you tick it**, and that is the one place a handoff does not
+follow "on by default with a switch". A handoff is reachable from a row you
+never opened, where the draft is whatever the poll wrote overnight; defaulting
+that to "publish under your name" is exactly what the send path exists to
+prevent. Ticking it shows you the body it would post, which is the reading. A
+row already `sent` is not offered it at all.
+
+Locally the row follows what actually reached GitHub:
+
+| | status | `settledAt` |
+| --- | --- | --- |
+| the review posted | `sent` (+ `sent`, `calibration`) | left alone |
+| already sent before | unchanged | unchanged |
+| neither | `skipped` | stamped |
+
+`handoff` is written in all three, and `filed` cleared in the first and last —
+your own decision cannot sit under cerber's account of why the row was filed. A
+row already `sent` keeps its status because overwriting it would leave one
+claiming no review was ever sent. And a second handoff passes `from: null`,
+skipping a withdrawal GitHub would refuse because the first one already
+happened.
 
 `handoff` outranks both the status and `filed` wherever the queue tags a row
 (`rowTag`, `requestTag`, `web/src/inbox.ts`): "skipped" alone reads as work

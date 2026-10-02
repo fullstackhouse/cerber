@@ -72,6 +72,15 @@ const HandoffSchema = z.object({
     }),
   /** The comment to post on the PR. Blank or absent posts nothing. */
   note: z.string().max(65536).optional(),
+  /**
+   * Send the draft along with it, as a COMMENT review.
+   *
+   * Off unless asked for: a draft the poll wrote and nobody has read is exactly
+   * what the send path exists to keep off GitHub, and a handoff is reachable
+   * from a row you never opened. Asking for it is the human act that makes it
+   * a send like any other.
+   */
+  postReview: z.boolean().optional(),
   confirm: z.boolean().optional(),
 });
 
@@ -890,6 +899,7 @@ export async function buildApp(
     }
     const { to, confirm } = parsed.data;
     const note = parsed.data.note?.trim() ?? "";
+    const postReview = parsed.data.postReview === true;
     if (confirm !== true) {
       return c.json({ error: "a handoff requires an explicit confirm: true" }, 400);
     }
@@ -937,6 +947,32 @@ export async function buildApp(
     // already moved by now — they are being asked for this review whether or not
     // the conversation says why — so a failure here is recorded and reported
     // rather than rolled back into a lie about where the PR is.
+    // The draft, when it was asked for, and always as a COMMENT: handing a PR
+    // over is handing over the judgement with it, so an approve or a change
+    // request here would be cerber ruling on a review it is giving away. The
+    // grades stay on the findings, which is where they were anyway — the
+    // verdict is the part that is now @to's to make. Already-sent rows never
+    // reach this: the dialog does not offer it, and a second submission is what
+    // the send path's own guard refuses.
+    let sendError: string | null = null;
+    let sent: Artifact["sent"] = null;
+    let payload: ReturnType<typeof buildReviewPayload> | null = null;
+    if (postReview && !artifact.sent) {
+      payload = buildReviewPayload(artifact, "COMMENT");
+      try {
+        const { url } = await submitReview(ref, {
+          event: payload.event,
+          body: payload.body,
+          comments: payload.comments,
+          commitId: payload.commitId,
+        });
+        sent = { at: new Date().toISOString(), event: payload.event, url, auto: false };
+      } catch (err: unknown) {
+        sendError = err instanceof Error ? err.message : String(err);
+        console.error(`[handoff ${artifact.id}] the review did not post: ${sendError}`);
+      }
+    }
+
     let noteError: string | null = null;
     let posted: { body: string; url: string | null } | null = null;
     if (note) {
@@ -949,25 +985,32 @@ export async function buildApp(
       }
     }
 
-    const updated = await updateArtifactByKey(key, (a) => ({
-      ...a,
-      // A send is the stronger fact about this row and already took it out of
-      // the live queue, so a handoff after one records itself without
-      // overwriting a status that would then claim no review was ever sent.
-      status: a.sent ? a.status : ("skipped" as const),
-      settledAt: a.sent ? a.settledAt : new Date().toISOString(),
-      // Cerber's account of why a row is filed away cannot stand next to your
-      // own: you did this, and `handoff` is what the queue tags the row from.
-      filed: a.sent ? a.filed : null,
-      handoff: {
-        at: new Date().toISOString(),
-        to,
-        withdrewYours: swap.withdrewYours,
-        note: posted,
-      },
-    }));
+    const at = new Date().toISOString();
+    const updated = await updateArtifactByKey(key, (a) => {
+      // Three ways this row can end, and the status follows what actually
+      // reached GitHub. A review that went is the strongest thing true about
+      // it; a row already sent keeps the standing it had; anything else is you
+      // deciding not to review this one, which is a skip.
+      const settles = !sent && !a.sent;
+      return {
+        ...a,
+        status: sent ? ("sent" as const) : a.sent ? a.status : ("skipped" as const),
+        settledAt: settles ? at : a.settledAt,
+        // Cerber's account of why a row is filed away cannot stand next to your
+        // own: you did this, and `handoff` is what the queue tags the row from.
+        filed: a.sent ? a.filed : null,
+        sent: sent ?? a.sent,
+        calibration: sent && payload ? computeCalibration(a, payload.event) : a.calibration,
+        handoff: {
+          at,
+          to,
+          withdrewYours: swap.withdrewYours,
+          note: posted,
+        },
+      };
+    });
     if (!updated) return c.json({ error: "not found" }, 404);
-    return c.json({ artifact: updated, noteError });
+    return c.json({ artifact: updated, noteError, sendError });
   });
 
   // Static cockpit build. In the published package web/dist ships alongside dist/.

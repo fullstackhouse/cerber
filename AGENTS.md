@@ -6,10 +6,11 @@ reaches GitHub without a deliberate human act, and only three things ever do:
 (a) an explicit, user-confirmed Send, (b) daemon auto-send that the user
 explicitly enabled with --auto-send — approve-only, confidence-threshold-gated,
 every decision logged to autosend.ndjson, and (c) a handoff — one confirmed
-click that moves the review request to somebody else and posts the note saying
-so. Send is the only one of the three that speaks as a review; auto-send can
-never hand off. No pending reviews, no reactions, and reviewing itself is
-read-only.**
+click that moves the review request to somebody else, posts the note saying so,
+and, only if you ticked the box for it, sends the draft along as a COMMENT
+review through Send's own composition. Auto-send can never hand off, and a
+handoff never forms a verdict. No pending reviews, no reactions, and reviewing
+itself is read-only.**
 
 ## Product principles
 
@@ -212,12 +213,15 @@ left unwritten. Code and tests win when they disagree.
   issue comment on purpose: `pulls/…/reviews` with a COMMENT event looks the
   same in the thread and is a review everywhere that counts one, and only Send
   may speak as a review.
-- Don't post the draft as part of a handoff. Handing a PR over is deciding not
-  to review it: the handoff moves the request and its note says *that*, while
-  the draft stays here for whoever opens the row next. Bundling them would post
-  a review nobody vouched for, and would put a second control over what gets
-  posted right beside the one that exists. If the draft is worth passing on,
-  Send it as a comment first — the dialog says so, and says nothing more.
+- Don't let a handoff form a verdict, and don't let it post the draft by
+  itself. It can carry the draft — that is what the box is for, and it goes
+  through `buildReviewPayload`/`submitReview` rather than a second composition —
+  but always as COMMENT, because handing a PR over hands the judgement over with
+  it. And the box stays off by default: a handoff is reachable from a row nobody
+  opened, where the draft is whatever the poll wrote, so defaulting it on would
+  publish an unread review under the user's name. That is the one place a
+  capability here does not ship on-by-default, and the reason is the same one
+  Send exists for.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable

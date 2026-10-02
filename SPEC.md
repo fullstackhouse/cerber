@@ -1432,17 +1432,39 @@ may be requested, so the field stays free text, a login the list never mentions
 can still be handed to, and a failure to read it is a line in the dialog rather
 than anything that stops a handoff.
 
-**The draft is never posted.** Handing a PR over is deciding not to review it.
-The draft stays local, openable and still sendable, and the dialog MUST say so
-rather than offering to post it — which would both post a review nobody vouched
-for and put a second control beside §14.4's.
+**The draft may go with it, when asked for.** `postReview` sends the draft
+through §14.4's own composition and submission — same body, same inline
+anchoring, `bodyOverride` honoured — so there is one way a review is built and
+one way it is posted, reached from a second place rather than reimplemented.
 
-**Local effect.** Status becomes `skipped` with `settledAt` set, `filed` cleared
-(the user's own decision cannot sit under cerber's account of why a row was
-filed), and `handoff` written. A row that was already `sent` keeps its status
-and `settledAt` and only gains `handoff`: overwriting them would leave a row
-claiming no review was ever sent. A second handoff passes a null `from`, skipping
-a withdrawal GitHub would refuse.
+It posts as **COMMENT**, always, whatever the draft's verdict says. Handing a PR
+over hands the judgement over with it, so an approve or a change request here
+would be cerber ruling on a review it is giving away; the grades stay on the
+findings, where they were a fact rather than a verdict. The dialog MUST show the
+body before the button and MUST say which event it posts.
+
+It defaults **off**, and that is the one place a handoff does not follow "on by
+default": a handoff is reachable from a row nobody ever opened, where the draft
+is whatever the poll wrote, and publishing that under the user's name is the
+thing §14.4 exists to prevent. Ticking it is the reading. An artifact that is
+already `sent` MUST NOT be offered it and MUST NOT submit twice.
+
+A handoff that posts nothing leaves the draft local, openable and still
+sendable, and the dialog says so.
+
+**Local effect**, following what actually reached GitHub:
+
+| | status | `settledAt` |
+|---|---|---|
+| the review posted | `sent` + `SentInfo` + `Calibration` | unchanged |
+| already `sent` before | unchanged | unchanged |
+| neither | `skipped` | stamped |
+
+`filed` is cleared in the first and last (the user's own decision cannot sit
+under cerber's account of why a row was filed) and `handoff` is written in all
+three. A row already `sent` keeps its status because overwriting it would leave
+one claiming no review was ever sent. A second handoff passes a null `from`,
+skipping a withdrawal GitHub would refuse.
 
 **Preconditions.** Not while a run is in flight (same OR as §14.4). The
 recipient MUST be a single GitHub login, MUST NOT be the user themselves, and a
@@ -1525,7 +1547,7 @@ static assets included. No CORS: same-origin only.
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
 | `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified |
 | `GET …/reviewers` | §14.6 suggestions | `{logins}` minus you and the author; 404 unknown review; 502 when the repo's list could not be read — the dialog says so and carries on |
-| `POST …/handoff` | §14.6 | requires `{confirm: true}`; 400 on a team, a malformed login or yourself; 409 in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, noteError}` — `noteError` non-null when only the note failed |
+| `POST …/handoff` | §14.6 | requires `{confirm: true}`; optional `postReview`; 400 on a team, a malformed login or yourself; 409 in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, sendError, noteError}` — either non-null when that half alone failed |
 | `GET /*` | cockpit SPA | plain-text pointer when the web build is absent |
 
 ### 16.3 The 202-Detached Pattern
@@ -1670,8 +1692,9 @@ one is reported over the next.
   ahead of both its status and `filed`: it *is* `skipped`, and "skipped" alone
   reads as work dropped where this is work passed on. The review itself states
   what GitHub says now — who is asked, whether the user still is — and that the
-  draft was never sent. The handoff dialog MUST name both writes before either
-  happens, and MUST say the draft stays local rather than offering to post it.
+  draft went with it or did not. The handoff dialog MUST name every write before
+  any of them happens, MUST show the review body whenever it is about to post
+  one, and MUST NOT offer to post a draft on a row that already sent one.
 - Opening a review triggers refresh (§13.2); a refresh failure is reported
   softly and the draft still reads.
 - Every box the user types markdown into (a comment being edited, a comment
@@ -1805,11 +1828,13 @@ rate-limit bookkeeping and the in-flight registry are deliberately lost.
 ## 20. Security Invariants (summary)
 
 1. **Three writes, one of them a review.** `submitReview` is the only GitHub
-   write that speaks as a review, reachable only via explicit confirmed Send or
-   opt-in auto-send. The other two are a handoff's (`handOffReview`,
-   `postIssueComment`), reachable only from `POST /api/reviews/:key/handoff`
-   with `confirm: true`, never from the daemon (§14.6). Everything else is
-   read-only.
+   write that speaks as a review, reachable from three human acts and no others:
+   an explicit confirmed Send, opt-in auto-send, and a handoff that was asked to
+   carry the draft (`postReview`, always as COMMENT, never on an already-sent
+   artifact — §14.6). The other two writes are a handoff's own
+   (`handOffReview`, `postIssueComment`), reachable only from `POST
+   /api/reviews/:key/handoff` with `confirm: true`. None of the three is ever
+   reachable from the daemon except auto-send. Everything else is read-only.
 2. **Runs hold no credentials.** §14.3's environment is mandatory for every
    agent invocation. Not a sandbox; never claim one.
 3. **Trust is people, granted only by the user.** Repo-shaped trust is
@@ -2010,9 +2035,10 @@ An implementation conforms when all of the following hold:
       unanchorable comments and pins `commit_id`; every subprocess uses argv
       arrays.
 - [ ] A handoff's writes follow §14.6: `confirm: true`, never the daemon, the
-      request moved before the note is posted, a failed move writes and posts
-      nothing, a failed withdrawal or note is recorded and reported rather than
-      rolled back, the note is a plain issue comment, the draft is never posted,
+      request moved before anything is posted, a failed move writes and posts
+      nothing, a failed withdrawal/review/note is recorded and reported rather
+      than rolled back, the note is a plain issue comment, the draft posts only
+      when asked and only ever as COMMENT (never twice, never on a sent row),
       and a team or the user themselves is refused.
 - [ ] Trust refuses repo-shaped rules; denials win; lookups fail closed.
 
