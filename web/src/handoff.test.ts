@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { MAX_RECENT, isLogin, nextRecent, parseRecent } from "./handoff";
+import {
+  MAX_RECENT,
+  asLogin,
+  candidates,
+  isLogin,
+  matchCandidates,
+  nextRecent,
+  parseRecent,
+} from "./handoff";
 
 describe("isLogin", () => {
   it("takes what GitHub takes", () => {
@@ -61,5 +69,70 @@ describe("nextRecent", () => {
     expect(next).toHaveLength(MAX_RECENT);
     expect(next[0]).toBe("maks");
     expect(next).not.toContain(`person${MAX_RECENT - 1}`);
+  });
+});
+
+describe("asLogin", () => {
+  it("takes the name the way people write it", () => {
+    expect(asLogin(" @maks ")).toBe("maks");
+    expect(asLogin("maks")).toBe("maks");
+  });
+});
+
+describe("candidates", () => {
+  it("offers the people you have handed to first", () => {
+    // One question — who takes this — so the two sources are one list, with the
+    // better guess at the top of it rather than in a strip of its own.
+    expect(candidates(["ada-w", "maks", "tomek"], ["maks"])).toEqual([
+      { login: "maks", recent: true },
+      { login: "ada-w", recent: false },
+      { login: "tomek", recent: false },
+    ]);
+  });
+
+  it("keeps a recent the repo's list does not mention", () => {
+    // The repo list is a suggestion, not the rule for who may be asked — so it
+    // does not get to drop somebody you have actually handed a review to.
+    expect(candidates([], ["maks"])).toEqual([{ login: "maks", recent: true }]);
+    expect(candidates(["ada-w"], ["maks"])).toHaveLength(2);
+  });
+
+  it("counts one person once, however they are spelled", () => {
+    expect(candidates(["Maks"], ["maks"])).toEqual([{ login: "maks", recent: true }]);
+  });
+
+  it("is empty when nothing is known yet", () => {
+    expect(candidates([], [])).toEqual([]);
+  });
+});
+
+describe("matchCandidates", () => {
+  const all = candidates(["ada-w", "maksymilian", "tomek-maks"], ["maks"]);
+
+  it("offers everyone until something is typed", () => {
+    expect(matchCandidates(all, "").map((c) => c.login)).toEqual([
+      "maks",
+      "ada-w",
+      "maksymilian",
+      "tomek-maks",
+    ]);
+  });
+
+  it("puts the names that start with what you typed first", () => {
+    // A match in the middle is a fallback, not an equal: "tomek-maks" contains
+    // "maks" but is not what somebody typing it is reaching for.
+    expect(matchCandidates(all, "maks").map((c) => c.login)).toEqual([
+      "maks",
+      "maksymilian",
+      "tomek-maks",
+    ]);
+  });
+
+  it("ignores case and a leading @, because both are how people type", () => {
+    expect(matchCandidates(all, "@ADA").map((c) => c.login)).toEqual(["ada-w"]);
+  });
+
+  it("comes back empty rather than guessing", () => {
+    expect(matchCandidates(all, "nobody")).toEqual([]);
   });
 });

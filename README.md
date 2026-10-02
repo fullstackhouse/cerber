@@ -235,7 +235,10 @@ glance at the tab strip answers "is there anything for me?".
 
 Some reviews are not yours. Wrong part of the stack, wrong week, somebody else
 wrote half of it — and the honest answer is a name, not a skip. **Hand off** is
-in the send panel next to *mark reviewed* and *skip*: type a GitHub login, and
+in the send panel next to *mark reviewed* and *skip*. It opens with the people
+who can take it already listed — whoever this repo assigns work to, with anyone
+you have handed to before at the top — so in the ordinary case you pick a name
+rather than typing one. Then:
 
 - they are added as a requested reviewer and you are taken off,
 - a short note goes on the PR saying so — prefilled with their name so they get
@@ -258,6 +261,10 @@ If GitHub refuses the swap — they are not a collaborator, or you cannot reques
 reviews on that repo — nothing happens at all: no note on the PR, no change
 here. And if it moves them on but cannot take you off, the row says that too,
 rather than claiming you are done with it.
+
+The list is a convenience, not a gate: it is GitHub's assignable-users list, not
+its rule for who may review, so you can always type a login it doesn't mention —
+and on a repo cerber can't read that list for, the box says so and still works.
 
 Handing to a team isn't supported — a room being asked is not somebody taking it.
 

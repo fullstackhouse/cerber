@@ -273,6 +273,22 @@ if (argv[0] === "api") {
     process.exit(1);
   }
 
+  // Who the repo takes reviews from, behind the handoff's suggestions. One cast
+  // for every fixture repo: a demo org has one set of people in it. Answers the
+  // logins rather than the rows, because the real call asks `gh` for exactly
+  // that with `--jq`, and a stub that answered a different shape would be
+  // testing the parser against something nothing ever sends it.
+  if (endpoint?.match(/^repos\/[^/]+\/[^/]+\/assignees/)) {
+    const people = readJson(path.join(FIXTURES, "people.json"));
+    out(
+      people
+        .filter((p) => p.type !== "Bot")
+        .map((p) => p.login)
+        .join("\n"),
+    );
+    process.exit(0);
+  }
+
   const comments = endpoint?.match(/^repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/comments/);
   if (comments) {
     const dir = prDir(comments[1], comments[2], Number(comments[3]));

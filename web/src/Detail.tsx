@@ -19,6 +19,7 @@ import {
   exportUrl,
   fetchReview,
   fetchReviews,
+  fetchHandoffCandidates,
   fetchSendPreview,
   handOffReview,
   patchComment,
@@ -29,7 +30,14 @@ import {
   sendReview,
   startChatTurn,
 } from "./api";
-import { isLogin, recentHandoffs, rememberHandoff } from "./handoff";
+import {
+  asLogin,
+  candidates,
+  isLogin,
+  matchCandidates,
+  recentHandoffs,
+  rememberHandoff,
+} from "./handoff";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
@@ -1458,9 +1466,6 @@ function BodyEditor({
 const suggestedNote = (login: string) =>
   login ? `@${login} — handing this review over to you.` : "";
 
-/** A login as typed: a leading `@` is how people write one, and not part of it. */
-const asLogin = (typed: string) => typed.trim().replace(/^@/, "");
-
 /**
  * Give this review to somebody else.
  *
@@ -1478,26 +1483,37 @@ const asLogin = (typed: string) => typed.trim().replace(/^@/, "");
  */
 function HandoffDialog({
   artifact,
+  reviewKey,
   onConfirm,
   onCancel,
 }: {
   artifact: Artifact;
+  reviewKey: string;
   /** Resolves once the handoff landed; rejects with the reason it did not. */
   onConfirm: (to: string, note: string) => Promise<unknown>;
   onCancel: () => void;
 }) {
-  // Read once, on open: the list is re-sorted by this very handoff, and a
-  // suggestion strip that reshuffled under the cursor would move the name you
-  // were about to click.
+  // Read once, on open: this very handoff re-sorts the list, and a set of
+  // suggestions that reshuffled under the cursor would move the name you were
+  // about to click.
   const [recent] = useState(recentHandoffs);
-  const [to, setTo] = useState(recent[0] ?? "");
-  const [note, setNote] = useState(() => suggestedNote(recent[0] ?? ""));
+  const [to, setTo] = useState("");
+  const [note, setNote] = useState("");
   // Once you have typed in the note it is yours, and changing the name must not
   // overwrite it. Until then it follows the name, so the ordinary case — pick a
   // person, hand it over — needs nothing typed at all.
   const [ownNote, setOwnNote] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Who the repo will let you put on a PR. Null while it is being fetched, and
+  // on a repo cerber could not list — the two look the same here on purpose,
+  // because the box works the same either way.
+  const [people, setPeople] = useState<string[] | null>(null);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  // Which suggestion the keyboard is on; -1 is none, and means Enter confirms
+  // rather than picks.
+  const [active, setActive] = useState(-1);
   const box = useGrowToFit(note);
   const dialog = useRef<HTMLDialogElement>(null);
   const login = asLogin(to);
@@ -1505,9 +1521,32 @@ function HandoffDialog({
   // Something worth passing on, that nobody has passed on yet.
   const draftToOffer = !artifact.sent && (artifact.summary !== "" || artifact.comments.length > 0);
 
+  const all = useMemo(() => candidates(people ?? [], recent), [people, recent]);
+  const shown = useMemo(() => matchCandidates(all, to), [all, to]);
+
+  // The repo's list is a convenience, so its failure is a line under the box
+  // rather than anything that stops you: the name is free text, and the one
+  // list that cannot fail — the people you have handed to before — is local.
+  useEffect(() => {
+    let stale = false;
+    fetchHandoffCandidates(reviewKey)
+      .then((r) => !stale && setPeople(r.logins))
+      .catch((e) => !stale && setPeopleError(String(e?.message ?? e)));
+    return () => {
+      stale = true;
+    };
+  }, [reviewKey]);
+
   const pickLogin = (typed: string) => {
     setTo(typed);
     if (!ownNote) setNote(suggestedNote(asLogin(typed)));
+  };
+
+  /** Take a suggestion: it fills the box and closes the list, nothing more. */
+  const choose = (chosen: string) => {
+    pickLogin(chosen);
+    setListOpen(false);
+    setActive(-1);
   };
 
   // `showModal` rather than the `open` attribute: only the former puts the
@@ -1565,28 +1604,93 @@ function HandoffDialog({
 
         <div className="handoff-who">
           <span className="handoff-at">@</span>
-          <input
-            className="handoff-login"
-            autoFocus
-            value={to}
-            spellCheck={false}
-            placeholder="github login"
-            onChange={(e) => pickLogin(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") confirm();
-            }}
-          />
-          {recent.length > 0 && (
-            <span className="faint handoff-recent">
-              recently
-              {recent.map((r) => (
-                <button key={r} className="link" onClick={() => pickLogin(r)} disabled={busy}>
-                  @{r}
-                </button>
-              ))}
-            </span>
-          )}
+          <div className="handoff-combo">
+            <input
+              className="handoff-login"
+              autoFocus
+              value={to}
+              spellCheck={false}
+              placeholder="github login"
+              role="combobox"
+              aria-expanded={listOpen && shown.length > 0}
+              aria-controls="handoff-options"
+              aria-autocomplete="list"
+              aria-activedescendant={active >= 0 ? `handoff-option-${active}` : undefined}
+              onFocus={() => setListOpen(true)}
+              // The options take the click before this fires (they cancel the
+              // mousedown that would move focus), so closing here cannot close
+              // the list out from under the name being picked.
+              onBlur={() => setListOpen(false)}
+              onChange={(e) => {
+                pickLogin(e.target.value);
+                setListOpen(true);
+                // Back onto the best match on every keystroke, so typing three
+                // letters and pressing Enter fills in the name they belong to.
+                setActive(0);
+              }}
+              onKeyDown={(e) => {
+                const open = listOpen && shown.length > 0;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (!open) return setListOpen(true);
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setActive((i) => (i + step + shown.length) % shown.length);
+                  return;
+                }
+                if (e.key === "Enter") {
+                  // A highlighted suggestion is only worth taking while it says
+                  // something the box does not: once the name is typed out in
+                  // full, Enter is the confirmation it looks like.
+                  const pick = open && active >= 0 ? shown[active] : undefined;
+                  if (pick && pick.login.toLowerCase() !== login.toLowerCase()) choose(pick.login);
+                  else confirm();
+                  return;
+                }
+                if (e.key === "Escape" && open) {
+                  // Closes the list, not the dialog. `preventDefault` is what
+                  // stops the element taking this Escape as "close me" too —
+                  // one key, the innermost thing open.
+                  e.preventDefault();
+                  setListOpen(false);
+                  setActive(-1);
+                }
+              }}
+            />
+            {listOpen && shown.length > 0 && (
+              <ul className="handoff-options" id="handoff-options" role="listbox">
+                {shown.map((c, i) => (
+                  <li
+                    key={c.login}
+                    id={`handoff-option-${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    className={i === active ? "on" : undefined}
+                    onMouseEnter={() => setActive(i)}
+                    // `mousedown` and not `click`: the input is about to lose
+                    // focus to this row, and the blur handler would close the
+                    // list before the click ever landed. Cancelling the
+                    // mousedown keeps the focus where it is.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      choose(c.login);
+                    }}
+                  >
+                    <span className="handoff-option-login">@{c.login}</span>
+                    {c.recent && <span className="faint">handed to before</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
+
+        {/* Said once the fetch has answered, and only when it answered badly:
+            the box is free text and the suggestions were never the point. */}
+        {peopleError && (
+          <p className="faint handoff-who-note">
+            cerber could not read who this repo takes reviews from — type the login instead.
+          </p>
+        )}
 
         <textarea
           ref={box}
@@ -2958,6 +3062,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             {handingOff && (
               <HandoffDialog
                 artifact={artifact}
+                reviewKey={reviewKey}
                 onConfirm={handOff}
                 onCancel={() => setHandingOff(false)}
               />

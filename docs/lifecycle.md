@@ -432,10 +432,23 @@ one already happened.
 
 `handoff` outranks both the status and `filed` wherever the queue tags a row
 (`rowTag`, `requestTag`, `web/src/inbox.ts`): "skipped" alone reads as work
-dropped, where this is work passed on. Who you hand reviews to is remembered in
-`localStorage` (`web/src/handoff.ts`), beside the theme pin and the bell's
-announced-keys — a suggestion for the name box, not a fact about reviews, so
-`config.json` keeps out of it.
+dropped, where this is work passed on.
+
+**Who it suggests.** The name field is a combobox over two lists merged into one
+(`candidates`, `web/src/handoff.ts`): the people you have handed to before, then
+whoever this repo will take. The first is local — `localStorage`, beside the
+theme pin and the bell's announced-keys, a convenience about this screen rather
+than a fact about reviews, so `config.json` keeps out of it. The second is
+`GET /api/reviews/:key/reviewers` → `fetchAssignableUsers` → `gh api
+repos/…/assignees`, which needs only read access, where the obvious
+`collaborators` needs push — exactly what a reviewer on somebody else's repo
+does not have. Bots are dropped, and so are you and the PR's author, because
+GitHub refuses both as reviewers.
+
+None of it is authoritative and nothing treats it as such: GitHub's rule for who
+may be *requested* is its own. The field is free text, a login the list never
+mentions can still be handed to, and a repo whose people cannot be read says so
+in one line and leaves the handoff working.
 
 Not supported, and refused in words rather than half-done: handing a review to a
 team. `@org/team` reaches GitHub through a different field, and "take your own

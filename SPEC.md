@@ -1421,6 +1421,17 @@ behind it is one the user is deciding not to read. Dismissing it (Escape, the
 backdrop, cancel) MUST be refused while the writes are in flight — closing then
 would hide a GitHub write that is still happening.
 
+**Suggestions.** The name field is a combobox over two sources, merged into one
+list: the logins the user has handed to before (local, §17.9) first, then the
+repo's assignable users (`GET /repos/{o}/{r}/assignees`, read access only —
+`collaborators` answers nearly the same question but needs push, which a
+reviewer on somebody else's repo does not have). Bots are dropped, as are the
+user's own login and the PR author's, both of which GitHub refuses as reviewers.
+The list is advisory and MUST NOT gate the write: it is not GitHub's rule for who
+may be requested, so the field stays free text, a login the list never mentions
+can still be handed to, and a failure to read it is a line in the dialog rather
+than anything that stops a handoff.
+
 **The draft is never posted.** Handing a PR over is deciding not to review it.
 The draft stays local, openable and still sendable, and the dialog MUST say so
 rather than offering to post it — which would both post a review nobody vouched
@@ -1513,6 +1524,7 @@ static assets included. No CORS: same-origin only.
 | `GET …/export` | markdown export | standalone document; verdict basis = blockers + confidence |
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
 | `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified |
+| `GET …/reviewers` | §14.6 suggestions | `{logins}` minus you and the author; 404 unknown review; 502 when the repo's list could not be read — the dialog says so and carries on |
 | `POST …/handoff` | §14.6 | requires `{confirm: true}`; 400 on a team, a malformed login or yourself; 409 in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, noteError}` — `noteError` non-null when only the note failed |
 | `GET /*` | cockpit SPA | plain-text pointer when the web build is absent |
 
@@ -1727,6 +1739,18 @@ Settings; the pin is browser state, stored in localStorage (`cerber.theme`,
 `config.json`, because it is about that screen rather than about reviews. A
 pinned theme MUST apply before the first paint, so a reload never flashes the
 other one.
+
+### 17.9 Browser-Held State
+
+Three things live in localStorage rather than `config.json`, on the same rule:
+they are about this screen, not about reviews, and losing them costs a
+convenience rather than a decision. The theme pin (§17.8); the arrival bell's
+switch and announced-keys, which sit beside the browser's own notification
+permission; and the logins the user has handed reviews to
+(`cerber.handoff.recent`, most recent first, capped, de-duplicated
+case-insensitively — GitHub logins are). All three MUST be read defensively: a
+hand-edited or malformed value leaves the feature at its default rather than
+putting nonsense in front of a GitHub write.
 
 ## 18. CLI
 

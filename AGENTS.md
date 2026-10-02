@@ -79,7 +79,9 @@ left unwritten. Code and tests win when they disagree.
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
   gh client (shells out to `gh`, no tokens handled — and holds all three
-  writes, each named as what it is), diff utils,
+  writes, each named as what it is; `fetchAssignableUsers` is the read behind
+  the handoff's suggestions, and uses `assignees` rather than `collaborators`
+  because only the first works without push access), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
   matching each comment's line *text*, never a fuzzy guess), review revision
   (`revise.ts` — applies a chat turn's edits, refuses the user's own comments,

@@ -592,6 +592,38 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
 }
 
 /**
+ * Who this repo will let you put on a PR — the list behind the handoff's
+ * suggestions.
+ *
+ * The `assignees` endpoint rather than `collaborators`: they answer nearly the
+ * same question, but collaborators needs push access, which is exactly what a
+ * reviewer on somebody else's repo does not have. This one needs only read, so
+ * the suggestions work wherever cerber can see the PR at all.
+ *
+ * Bots are dropped. A bot cannot take a review off you, and a list that offers
+ * one is a list you have to read past every time.
+ *
+ * Not authoritative, and nothing treats it as such: GitHub's own rule for who
+ * may be *requested* is its own, so the name box stays free text and a login
+ * this never mentions can still be handed to. These are suggestions.
+ */
+export async function fetchAssignableUsers(ref: PrRef): Promise<string[]> {
+  const out = await gh([
+    "api",
+    `repos/${ref.owner}/${ref.repo}/assignees`,
+    "--paginate",
+    "-F",
+    "per_page=100",
+    "--jq",
+    '.[] | select(.type != "Bot") | .login',
+  ]);
+  return out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
  * Move the review request to somebody else: ask GitHub for their review, then
  * take yours off.
  *

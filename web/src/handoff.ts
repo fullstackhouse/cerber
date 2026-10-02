@@ -63,3 +63,54 @@ export function rememberHandoff(login: string): string[] {
   }
   return next;
 }
+
+/** A login as typed: a leading `@` is how people write one, and not part of it. */
+export const asLogin = (typed: string) => typed.trim().replace(/^@/, "");
+
+/** One name the box can offer, and whether you have handed to them before. */
+export interface Candidate {
+  login: string;
+  /** True when this login is in your own recents — the half of the list you chose. */
+  recent: boolean;
+}
+
+/**
+ * Everyone the box offers, in the order it offers them.
+ *
+ * Your recents first and in recency order, then whoever else the repo allows,
+ * in the order GitHub listed them. The two halves are merged rather than shown
+ * as separate lists: it is one question — who takes this — and a name you have
+ * used before is the same name, just a better guess.
+ *
+ * A recent who is not in the repo's list still shows. They may be a
+ * collaborator GitHub does not list as assignable, or the list may have failed
+ * to load entirely; either way, dropping a name you have *actually handed to*
+ * on the strength of a list this does not treat as authoritative would be the
+ * wrong way round.
+ */
+export function candidates(people: string[], recent: string[]): Candidate[] {
+  const seen = new Set<string>();
+  const out: Candidate[] = [];
+  for (const login of [...recent, ...people]) {
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ login, recent: recent.some((r) => r.toLowerCase() === key) });
+  }
+  return out;
+}
+
+/**
+ * The candidates left standing against what has been typed.
+ *
+ * Case-insensitive, and a name that *starts* with what you typed comes first: a
+ * match in the middle is a fallback, not an equal. Within each half the order
+ * it was given in survives, so your recents stay at the top of their group.
+ */
+export function matchCandidates(all: Candidate[], typed: string): Candidate[] {
+  const q = asLogin(typed).toLowerCase();
+  if (!q) return all;
+  const hits = all.filter((c) => c.login.toLowerCase().includes(q));
+  const starts = (c: Candidate) => c.login.toLowerCase().startsWith(q);
+  return [...hits.filter(starts), ...hits.filter((c) => !starts(c))];
+}

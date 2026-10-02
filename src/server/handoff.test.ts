@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, ArtifactStatus, PrInfo, SCHEMA_VERSION } from "../core/artifact.js";
-import { currentLogin, handOffReview, postIssueComment } from "../core/gh.js";
+import {
+  currentLogin,
+  fetchAssignableUsers,
+  handOffReview,
+  postIssueComment,
+} from "../core/gh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import { buildApp } from "./index.js";
 
@@ -14,6 +19,7 @@ vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
   handOffReview: vi.fn(),
   postIssueComment: vi.fn(),
+  fetchAssignableUsers: vi.fn(),
   currentLogin: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchPrDiff: vi.fn(),
@@ -23,6 +29,7 @@ vi.mock("../runner/review.js", () => ({ reviewPr: vi.fn(), pool: vi.fn() }));
 const swap = handOffReview as Mock;
 const comment = postIssueComment as Mock;
 const login = currentLogin as Mock;
+const assignable = fetchAssignableUsers as Mock;
 
 const home = mkdtempSync(path.join(os.tmpdir(), "cerber-handoff-"));
 process.env.CERBER_HOME = home;
@@ -94,6 +101,7 @@ beforeEach(async () => {
   login.mockResolvedValue("jacek");
   swap.mockResolvedValue({ withdrewYours: true, withdrawError: null });
   comment.mockResolvedValue({ url: "https://github.com/acme/widgets/pull/42#c1" });
+  assignable.mockResolvedValue(["maks", "jacek", "someone", "ada"]);
   const { promises: fs } = await import("node:fs");
   await fs.rm(path.join(home, "reviews"), { recursive: true, force: true });
 });
@@ -260,5 +268,51 @@ describe("POST /api/reviews/:key/handoff — giving a review away", () => {
     });
     expect(res.status).toBe(404);
     expect(swap).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/reviews/:key/reviewers — who it could be handed to", () => {
+  const get = async (key = KEY) => {
+    const app = await buildApp({});
+    return app.request(`/api/reviews/${key}/reviewers`);
+  };
+
+  it("offers everyone GitHub would accept, in a readable order", async () => {
+    await saveArtifact(artifact());
+    const res = await get();
+    expect(res.status).toBe(200);
+    // Sorted, and without the two GitHub would refuse: you, and the author.
+    expect((await res.json()).logins).toEqual(["ada", "maks"]);
+  });
+
+  it("drops you and the author however they are spelled", async () => {
+    await saveArtifact(artifact({ pr: { ...pr(), author: "SOMEONE" } }));
+    login.mockResolvedValue("JACEK");
+    assignable.mockResolvedValue(["Jacek", "someone", "maks"]);
+    expect((await (await get()).json()).logins).toEqual(["maks"]);
+  });
+
+  it("still answers when gh cannot say who you are", async () => {
+    // Not knowing costs the exclusion, not the list — and the handoff refuses
+    // you by name anyway.
+    await saveArtifact(artifact());
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect((await res.json()).logins).toContain("jacek");
+  });
+
+  it("reports a repo it could not read, rather than pretending it is empty", async () => {
+    // Empty would read as "nobody can take this", which is a different claim.
+    await saveArtifact(artifact());
+    assignable.mockRejectedValue(new Error("gh: Not Found (HTTP 404)"));
+    const res = await get();
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toContain("404");
+  });
+
+  it("404s on a review it has never heard of", async () => {
+    expect((await get("nope__nope__1")).status).toBe(404);
+    expect(assignable).not.toHaveBeenCalled();
   });
 });

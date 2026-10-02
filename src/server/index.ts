@@ -19,6 +19,7 @@ import {
 import { toMarkdown } from "../core/export.js";
 import {
   currentLogin,
+  fetchAssignableUsers,
   fetchPrDiff,
   fetchPrInfo,
   handOffReview,
@@ -833,6 +834,41 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     const event = (c.req.query("event") ?? "COMMENT") as ReviewEvent;
     return c.json(buildReviewPayload(artifact, event));
+  });
+
+  /**
+   * Who this review could be handed to — the handoff's suggestions.
+   *
+   * Read-only, and allowed to come back empty: the name box works without it,
+   * and a repo cerber cannot list people for is a repo you can still hand a PR
+   * to by typing the name. So a failure here is reported as a line in the
+   * dialog, not as an error that stops it.
+   *
+   * Two logins are dropped because GitHub would refuse them anyway: your own,
+   * and the PR author's — nobody reviews their own pull request.
+   */
+  app.get("/api/reviews/:key/reviewers", async (c) => {
+    const artifact = await loadArtifactByKey(c.req.param("key"));
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    let logins: string[];
+    try {
+      logins = await fetchAssignableUsers({
+        owner: artifact.pr.owner,
+        repo: artifact.pr.repo,
+        number: artifact.pr.number,
+      });
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+    // Not knowing who you are costs the exclusion, not the list: you would
+    // simply see yourself offered, and the handoff refuses that anyway.
+    const me = await currentLogin().catch(() => null);
+    const drop = new Set(
+      [me, artifact.pr.author].filter(Boolean).map((l) => (l as string).toLowerCase()),
+    );
+    return c.json({
+      logins: logins.filter((l) => !drop.has(l.toLowerCase())).sort((a, b) => a.localeCompare(b)),
+    });
   });
 
   /**

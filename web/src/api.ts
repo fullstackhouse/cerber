@@ -144,6 +144,14 @@ export const sendReview = (key: string, event: string) =>
   });
 
 /**
+ * Who this review could be handed to, for the dialog's suggestions. Read-only,
+ * and the name box works without it — so a caller treats a rejection as a line
+ * to show rather than a reason to stop.
+ */
+export const fetchHandoffCandidates = (key: string) =>
+  request<{ logins: string[] }>(`/api/reviews/${encodeURIComponent(key)}/reviewers`);
+
+/**
  * Give this review to somebody else: GitHub's review request moves to them, the
  * note (when there is one) goes up as a plain comment, and the row settles here.
  *

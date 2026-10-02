@@ -5,6 +5,7 @@ import {
   classifyReply,
   currentLogin,
   lastMentionOfYou,
+  fetchAssignableUsers,
   fetchPrDiff,
   handOffReview,
   lastRequestOf,
@@ -571,5 +572,39 @@ describe("postIssueComment", () => {
   it("still counts as posted when the response is not readable", async () => {
     exec.mockResolvedValue({ stdout: "" });
     expect(await postIssueComment({ owner: "o", repo: "r", number: 7 }, "hi")).toEqual({ url: null });
+  });
+});
+
+describe("fetchAssignableUsers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("asks the endpoint a reader is allowed to ask, and drops bots", () => {
+    // `collaborators` answers nearly the same question but needs push access —
+    // exactly what a reviewer on somebody else's repo does not have.
+    exec.mockResolvedValue({ stdout: "" });
+    void fetchAssignableUsers({ owner: "o", repo: "r", number: 7 });
+    expect(exec.mock.calls[0]?.[1]).toEqual([
+      "api",
+      "repos/o/r/assignees",
+      "--paginate",
+      "-F",
+      "per_page=100",
+      "--jq",
+      '.[] | select(.type != "Bot") | .login',
+    ]);
+  });
+
+  it("reads back one login per line", async () => {
+    exec.mockResolvedValue({ stdout: "maks\nada-w\n" });
+    expect(await fetchAssignableUsers({ owner: "o", repo: "r", number: 7 })).toEqual([
+      "maks",
+      "ada-w",
+    ]);
+  });
+
+  it("is empty rather than a list of one empty name", async () => {
+    // A repo with nobody assignable, and the blank line `gh` leaves behind.
+    exec.mockResolvedValue({ stdout: "\n" });
+    expect(await fetchAssignableUsers({ owner: "o", repo: "r", number: 7 })).toEqual([]);
   });
 });
