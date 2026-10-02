@@ -1,5 +1,14 @@
 import { html } from "diff2html";
-import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
@@ -1456,12 +1465,18 @@ const asLogin = (typed: string) => typed.trim().replace(/^@/, "");
  * Give this review to somebody else.
  *
  * Two things leave this machine when the button is pressed — GitHub's review
- * request moves to them, and the note goes up as a plain comment — so the panel
+ * request moves to them, and the note goes up as a plain comment — so the dialog
  * names both before either happens. What it does not do is post the draft:
  * handing a PR over is deciding not to review it, and Send stays the only way a
  * review of yours reaches anybody.
+ *
+ * A real `<dialog>`, opened modally. The page behind it is a review you are
+ * deciding *not* to read, so it should stop taking the keys — and the element
+ * does that, the focus trap, the backdrop and Escape without any of it being
+ * written here. Escape is held back while the writes are in flight, because
+ * closing then would hide a GitHub write that is still happening.
  */
-function HandoffPanel({
+function HandoffDialog({
   artifact,
   onConfirm,
   onCancel,
@@ -1484,6 +1499,7 @@ function HandoffPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useGrowToFit(note);
+  const dialog = useRef<HTMLDialogElement>(null);
   const login = asLogin(to);
   const ready = isLogin(login);
   // Something worth passing on, that nobody has passed on yet.
@@ -1493,6 +1509,20 @@ function HandoffPanel({
     setTo(typed);
     if (!ownNote) setNote(suggestedNote(asLogin(typed)));
   };
+
+  // `showModal` rather than the `open` attribute: only the former puts the
+  // dialog in the top layer, and only the top layer gets the backdrop, the
+  // focus trap and Escape. Once, on mount — React unmounting it closes it.
+  //
+  // A *layout* effect, and that is load-bearing: a `<dialog>` that has not been
+  // shown is `display: none`, where every box inside it measures zero. The note
+  // grows itself to fit its text from a passive effect, and passive effects all
+  // run after layout ones — so showing the dialog here is what gives that
+  // measurement something to measure. Shown from a passive effect instead, the
+  // note opened two pixels tall with its first line sliced in half.
+  useLayoutEffect(() => {
+    dialog.current?.showModal();
+  }, []);
 
   const confirm = () => {
     // The button is disabled for both, but Enter in the name box is not.
@@ -1508,99 +1538,117 @@ function HandoffPanel({
   };
 
   return (
-    <div className="handoff-panel">
-      <div className="send-top">
-        <span className="lab">hand off to</span>
-        <span className="grow" />
-        <span className="faint">moves GitHub’s review request — your draft stays here</span>
-      </div>
+    <dialog
+      className="handoff-dialog"
+      ref={dialog}
+      aria-label={`Hand off ${artifact.id}`}
+      // Escape, which the element raises as `cancel` rather than as a key. The
+      // only reason to refuse it is a write already on its way to GitHub.
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onCancel();
+      }}
+      // A click on the backdrop lands on the dialog itself — everything inside
+      // is a child and reports that child as the target. This is the whole of
+      // "click outside to close", and it needs the element to carry no padding
+      // of its own, which the stylesheet sees to.
+      onClick={(e) => {
+        if (e.target === dialog.current && !busy) onCancel();
+      }}
+    >
+      <div className="handoff-body">
+        <div className="send-top">
+          <span className="lab">hand off</span>
+          <span className="grow" />
+          <span className="faint">{artifact.id}</span>
+        </div>
 
-      <div className="handoff-who">
-        <span className="handoff-at">@</span>
-        <input
-          className="handoff-login"
-          autoFocus
-          value={to}
-          spellCheck={false}
-          placeholder="github login"
-          onChange={(e) => pickLogin(e.target.value)}
+        <div className="handoff-who">
+          <span className="handoff-at">@</span>
+          <input
+            className="handoff-login"
+            autoFocus
+            value={to}
+            spellCheck={false}
+            placeholder="github login"
+            onChange={(e) => pickLogin(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confirm();
+            }}
+          />
+          {recent.length > 0 && (
+            <span className="faint handoff-recent">
+              recently
+              {recent.map((r) => (
+                <button key={r} className="link" onClick={() => pickLogin(r)} disabled={busy}>
+                  @{r}
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+
+        <textarea
+          ref={box}
+          className="body-edit"
+          rows={2}
+          value={note}
+          onChange={(e) => {
+            setOwnNote(true);
+            setNote(e.target.value);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") confirm();
-            if (e.key === "Escape" && !busy) onCancel();
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              // Or the browser types the newline into the box on the way out.
+              e.preventDefault();
+              confirm();
+            }
           }}
         />
-        {recent.length > 0 && (
-          <span className="faint handoff-recent">
-            recently
-            {recent.map((r) => (
-              <button key={r} className="link" onClick={() => pickLogin(r)} disabled={busy}>
-                @{r}
-              </button>
-            ))}
+        <div className="body-source">
+          <span className="faint">
+            {note.trim()
+              ? "goes on the PR as a plain comment, not a review"
+              : "nothing will be posted — only the review request moves"}
           </span>
-        )}
-      </div>
+          {note.trim() !== "" && (
+            <button
+              className="link"
+              onClick={() => {
+                setOwnNote(true);
+                setNote("");
+              }}
+              disabled={busy}
+            >
+              post no note
+            </button>
+          )}
+        </div>
 
-      <textarea
-        ref={box}
-        className="body-edit handoff-note"
-        rows={2}
-        value={note}
-        onChange={(e) => {
-          setOwnNote(true);
-          setNote(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            // Or the browser types the newline into the box on the way out.
-            e.preventDefault();
-            confirm();
-          }
-          if (e.key === "Escape" && !busy) onCancel();
-        }}
-      />
-      <div className="body-source">
-        <span className="faint">
-          {note.trim()
-            ? "goes on the PR as a plain comment, not a review"
-            : "nothing will be posted — only the review request moves"}
-        </span>
-        {note.trim() !== "" && (
-          <button
-            className="link"
-            onClick={() => {
-              setOwnNote(true);
-              setNote("");
-            }}
-            disabled={busy}
-          >
-            post no note
+        {error && <p className="error">{error}</p>}
+
+        <p className="faint handoff-says">
+          {ready ? <>@{login}</> : "They"} will be asked for this review and you will be taken off
+          it.{" "}
+          {artifact.sent
+            ? "This row stays under sent."
+            : "This row is filed under settled, and comes back if anybody asks you again."}{" "}
+          The draft is not posted
+          {draftToOffer ? " — send it as a comment first if you want them to have it" : ""}.
+        </p>
+
+        <div className="card-actions">
+          <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready}>
+            <Icon name="arrowRight" />
+            {busy ? "handing over…" : ready ? `hand off to @${login}` : "hand off"}
+            <Key>⌘↵</Key>
           </button>
-        )}
+          <button className="btn btn-sm" onClick={onCancel} disabled={busy}>
+            cancel
+          </button>
+        </div>
       </div>
-
-      {error && <p className="error">{error}</p>}
-
-      <p className="faint handoff-says">
-        {ready ? <>@{login}</> : "They"} will be asked for this review and you will be taken off it.{" "}
-        {artifact.sent
-          ? "This row stays under sent."
-          : "This row is filed under settled, and comes back if anybody asks you again."}{" "}
-        The draft is not posted
-        {draftToOffer ? " — send it as a comment first if you want them to have it" : ""}.
-      </p>
-
-      <div className="card-actions">
-        <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready}>
-          <Icon name="arrowRight" />
-          {busy ? "handing over…" : ready ? `hand off to @${login}` : "hand off"}
-          <Key>⌘↵</Key>
-        </button>
-        <button className="btn btn-sm" onClick={onCancel} disabled={busy}>
-          cancel
-        </button>
-      </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -2902,11 +2950,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 </>
               }
             />
-            {/* Under the panel rather than inside its footer: it is a write to
-                GitHub being composed, and a row of "not sending?" buttons is no
-                place for one. */}
+            {/* A modal rather than another row in this column: it is a write to
+                GitHub being composed, and the page behind it is a review you are
+                deciding not to read. Rendered here only because this is where
+                the button is — a modal dialog lives in the top layer, so where
+                it sits in the markup decides nothing about where it appears. */}
             {handingOff && (
-              <HandoffPanel
+              <HandoffDialog
                 artifact={artifact}
                 onConfirm={handOff}
                 onCancel={() => setHandingOff(false)}

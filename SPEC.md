@@ -1416,8 +1416,13 @@ of (1) writes nothing and posts nothing.
 **The note.** Prefilled naming the recipient (so they are notified), editable,
 and clearable: an empty note posts nothing and the request still moves.
 
+**The surface** is a modal dialog, not another row in the page: the review
+behind it is one the user is deciding not to read. Dismissing it (Escape, the
+backdrop, cancel) MUST be refused while the writes are in flight — closing then
+would hide a GitHub write that is still happening.
+
 **The draft is never posted.** Handing a PR over is deciding not to review it.
-The draft stays local, openable and still sendable, and the panel MUST say so
+The draft stays local, openable and still sendable, and the dialog MUST say so
 rather than offering to post it — which would both post a review nobody vouched
 for and put a second control beside §14.4's.
 
@@ -1653,7 +1658,7 @@ one is reported over the next.
   ahead of both its status and `filed`: it *is* `skipped`, and "skipped" alone
   reads as work dropped where this is work passed on. The review itself states
   what GitHub says now — who is asked, whether the user still is — and that the
-  draft was never sent. The handoff panel MUST name both writes before either
+  draft was never sent. The handoff dialog MUST name both writes before either
   happens, and MUST say the draft stays local rather than offering to post it.
 - Opening a review triggers refresh (§13.2); a refresh failure is reported
   softly and the draft still reads.

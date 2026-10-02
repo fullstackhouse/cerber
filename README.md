@@ -251,7 +251,7 @@ for that to work.
 **Your draft stays here.** Handing a PR over means deciding not to review it, so
 the handoff posts the note and nothing else; whatever Claude drafted is still on
 your disk, still openable, still sendable. If it is worth passing on, send it as
-a comment *before* you hand off — the panel says so, and does not do it for you,
+a comment *before* you hand off — the dialog says so, and does not do it for you,
 because a draft nobody has read is not something to post under your name.
 
 If GitHub refuses the swap — they are not a collaborator, or you cannot request

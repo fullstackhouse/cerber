@@ -17,7 +17,7 @@ read-only.**
   to turn it off**, never off with a switch to turn it on — source-backed
   review, the checkout, poll and auto-review all landed that way. The single
   deliberate exception is the GitHub write path: Send stays a human click,
-  auto-send stays opt-in, and a handoff is a panel you fill in rather than a
+  auto-send stays opt-in, and a handoff is a dialog you fill in rather than a
   button that fires.
 - Never ship a default that half-works. If the obvious path (open cerber → see
   the PRs awaiting you, drafts already written) needs a manual step to be
@@ -206,7 +206,7 @@ left unwritten. Code and tests win when they disagree.
   and a handoff's two (`handOffReview`, `postIssueComment`). A fourth needs the
   hard rule at the top of this file rewritten in the same PR, not bent — and it
   has to be the shape those three are: one human click, nothing inferred, and
-  the panel saying what will happen before it does. A handoff's note is a plain
+  the dialog saying what will happen before it does. A handoff's note is a plain
   issue comment on purpose: `pulls/…/reviews` with a COMMENT event looks the
   same in the thread and is a review everywhere that counts one, and only Send
   may speak as a review.
@@ -215,7 +215,7 @@ left unwritten. Code and tests win when they disagree.
   the draft stays here for whoever opens the row next. Bundling them would post
   a review nobody vouched for, and would put a second control over what gets
   posted right beside the one that exists. If the draft is worth passing on,
-  Send it as a comment first — the panel says so, and says nothing more.
+  Send it as a comment first — the dialog says so, and says nothing more.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable

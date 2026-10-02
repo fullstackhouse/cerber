@@ -2030,26 +2030,33 @@ button {
 
 /* ---- handing a review to somebody else ---- */
 
-.handoff-panel {
+/* The element carries the frame and no padding of its own: the padding is the
+   body's, so a click landing on the dialog itself is a click on the backdrop
+   and nothing else — which is what closes it. */
+.handoff-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 0;
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--surface);
-  padding: 14px 18px 16px;
-  margin-top: 10px;
+  color: var(--fg);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
-/* Joined to the send panel when it follows one: both write to GitHub, and the
-   handoff is the one that writes something other than a review. On a sent
-   review there is no panel to join — the sent strip and its actions are in
-   between — so it stands on its own there. */
-.send-panel + .handoff-panel {
-  border-top: none;
-  border-radius: 0 0 4px 4px;
-  margin-top: 0;
+/* Written out rather than mixed from a token: `::backdrop` does not inherit
+   the custom properties of the dialog it belongs to in every browser that
+   supports the element, and a scrim that silently resolves to nothing is worse
+   than one that is not themed. A dark scrim is right over either theme. */
+.handoff-dialog::backdrop {
+  background: rgb(14 17 20 / 0.45);
 }
 
-.handoff-panel .send-top {
-  margin-bottom: 10px;
+.handoff-body {
+  padding: 16px 18px 18px;
+}
+
+.handoff-dialog .send-top {
+  margin-bottom: 12px;
 }
 
 .handoff-who {
@@ -2087,14 +2094,9 @@ button {
   font-size: 11px;
 }
 
-.handoff-note {
-  max-width: 760px;
-}
-
 /* What the button is about to do, in the words of the thing it does. */
 .handoff-says {
-  max-width: 640px;
-  margin: 10px 0 12px;
+  margin: 10px 0 14px;
   font-size: 11.5px;
   line-height: 1.55;
 }

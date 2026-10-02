@@ -392,7 +392,9 @@ every row settled before this shipped stays unreachable forever.
 
 The way out that is not a decision about the *review* but about who does it.
 `POST /api/reviews/:key/handoff` (`src/server/index.ts`), from the **hand off**
-button in the cockpit's send panel.
+button in the cockpit's send panel, which opens a modal dialog: the page behind
+it is a review you are deciding not to read, and a GitHub write being composed
+should have the keys to itself.
 
 Two things reach GitHub, in this order and for this reason:
 
@@ -417,7 +419,7 @@ rolled back into a lie about where the PR is.
 
 **The draft is never posted.** Handing a PR over is deciding not to review it, so
 what the handoff announces is the handoff. The draft stays on disk, openable and
-still sendable — and the panel says so, with one line pointing at Send for anyone
+still sendable — and the dialog says so, with one line pointing at Send for anyone
 who wants the other person to have it.
 
 Locally the row becomes `skipped`, with `settledAt` and `handoff` set and `filed`
