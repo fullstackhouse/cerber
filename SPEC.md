@@ -604,8 +604,10 @@ reviewed | skipped ── the poll, someone asking for you again
 ```
 
 `ready` if the row holds a finished, error-free draft; `awaiting` if not (the
-poll then drafts it again). Reopening clears `settledAt` and `filed`. A push
-alone still never reopens a settled row.
+poll then drafts it again). Reopening clears `settledAt`, `filed` and `handoff`
+— the last because a reopen is GitHub asking the user again, which contradicts
+every claim a handoff record makes. A push alone still never reopens a settled
+row.
 
 A chat turn is an AI run but **never changes the status**; it lives on
 `pendingChat` (§12.1).
@@ -654,8 +656,11 @@ What MUST survive any run, on both its success and failure paths, is every
 *decision*: a send that landed mid-run, a `reviewed`/`skipped` set while the
 run worked (together with the `settledAt` that dates it — the stamp travels
 with the status, so a settle keeps both halves of itself and a forced
-re-review clears both), the `filed` record, the `calibration`, and the chat
-transcript.
+re-review clears both), a `handoff` (§14.6 — by then GitHub has already been
+told somebody else is reviewing this), the `filed` record, the `calibration`,
+and the chat transcript. A chat turn's fold (§12.5) carries the same `handoff`
+for the same reason, and the handoff route refuses to start while one is in
+flight so the rest of that fold never has to.
 The run's result is folded onto whatever the artifact says now rather than
 written over it; on failure, the status becomes `failed` only if the user does
 not own it (`sent`/`reviewed`/`skipped` stand, with `run.error` recorded
@@ -839,7 +844,7 @@ Rules for both, all normative:
 - The reopen is an atomic update that re-checks the predicate against the
   fresh on-disk artifact (a re-review or send may have started during the
   read). It sets status to `ready` when a finished, error-free draft exists,
-  else `awaiting`; clears `settledAt`; and clears `filed` — cerber's account
+  else `awaiting`; clears `settledAt`; and clears `filed` and `handoff` — cerber's account
   of why the row was settled is not the story of a row that is back. From
   there the ordinary rules take over: the freshness guard re-drafts if the
   head moved since the run read the code, and leaves a current draft alone.
@@ -1468,7 +1473,10 @@ three. A row already `sent` keeps its status because overwriting it would leave
 one claiming no review was ever sent. A second handoff passes a null `from`,
 skipping a withdrawal GitHub would refuse.
 
-**Preconditions.** Not while a run is in flight (same OR as §14.4). The
+**Preconditions.** Not while a run is in flight (same OR as §14.4), and not
+while a chat turn is being answered — a turn's result is folded onto whatever
+the row says when it lands, and that fold is not written for a row given away
+mid-turn. The
 recipient MUST be a single GitHub login, MUST NOT be the user themselves, and a
 team (`@org/team`) MUST be refused rather than half-handled — it reaches GitHub
 through a different field and has no "withdraw yours" counterpart.
@@ -1549,7 +1557,7 @@ static assets included. No CORS: same-origin only.
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
 | `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified |
 | `GET …/reviewers` | §14.6 suggestions | `{logins}` minus you and the author; 404 unknown review; 502 when the repo's list could not be read — the dialog says so and carries on |
-| `POST …/handoff` | §14.6 | requires `{confirm: true}`; optional `postReview`; 400 on a team, a malformed login or yourself; 409 in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, sendError, noteError}` — either non-null when that half alone failed |
+| `POST …/handoff` | §14.6 | requires `{confirm: true}`; optional `postReview`; 400 on a team, a malformed login or yourself; 409 while a run or a chat turn is in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, sendError, noteError}` — either non-null when that half alone failed |
 | `GET /*` | cockpit SPA | plain-text pointer when the web build is absent |
 
 ### 16.3 The 202-Detached Pattern
@@ -2016,7 +2024,7 @@ An implementation conforms when all of the following hold:
       search are checked too; legacy fallback to `filed.at` then
       `run.finishedAt`; unsettled rows cost no GitHub call; failed reads
       change nothing; the leash stamp is spent before the call; and the
-      reopen clears `settledAt` and `filed`. A push alone never reopens.
+      reopen clears `settledAt`, `filed` and `handoff`. A push alone never reopens.
 
 **Runner**
 - [ ] The tool matrix of §11.3 is exact; the run environment matches §14.3;

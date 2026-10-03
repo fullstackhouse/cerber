@@ -796,7 +796,7 @@ export async function buildApp(
     return c.body(toMarkdown(artifact));
   });
 
-  // ---- Send: THE ONLY GITHUB WRITE. Explicit user action from the cockpit. ----
+  // ---- Send: the only write that speaks as a review. Explicit user action. ----
 
   app.post("/api/reviews/:key/send", async (c) => {
     const { event, confirm } = await c.req.json();
@@ -952,21 +952,26 @@ export async function buildApp(
       console.error(`[handoff ${artifact.id}] could not withdraw your request: ${swap.withdrawError}`);
     }
 
-    // The note comes second and is allowed to fail on its own. The request has
-    // already moved by now — they are being asked for this review whether or not
-    // the conversation says why — so a failure here is recorded and reported
-    // rather than rolled back into a lie about where the PR is.
+    // The note goes last, and is allowed to fail on its own — as is the review
+    // above it. The request has already moved by now: they are being asked for
+    // this review whether or not the conversation says why, so a failure in
+    // either is recorded and reported rather than rolled back into a lie about
+    // where the PR is.
     // The draft, when it was asked for, and always as a COMMENT: handing a PR
     // over is handing over the judgement with it, so an approve or a change
     // request here would be cerber ruling on a review it is giving away. The
     // grades stay on the findings, which is where they were anyway — the
-    // verdict is the part that is now @to's to make. Already-sent rows never
-    // reach this: the dialog does not offer it, and a second submission is what
-    // the send path's own guard refuses.
+    // verdict is the part that is now @to's to make.
+    //
+    // Re-read from disk first, and not out of caution: the artifact above was
+    // loaded before the request swap, which is two GitHub calls ago, and a Send
+    // in another tab or an auto-send landing in that window would make this the
+    // second review on the PR. The snapshot cannot see that; the file can.
     let sendError: string | null = null;
     let sent: Artifact["sent"] = null;
     let payload: ReturnType<typeof buildReviewPayload> | null = null;
-    if (postReview && !artifact.sent) {
+    const alreadySent = postReview ? ((await loadArtifactByKey(key))?.sent ?? artifact.sent) : null;
+    if (postReview && !alreadySent) {
       payload = buildReviewPayload(artifact, "COMMENT");
       try {
         const { url } = await submitReview(ref, {
@@ -1008,7 +1013,10 @@ export async function buildApp(
         // Cerber's account of why a row is filed away cannot stand next to your
         // own: you did this, and `handoff` is what the queue tags the row from.
         filed: a.sent ? a.filed : null,
-        sent: sent ?? a.sent,
+        // The disk's record wins: a send that landed while this handoff was
+        // talking to GitHub is a review that went, and ours — if there is one
+        // at all — came after it.
+        sent: a.sent ?? sent,
         calibration: sent && payload ? computeCalibration(a, payload.event) : a.calibration,
         handoff: {
           at,

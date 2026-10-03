@@ -156,8 +156,9 @@ Notes on the edges that surprise people:
   speaks as a *review*: a handoff moves the request and posts a plain comment,
   and auto-send cannot hand off at all. The status field is held to the same
   line: `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two
-  that are your decision, so nothing but the send path can write `sent` and
-  nothing but `POST …/handoff` can write `handoff`.
+  that are your decision, so only the send path and a handoff
+  asked to carry the draft can write `sent`, and nothing but `POST …/handoff`
+  can write `handoff`.
 - **Neither will send a draft a run is rewriting.** The cockpit answers `409`,
   refusing on the artifact's status *and* on this process's own claim;
   `cerber send` prints the reason and exits non-zero, and goes on the status
@@ -213,8 +214,12 @@ What a re-review does *not* touch are the decisions you have made
 (`mergeRunResult`, `src/core/refresh.ts`). The run's result is folded onto
 whatever the artifact says now rather than written over it, so a send stands, a
 `reviewed` or `skipped` you set while the run was going stands — with the fresh
-draft underneath it, which is what the row shows if you change your mind — and
-the chat transcript is kept. Only the draft itself is the run's to replace.
+draft underneath it, which is what the row shows if you change your mind — a
+handoff stands, because by then GitHub has already been told somebody else is
+reviewing this, and the chat transcript is kept. Only the draft itself is the
+run's to replace. A chat turn's fold (`mergeConcurrentEdits`, `src/core/revise.ts`)
+keeps the handoff for the same reason — and the handoff refuses to start while a
+turn is being answered, which is what spares the rest of that fold the question.
 
 ### Re-review vs refresh — different things
 
@@ -302,7 +307,7 @@ it — see below.)
 
 And the one that *adds* a row back: somebody asking for you again after you
 settled — the re-request button, or your name in a comment → status →
-`ready`/`awaiting`, `settledAt` and `filed` cleared (`reopenIfAskedAgain`,
+`ready`/`awaiting`, `settledAt`, `filed` and `handoff` cleared (`reopenIfAskedAgain`,
 `reopenIfAskedInWords`; see "Asked again" below).
 
 A **pure stub** is `awaiting`, with no comments and **`run === null`** — it
@@ -363,7 +368,8 @@ People ask in two ways, and both count:
 
 Conditions, all of them: the row is `reviewed` or `skipped`, it was never sent,
 and the ask is newer than `settledAt`. Then the row goes back to `ready` — or
-`awaiting` if it has no finished draft to show — `settledAt` and `filed` are
+`awaiting` if it has no finished draft to show — `settledAt`, `filed` and
+`handoff` are
 cleared, and the ordinary rules take it from there: the freshness guard in §4
 re-drafts it if the head has moved since the run read it, and leaves the
 existing draft alone if it has not.

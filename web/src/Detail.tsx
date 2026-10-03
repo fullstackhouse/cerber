@@ -1549,6 +1549,11 @@ function HandoffDialog({
     if (!withReview) return;
     let stale = false;
     setPreviewError(null);
+    // Cleared before the refetch, not replaced after it: the button reads
+    // `bodyShown`, so leaving the old body up would arm it over a preview that
+    // no longer matches what would post — the one thing this box exists to
+    // guarantee against.
+    setPreview(null);
     fetchSendPreview(reviewKey, "COMMENT")
       .then((p) => !stale && setPreview(p))
       .catch((e) => {
@@ -1568,6 +1573,14 @@ function HandoffDialog({
   // Whether the body about to be posted is actually on screen. Nothing to show
   // and nothing to post are the same thing here; a tick with no preview is not.
   const bodyShown = !withReview || preview != null;
+
+  // The list scrolls, so moving the highlight has to move the view with it —
+  // otherwise ArrowDown past the visible rows arms Enter on a name nobody can
+  // see. `nearest` so it only scrolls when it has to.
+  useEffect(() => {
+    if (active < 0) return;
+    document.getElementById(`handoff-option-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
 
   const all = useMemo(() => candidates(people ?? [], recent), [people, recent]);
   const shown = useMemo(() => matchCandidates(all, to), [all, to]);
@@ -2211,9 +2224,12 @@ function HistoryCard({
 function HandoffNote({
   handoff,
   sent,
+  hasDraft,
 }: {
   handoff: NonNullable<Artifact["handoff"]>;
   sent: Artifact["sent"];
+  /** Whether there is a draft on this row at all — a handoff does not need one. */
+  hasDraft: boolean;
 }) {
   const when = new Date(handoff.at).toLocaleDateString();
   return (
@@ -2245,8 +2261,13 @@ function HandoffNote({
         // Said without dating it: the review may have gone with the handoff, or
         // long before it, and the strip further down carries the when.
         <>Your review of it is on the PR — the draft below is what went.</>
-      ) : (
+      ) : hasDraft ? (
         <>The draft below was never sent. It is still yours to read, or to send.</>
+      ) : (
+        // A row can be handed off before anything was drafted — the queue
+        // offers it on an `awaiting` stub and on a failed run. There is no
+        // draft to make a promise about.
+        <>Nothing was drafted here, and nothing was sent.</>
       )}
     </div>
   );
@@ -2285,7 +2306,13 @@ function FreshnessBanner({
     <div className="freshness">
       {/* Yours first: a handoff is a decision you made, and it is why anything
           cerber did to this row afterwards happened at all. */}
-      {handoff && <HandoffNote handoff={handoff} sent={artifact.sent} />}
+      {handoff && (
+        <HandoffNote
+          handoff={handoff}
+          sent={artifact.sent}
+          hasDraft={artifact.summary !== "" || artifact.comments.length > 0}
+        />
+      )}
       {filed && <FiledNote filed={filed} />}
       {closed && (
         <div>
@@ -2645,12 +2672,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         // The request has moved either way, so a half that failed is said here
         // and the page stays put to be read. The review first: it is the half
         // somebody was waiting for.
-        const missed = sendError
-          ? `the review did not post: ${sendError}`
-          : noteError
-            ? `the note did not post: ${noteError}`
-            : null;
-        if (missed) setError(`Handed to @${to}, but ${missed}`);
+        // Both halves can fail at once — a rate-limited token fails them
+        // together — and naming only the first leaves the user assuming the
+        // other one landed.
+        const missed = [
+          sendError && `the review did not post: ${sendError}`,
+          noteError && `the note did not post: ${noteError}`,
+        ].filter(Boolean);
+        if (missed.length > 0) setError(`Handed to @${to}, but ${missed.join("; and ")}`);
         else advance();
       },
     );
@@ -2674,6 +2703,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // where each is spelled out.
   const basis = verdictBasis(artifact);
   const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
+  // What the handoff route refuses on, asked here so the button can refuse first.
+  const busyWithRun = artifact.status === "running" || chatBusy;
   const retrue = () =>
     apply(
       startChatTurn(reviewKey, {
@@ -3148,9 +3179,16 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                       keeps asking you about, and passing it on is the answer. */}
                   <button
                     className="btn btn-sm"
-                    title="Move GitHub's review request to somebody else, and settle this row"
+                    title={
+                      busyWithRun
+                        ? "Wait for the run to finish — a handoff settles the row it is rewriting"
+                        : "Move GitHub's review request to somebody else, and settle this row"
+                    }
                     onClick={() => setHandingOff(true)}
-                    disabled={handingOff}
+                    // The route refuses both of these. Refusing here too is the
+                    // difference between not offering it and letting someone
+                    // fill the dialog in for a 409.
+                    disabled={handingOff || busyWithRun}
                   >
                     <Icon name="arrowRight" />
                     hand off

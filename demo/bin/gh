@@ -3,7 +3,7 @@
 //
 // cerber shells out to `gh` for everything it knows about GitHub, so putting
 // this first on PATH makes the whole product run for real against fixture
-// data — including its one write, which lands in a file instead of on GitHub.
+// data — including its writes, which land in files instead of on GitHub.
 //
 // Every argv shape cerber actually uses is handled below. Anything else exits
 // non-zero with the exact argv it was given: a stub that answered "" to an

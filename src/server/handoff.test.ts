@@ -10,7 +10,7 @@ import {
   postIssueComment,
   submitReview,
 } from "../core/gh.js";
-import { loadArtifact, saveArtifact } from "../core/state.js";
+import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { buildApp } from "./index.js";
 
 // The handoff's two writes, and the login it needs to know who to take off.
@@ -223,6 +223,28 @@ describe("POST /api/reviews/:key/handoff — giving a review away", () => {
     expect((await loadArtifact(ID))?.handoff?.to).toBe("ewa");
   });
 
+  it("records a withdrawal that failed, instead of claiming it worked", async () => {
+    // Everything that says "GitHub is asking both of you" reads this one flag,
+    // so a route that hard-coded it true would silence every one of them.
+    await saveArtifact(artifact());
+    swap.mockResolvedValue({ withdrewYours: false, withdrawError: "gh: Not Found (HTTP 404)" });
+    await handoff({ to: "maks", confirm: true });
+    expect((await loadArtifact(ID))?.handoff?.withdrewYours).toBe(false);
+  });
+
+  it("tries the withdrawal again after one that failed", async () => {
+    // The skip exists for a request already gone. One that was never removed is
+    // still there, and passing null would leave you on the PR for good.
+    await saveArtifact(
+      artifact({
+        status: "skipped",
+        handoff: { at: "2026-08-21T11:00:00.000Z", to: "maks", withdrewYours: false, note: null },
+      }),
+    );
+    await handoff({ to: "ewa", confirm: true });
+    expect(swap).toHaveBeenCalledWith(REF, "ewa", "jacek");
+  });
+
   it("refuses to hand a review to you", async () => {
     await saveArtifact(artifact());
     const res = await handoff({ to: "JACEK", confirm: true });
@@ -392,6 +414,24 @@ describe("handing the draft over with it", () => {
     expect(saved?.status).toBe("skipped");
     expect(saved?.sent).toBeNull();
     expect(saved?.handoff).toMatchObject({ to: "maks", note: { body: "over to you" } });
+  });
+
+  it("does not submit over a send that landed while it was talking to GitHub", async () => {
+    // The artifact was loaded before the request swap — two GitHub calls ago —
+    // so the snapshot cannot see a Send from another tab or an auto-send. The
+    // file can, and this is the second review on the PR if it doesn't look.
+    await saveArtifact(withComment());
+    const landed = { at: "2026-08-21T11:30:00.000Z", event: "APPROVE" as const, url: null, auto: true };
+    swap.mockImplementation(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, status: "sent" as const, sent: landed }));
+      return { withdrewYours: true, withdrawError: null };
+    });
+    const res = await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect(submit).not.toHaveBeenCalled();
+    const saved = await loadArtifact(ID);
+    expect(saved?.sent).toEqual(landed);
+    expect(saved?.handoff?.to).toBe("maks");
   });
 
   it("never submits a second review on a row that already sent one", async () => {

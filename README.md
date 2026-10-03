@@ -245,7 +245,8 @@ rather than typing one. Then:
 - a short note goes on the PR saying so — prefilled with their name so they get
   the notification, editable, and clearable if you would rather say nothing,
 - the drafted review goes up with it, if you tick the box for it (below),
-- the row is filed under settled here, tagged `handed to @them`.
+- the row is filed under settled here, tagged `handed to @them` — or under
+  sent, if you sent the review with it.
 
 That is the whole of it, and it is the one thing on the queue that genuinely
 *finishes* a review request instead of just filing it: a skip leaves GitHub

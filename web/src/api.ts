@@ -158,8 +158,9 @@ export const fetchHandoffCandidates = (key: string) =>
  * `postReview` sends the draft along with it as a COMMENT review — the ordinary
  * send path, asked for from here.
  *
- * Resolves with the row as it now stands and, separately, whatever went wrong
- * with the review and the note — because by then the request has already moved,
+ * The one mutating route that does not resolve with a bare artifact: it resolves
+ * with the row as it now stands and, separately, whatever went wrong with the
+ * review and the note — because by then the request has already moved,
  * so either failing is a thing to say rather than a reason to call this one.
  */
 export const handOffReview = (
