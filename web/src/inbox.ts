@@ -470,10 +470,19 @@ export function strip(
   }
   if (r.sent) {
     return {
-      reasoning: `Sent to GitHub as ${EVENT_LABEL[r.sent.event] ?? r.sent.event} on ${new Date(
-        r.sent.at,
-      ).toLocaleDateString()}. Kept here as a record; the conversation can't continue.`,
-      meta: [r.sent.auto ? "auto-sent by the daemon" : "sent by you", readMode(r)],
+      reasoning:
+        `Sent to GitHub as ${EVENT_LABEL[r.sent.event] ?? r.sent.event} on ${new Date(
+          r.sent.at,
+        ).toLocaleDateString()}. Kept here as a record; the conversation can't continue.` +
+        // Where the PR went outranks how it was answered — the row's tag says
+        // so too. Without this the one row that did both reads like an
+        // ordinary send, and nothing in the strip mentions the handoff.
+        (r.handoff ? ` GitHub asks @${r.handoff.to} for it now.` : ""),
+      meta: [
+        ...(r.handoff ? [`you handed this to @${r.handoff.to}`] : []),
+        r.sent.auto ? "auto-sent by the daemon" : "sent by you",
+        readMode(r),
+      ],
     };
   }
 
@@ -500,11 +509,17 @@ export function strip(
     );
   }
   if (r.handoff) {
+    // A row can be handed off before anything was drafted — the queue offers it
+    // on an `awaiting` stub and on a failed run — so the promise about the
+    // draft is only made where there is one to make it about.
+    const drafted = r.commentCount > 0 || r.verdict != null;
     return {
       reasoning:
         `GitHub asks @${r.handoff.to} for this review now` +
         `${r.handoff.withdrewYours ? " and no longer asks you" : " — and still asks you, because your own request could not be taken off"}. ` +
-        `The draft was never sent: it is still yours to read or send.`,
+        (drafted
+          ? `The draft was never sent: it is still yours to read or send.`
+          : `Nothing was drafted here, and nothing was sent.`),
       meta,
     };
   }

@@ -31,10 +31,13 @@ anything — run [`demo/run.sh`](./demo/README.md).
 - **Read [`SPEC.md`](./SPEC.md) before changing behaviour.** It is the design of
   record, with an appendix listing where the code has diverged from it. If your
   change moves that line, move the spec in the same PR.
-- **The hard rule is not negotiable:** the only code path that writes to GitHub
-  is a human-initiated send (`src/core/send.ts`), plus the auto-send a user turns
-  on themselves. A PR that lets anything else post — a poll, a retry, a
-  convenience — will not be merged, however good the reason.
+- **The hard rule is not negotiable:** nothing reaches GitHub without a
+  deliberate human act, and only three code paths ever do — a human-initiated
+  send (`src/core/send.ts`), the auto-send a user turns on themselves, and a
+  handoff, which a user fills in and confirms. A PR that lets anything else post
+  — a poll, a retry, a convenience — will not be merged, however good the
+  reason, and a fourth path needs that rule rewritten in the same PR rather than
+  bent around.
 
 `SDLC.md` and `CODE_REVIEW.md` describe how *we* work on this repo, with our own
 agent tooling. They are published for transparency, not as requirements: nothing

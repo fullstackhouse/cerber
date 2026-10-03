@@ -14,9 +14,13 @@ Worth knowing before you run it, because two of these are unusual:
 
 **It holds your GitHub credentials and can post as you.** Cerber shells out to
 `gh`, authenticated as you. Reviews it sends are your reviews, under your
-account. The only code path that writes to GitHub is a human-initiated send
-(`src/core/send.ts`), plus `--auto-send`, which you turn on yourself and which
-is approve-only, threshold-gated and logged to `~/.cerber/autosend.ndjson`.
+account. Three code paths write to GitHub, and every one of them is a click you
+make: a human-initiated send (`src/core/send.ts`); `--auto-send`, which you turn
+on yourself and which is approve-only, threshold-gated and logged to
+`~/.cerber/autosend.ndjson`; and a handoff, which moves a review request to
+somebody else, posts a comment saying so, and — only if you tick the box for it
+— sends the draft along as a COMMENT review through the send path's own
+composition. A handoff never forms a verdict, and auto-send can never hand off.
 Everything else — discovery, drafting, refreshing — is read-only.
 
 **On a trusted PR, it runs that PR's code.** A review of a PR matching one of

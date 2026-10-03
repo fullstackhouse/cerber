@@ -469,6 +469,26 @@ describe("a review you handed to somebody else", () => {
     expect(reasoning).toContain("never sent");
   });
 
+  it("does not promise a draft on a row that never had one", () => {
+    // The queue offers a handoff on an `awaiting` stub and on a failed run.
+    const bare = handed();
+    bare.commentCount = 0;
+    bare.verdict = null;
+    expect(strip(bare, null).reasoning).toContain("Nothing was drafted here");
+    expect(strip(bare, null).reasoning).not.toContain("yours to read");
+  });
+
+  it("still says where the PR went on a row that was also sent", () => {
+    // SPEC §17.6 ranks the handoff above the status, and the sent branch
+    // returns first — so without this the one row that did both reads like an
+    // ordinary send.
+    const both = handed();
+    both.sent = { at: "2026-08-20T11:00:00.000Z", event: "COMMENT", url: null, auto: false };
+    const { reasoning, meta } = strip(both, null);
+    expect(reasoning).toContain("GitHub asks @maks for it now");
+    expect(meta.join(" ")).toContain("you handed this to @maks");
+  });
+
   it("beats a send, because it is the thing that moved the request", () => {
     const both = handed();
     both.sent = { at: "2026-08-20T11:00:00.000Z", event: "COMMENT", url: null, auto: false };
