@@ -988,6 +988,31 @@ describe("a review you settled, and were asked for again", () => {
     expect(after?.filed).toBeNull();
   });
 
+  it("drops the handoff too — the one claim a reopen disproves outright", async () => {
+    // Every line a handoff prints says GitHub is asking somebody else and no
+    // longer asking you. A reopen happens because GitHub asked *you* again, so
+    // leaving the record behind contradicts the event that caused it — and the
+    // next handoff would read `withdrewYours` off it and skip the withdrawal,
+    // claiming you were taken off a PR you are still on.
+    await saveArtifact(
+      settled({
+        status: "skipped" as const,
+        settledAt: "2026-08-24T10:00:00Z",
+        handoff: {
+          at: "2026-08-24T10:00:00Z",
+          to: "maks",
+          withdrewYours: true,
+          note: null,
+        },
+      }),
+    );
+    lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");
+
+    const after = await pollOnce();
+    expect(after?.status).toBe("ready");
+    expect(after?.handoff).toBeNull();
+  });
+
   it("reopens a row with no draft as awaiting one", async () => {
     await saveArtifact(settled({ run: null }));
     lastRequest.mockResolvedValue("2026-08-24T12:41:22Z");

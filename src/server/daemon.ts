@@ -171,6 +171,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     // Null, not absent: the poll found this PR, so it owes the machine a tap
     // for it — once there is something to tap you about (§9.8).
@@ -510,8 +511,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
         askedAgainAfterSettling(a, at)
           ? // `filed` goes with the status it explained: cerber's account of why
-            // this row was settled is not the story of a row that is back.
-            { ...a, status: reopenedStatus(a), settledAt: null, filed: null }
+            // this row was settled is not the story of a row that is back. So
+            // does `handoff`, and for a sharper reason: every line it prints
+            // says GitHub is asking somebody else and no longer asking you,
+            // which is the one fact a reopen has just disproved. Left behind it
+            // would also tell the next handoff your request was already
+            // withdrawn, and that one skips the withdrawal — so the row would
+            // claim you were taken off a PR you are still on.
+            { ...a, status: reopenedStatus(a), settledAt: null, filed: null, handoff: null }
           : a,
       );
       // The status is what says the write landed. `settledAt` cannot: a legacy

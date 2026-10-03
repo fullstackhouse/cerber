@@ -97,6 +97,10 @@ export function mergeConcurrentEdits(
     // Nor does a turn announce anything: the ledger is the poll's, and a turn
     // takes minutes, which is long enough for a poll to have stamped it.
     notified: current.notified,
+    // Nor does it hand a review to anybody. A handoff that landed while the
+    // turn ran has already moved the request on GitHub, so restoring the
+    // pre-turn `null` would erase the only local record of where the PR went.
+    handoff: current.handoff,
   };
 }
 

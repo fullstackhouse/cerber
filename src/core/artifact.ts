@@ -171,6 +171,38 @@ export const FiledInfoSchema = z.object({
 });
 export type FiledInfo = z.infer<typeof FiledInfoSchema>;
 
+/**
+ * You gave this review to somebody else.
+ *
+ * The opposite of `filed` in every way that matters: that one is a record of
+ * cerber noticing GitHub had moved past a draft, this one is a decision of
+ * yours that *moved* GitHub — the review request is theirs now and no longer
+ * yours. It is why the row is settled, so it outranks the status wherever the
+ * queue tags one.
+ *
+ * `note` is the comment that went on the PR announcing it, and null when none
+ * did — either you cleared the text, or posting it failed after the request had
+ * already moved, which is one of the half-done states a handoff can end in.
+ *
+ * The draft may go with it, if you ticked the box for that, in which case the
+ * row carries a `sent` record too. It posts as a COMMENT and never anything
+ * else: handing a PR over hands the judgement over with it, so a handoff forms
+ * no verdict of its own.
+ */
+export const HandoffInfoSchema = z.object({
+  at: z.string(),
+  /** The login GitHub now asks for. */
+  to: z.string(),
+  /** Whether cerber also took your own review request off the PR. */
+  withdrewYours: z.boolean().default(true),
+  /** The note posted on the PR, if one was. */
+  note: z
+    .object({ body: z.string(), url: z.string().nullable().default(null) })
+    .nullable()
+    .default(null),
+});
+export type HandoffInfo = z.infer<typeof HandoffInfoSchema>;
+
 /** Result of pulling a review forward onto a newer head commit. */
 export const RefreshInfoSchema = z.object({
   at: z.string(),
@@ -330,6 +362,8 @@ export const ArtifactSchema = z.object({
   sent: SentInfoSchema.nullable().default(null),
   /** Set when cerber filed this draft away itself, and why. Never on a sent one. */
   filed: FiledInfoSchema.nullable().default(null),
+  /** Set when you gave this review to somebody else. Mutually exclusive with `filed`. */
+  handoff: HandoffInfoSchema.nullable().default(null),
   /**
    * When this review was settled — marked `reviewed` or `skipped`, by you or by
    * cerber filing it. Null on anything not settled.

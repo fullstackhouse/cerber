@@ -8,7 +8,7 @@ import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.j
 import { beginReview, endReview } from "../runner/inflight.js";
 import { buildApp } from "./index.js";
 
-// The only GitHub write in the product. Stubbed so a test can assert it was
+// The only GitHub write that speaks as a review. Stubbed so a test can assert it was
 // *not* called, which is the whole subject of half this file.
 vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
@@ -66,6 +66,7 @@ function artifact(status: ArtifactStatus): Artifact {
     run: null,
     sent: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     refresh: null,
     calibration: null,

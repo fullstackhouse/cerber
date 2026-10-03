@@ -5,10 +5,13 @@ import {
   classifyReply,
   currentLogin,
   lastMentionOfYou,
+  fetchAssignableUsers,
   fetchPrDiff,
+  handOffReview,
   lastRequestOf,
   latestOwnReview,
   mentionsYou,
+  postIssueComment,
   resetLoginCache,
 } from "./gh.js";
 import { newSideLineText, splitDiffByFile } from "./diff.js";
@@ -492,5 +495,125 @@ describe("fetchPrDiff", () => {
       "not authenticated",
     );
     expect(exec).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handOffReview", () => {
+  const REF = { owner: "o", repo: "r", number: 7 };
+  const endpoint = "repos/o/r/pulls/7/requested_reviewers";
+  const argsOf = (call: number) => exec.mock.calls[call]?.[1] as string[];
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("asks them first, then takes you off", async () => {
+    exec.mockResolvedValue({ stdout: "{}" });
+    expect(await handOffReview(REF, "maks", "jacek")).toEqual({
+      withdrewYours: true,
+      withdrawError: null,
+    });
+    // The order is the error handling: a refusal on the way in leaves the PR
+    // exactly as it was, with you still on the hook and nothing to undo.
+    expect(argsOf(0)).toEqual(["api", endpoint, "--method", "POST", "-f", "reviewers[]=maks"]);
+    expect(argsOf(1)).toEqual(["api", endpoint, "--method", "DELETE", "-f", "reviewers[]=jacek"]);
+  });
+
+  it("does not take you off a PR it could not put them on", async () => {
+    exec.mockRejectedValueOnce(
+      Object.assign(new Error("failed"), {
+        stderr: "gh: Reviews may only be requested from collaborators. (HTTP 422)",
+      }),
+    );
+    await expect(handOffReview(REF, "stranger", "jacek")).rejects.toThrow("collaborators");
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed withdrawal instead of unpicking the request that worked", async () => {
+    // Two requested reviewers is a state GitHub understands and @maks is asked
+    // either way — so this says what it managed and leaves the rest alone.
+    exec.mockResolvedValueOnce({ stdout: "{}" }).mockRejectedValueOnce(
+      Object.assign(new Error("failed"), { stderr: "gh: Not Found (HTTP 404)" }),
+    );
+    const res = await handOffReview(REF, "maks", "jacek");
+    expect(res.withdrewYours).toBe(false);
+    expect(res.withdrawError).toContain("404");
+  });
+
+  it("skips the withdrawal when you are already off the PR", async () => {
+    // A second handoff. Asking GitHub to withdraw a request that is not there
+    // would fail, and this would then report you still listed when you are not.
+    exec.mockResolvedValue({ stdout: "{}" });
+    expect(await handOffReview(REF, "ewa", null)).toEqual({
+      withdrewYours: true,
+      withdrawError: null,
+    });
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(argsOf(0)).toContain("POST");
+  });
+});
+
+describe("postIssueComment", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("posts on the issues endpoint, which is the one GitHub does not call a review", async () => {
+    exec.mockResolvedValue({ stdout: JSON.stringify({ html_url: "https://gh/c/1" }) });
+    expect(await postIssueComment({ owner: "o", repo: "r", number: 7 }, "over to you")).toEqual({
+      url: "https://gh/c/1",
+    });
+    expect(exec.mock.calls[0]?.[1]).toEqual([
+      "api",
+      "repos/o/r/issues/7/comments",
+      "--method",
+      "POST",
+      "-f",
+      "body=over to you",
+    ]);
+  });
+
+  it("still counts as posted when the response is not readable", async () => {
+    exec.mockResolvedValue({ stdout: "" });
+    expect(await postIssueComment({ owner: "o", repo: "r", number: 7 }, "hi")).toEqual({ url: null });
+  });
+});
+
+describe("fetchAssignableUsers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("asks the endpoint a reader is allowed to ask, and drops bots", () => {
+    // `collaborators` answers nearly the same question but needs push access —
+    // exactly what a reviewer on somebody else's repo does not have.
+    exec.mockResolvedValue({ stdout: "" });
+    void fetchAssignableUsers({ owner: "o", repo: "r", number: 7 });
+    expect(exec.mock.calls[0]?.[1]).toEqual([
+      "api",
+      "repos/o/r/assignees?per_page=100",
+      "--paginate",
+      "--jq",
+      '.[] | select(.type != "Bot") | .login',
+    ]);
+  });
+
+  it("keeps the page size out of the fields, where it would make this a POST", () => {
+    // `gh api` switches the method the moment a `-f`/`-F` is present, and
+    // `POST …/assignees` is a 404 — which read, in the dialog, as "this repo
+    // has nobody in it" on a repo with six people in it.
+    exec.mockResolvedValue({ stdout: "" });
+    void fetchAssignableUsers({ owner: "o", repo: "r", number: 7 });
+    const args = exec.mock.calls[0]?.[1] as string[];
+    expect(args).not.toContain("-f");
+    expect(args).not.toContain("-F");
+  });
+
+  it("reads back one login per line", async () => {
+    exec.mockResolvedValue({ stdout: "maks\nada-w\n" });
+    expect(await fetchAssignableUsers({ owner: "o", repo: "r", number: 7 })).toEqual([
+      "maks",
+      "ada-w",
+    ]);
+  });
+
+  it("is empty rather than a list of one empty name", async () => {
+    // A repo with nobody assignable, and the blank line `gh` leaves behind.
+    exec.mockResolvedValue({ stdout: "\n" });
+    expect(await fetchAssignableUsers({ owner: "o", repo: "r", number: 7 })).toEqual([]);
   });
 });

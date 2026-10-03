@@ -86,6 +86,7 @@ function ready(comments: Comment[], headSha = "old-sha"): Artifact {
     run: null,
     sent: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     refresh: null,
     calibration: null,
@@ -177,6 +178,32 @@ describe("what a re-review does to the previous draft", () => {
   // fetch before it takes minutes — long enough for the user to have settled
   // the row. Marking it running would erase that decision before
   // `mergeRunResult` ever got to defend it.
+  it("keeps a handoff that landed while the run worked", async () => {
+    // By the time the fold runs, GitHub has already been told somebody else is
+    // reviewing this. Writing the run's `null` over the record leaves the row
+    // reading a bare "skipped", with nothing anywhere saying where the PR went
+    // — and the open-requests tab then tags it "you haven't replied".
+    await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
+    const handed = {
+      at: "2026-08-21T10:03:00.000Z",
+      to: "maks",
+      withdrewYours: true,
+      note: null,
+    };
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({
+        ...a,
+        status: "skipped" as const,
+        settledAt: handed.at,
+        handoff: handed,
+      }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.handoff).toEqual(handed);
+    expect(artifact.status).toBe("skipped");
+  });
+
   it("does not claim a row you settled while it was fetching", async () => {
     await saveArtifact({ ...ready([]), status: "awaiting", notified: null });
     claudeThat(async () => {});

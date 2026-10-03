@@ -259,6 +259,7 @@ async function performReview(
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the

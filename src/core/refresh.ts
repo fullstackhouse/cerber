@@ -95,6 +95,11 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
     notified: current.notified,
     calibration: current.calibration,
     filed: current.filed,
+    // A decision of the user's, like the status above it: a handoff that landed
+    // while the run worked has already moved the request on GitHub, and a run
+    // that wrote `null` over it would leave the row reading "skipped" with
+    // nothing anywhere saying who has the PR now.
+    handoff: current.handoff,
     chat: current.chat,
     preChat: current.preChat,
     pendingChat: current.pendingChat,

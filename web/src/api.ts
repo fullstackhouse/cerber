@@ -143,6 +143,35 @@ export const sendReview = (key: string, event: string) =>
     body: JSON.stringify({ event, confirm: true }),
   });
 
+/**
+ * Who this review could be handed to, for the dialog's suggestions. Read-only,
+ * and the name box works without it — so a caller treats a rejection as a line
+ * to show rather than a reason to stop.
+ */
+export const fetchHandoffCandidates = (key: string) =>
+  request<{ logins: string[] }>(`/api/reviews/${encodeURIComponent(key)}/reviewers`);
+
+/**
+ * Give this review to somebody else: GitHub's review request moves to them, the
+ * note (when there is one) goes up as a plain comment, and the row settles here.
+ *
+ * `postReview` sends the draft along with it as a COMMENT review — the ordinary
+ * send path, asked for from here.
+ *
+ * The one mutating route that does not resolve with a bare artifact: it resolves
+ * with the row as it now stands and, separately, whatever went wrong with the
+ * review and the note — because by then the request has already moved,
+ * so either failing is a thing to say rather than a reason to call this one.
+ */
+export const handOffReview = (
+  key: string,
+  body: { to: string; note: string; postReview: boolean },
+) =>
+  request<{ artifact: Artifact; noteError: string | null; sendError: string | null }>(
+    `/api/reviews/${encodeURIComponent(key)}/handoff`,
+    { method: "POST", body: JSON.stringify({ ...body, confirm: true }) },
+  );
+
 export const exportUrl = (key: string) => `/api/reviews/${encodeURIComponent(key)}/export`;
 
 export const fetchConfig = () => request<ConfigView>("/api/config");

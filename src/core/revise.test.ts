@@ -53,6 +53,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     calibration: null,
     chat: [],
@@ -248,6 +249,24 @@ describe("mergeConcurrentEdits", () => {
     const current = artifact({ comments: [comment({ id: "c1", body: "The user's own rewrite.", editedByUser: true })] });
     const merged = mergeConcurrentEdits(b, after, current);
     expect(merged.comments[0]!.body).toBe("The user's own rewrite.");
+  });
+
+  it("does not hand a review back after you gave it away mid-turn", () => {
+    // A turn revises a draft; it never moves a review request. One that landed
+    // while the turn ran has already told GitHub somebody else is reviewing
+    // this, so restoring the pre-turn `null` would erase the only local record
+    // of it — on a row whose request has genuinely moved.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const handed = { at: "2026-08-21T10:03:00.000Z", to: "maks", withdrewYours: true, note: null };
+    const merged = mergeConcurrentEdits(
+      b,
+      after,
+      artifact({ comments: [comment({ id: "c1" })], handoff: handed }),
+    );
+    expect(merged.handoff).toEqual(handed);
   });
 
   it("takes the turn's rewrite when the user did not touch it", () => {

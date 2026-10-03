@@ -1,19 +1,25 @@
 # AGENTS.md
 
 Cerber: AI code-review cockpit. Claude reviews PRs into local JSON artifacts;
-the user walks through them in a local React cockpit. **Hard rule: cerber never
-writes to GitHub except (a) an explicit, user-confirmed Send, or (b) daemon
-auto-send that the user explicitly enabled with --auto-send — approve-only,
-confidence-threshold-gated, every decision logged to autosend.ndjson. No
-pending reviews, no comments, no reactions — reviewing is read-only.**
+the user walks through them in a local React cockpit. **Hard rule: nothing
+reaches GitHub without a deliberate human act, and only three things ever do:
+(a) an explicit, user-confirmed Send, (b) daemon auto-send that the user
+explicitly enabled with --auto-send — approve-only, confidence-threshold-gated,
+every decision logged to autosend.ndjson, and (c) a handoff — one confirmed
+click that moves the review request to somebody else, posts the note saying so,
+and, only if you ticked the box for it, sends the draft along as a COMMENT
+review through Send's own composition. Auto-send can never hand off, and a
+handoff never forms a verdict. No pending reviews, no reactions, and reviewing
+itself is read-only.**
 
 ## Product principles
 
 - Fewest clicks wins every tie. A capability ships **on by default with a switch
   to turn it off**, never off with a switch to turn it on — source-backed
   review, the checkout, poll and auto-review all landed that way. The single
-  deliberate exception is the GitHub write path: Send stays a human click and
-  auto-send stays opt-in.
+  deliberate exception is the GitHub write path: Send stays a human click,
+  auto-send stays opt-in, and a handoff is a dialog you fill in rather than a
+  button that fires.
 - Never ship a default that half-works. If the obvious path (open cerber → see
   the PRs awaiting you, drafts already written) needs a manual step to be
   useful, the default is wrong; fix the default instead of documenting the step.
@@ -73,7 +79,10 @@ left unwritten. Code and tests win when they disagree.
 
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
-  gh client (shells out to `gh`, no tokens handled), diff utils,
+  gh client (shells out to `gh`, no tokens handled — and holds all three
+  writes, each named as what it is; `fetchAssignableUsers` is the read behind
+  the handoff's suggestions, and uses `assignees` rather than `collaborators`
+  because only the first works without push access), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
   matching each comment's line *text*, never a fuzzy guess), review revision
   (`revise.ts` — applies a chat turn's edits, refuses the user's own comments,
@@ -196,7 +205,23 @@ left unwritten. Code and tests win when they disagree.
 
 ## Don'ts
 
-- Don't add GitHub write calls anywhere except the (future) explicit send path
+- Don't add GitHub write calls outside the three that exist: Send (`submitReview`),
+  and a handoff's two (`handOffReview`, `postIssueComment`). A fourth needs the
+  hard rule at the top of this file rewritten in the same PR, not bent — and it
+  has to be the shape those three are: one human click, nothing inferred, and
+  the dialog saying what will happen before it does. A handoff's note is a plain
+  issue comment on purpose: `pulls/…/reviews` with a COMMENT event looks the
+  same in the thread and is a review everywhere that counts one, and only Send
+  may speak as a review.
+- Don't let a handoff form a verdict, and don't let it post the draft by
+  itself. It can carry the draft — that is what the box is for, and it goes
+  through `buildReviewPayload`/`submitReview` rather than a second composition —
+  but always as COMMENT, because handing a PR over hands the judgement over with
+  it. And the box stays off by default: a handoff is reachable from a row nobody
+  opened, where the draft is whatever the poll wrote, so defaulting it on would
+  publish an unread review under the user's name. That is the one place a
+  capability here does not ship on-by-default, and the reason is the same one
+  Send exists for.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
