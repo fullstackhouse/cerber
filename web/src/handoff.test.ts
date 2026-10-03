@@ -135,6 +135,13 @@ describe("matchCandidates", () => {
     ]);
   });
 
+  it("puts a name typed in full ahead of a longer one that contains it", () => {
+    // Enter takes the top of this list. A recent `ada-w` outranking an exact
+    // `ada` is how a review gets handed to the wrong person.
+    const both = candidates(["ada"], ["ada-w"]);
+    expect(matchCandidates(both, "ada").map((c) => c.login)).toEqual(["ada", "ada-w"]);
+  });
+
   it("ignores case and a leading @, because both are how people type", () => {
     expect(matchCandidates(all, "@ADA").map((c) => c.login)).toEqual(["ada-w"]);
   });

@@ -657,7 +657,9 @@ What MUST survive any run, on both its success and failure paths, is every
 run worked (together with the `settledAt` that dates it — the stamp travels
 with the status, so a settle keeps both halves of itself and a forced
 re-review clears both), a `handoff` (§14.6 — by then GitHub has already been
-told somebody else is reviewing this), the `filed` record, the `calibration`,
+told somebody else is reviewing this; a *forced* re-review drops it along with
+`filed` and `settledAt`, because forcing one is asking for the row back), the
+`filed` record, the `calibration`,
 and the chat transcript. A chat turn's fold (§12.5) carries the same `handoff`
 for the same reason, and the handoff route refuses to start while one is in
 flight so the rest of that fold never has to.

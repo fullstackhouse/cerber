@@ -117,6 +117,15 @@ export function matchCandidates(all: Candidate[], typed: string): Candidate[] {
   const q = asLogin(typed).toLowerCase();
   if (!q) return all;
   const hits = all.filter((c) => c.login.toLowerCase().includes(q));
+  const exact = (c: Candidate) => c.login.toLowerCase() === q;
   const starts = (c: Candidate) => c.login.toLowerCase().startsWith(q);
-  return [...hits.filter(starts), ...hits.filter((c) => !starts(c))];
+  // The exact match first, ahead even of a recent. Enter takes the top of this
+  // list, so without it somebody who types `ada` in full — and has handed to
+  // `ada-w` before — is handed the longer name, and the second Enter sends the
+  // review to the wrong person.
+  return [
+    ...hits.filter(exact),
+    ...hits.filter((c) => !exact(c) && starts(c)),
+    ...hits.filter((c) => !starts(c)),
+  ];
 }

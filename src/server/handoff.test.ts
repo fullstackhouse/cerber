@@ -434,6 +434,18 @@ describe("handing the draft over with it", () => {
     expect(saved?.handoff?.to).toBe("maks");
   });
 
+  it("will not post a review on a row that has nothing drafted", async () => {
+    // The dialog hides the box there, but the dialog is not the guard — a stale
+    // tab or a direct call would submit a body of nothing but cerber's footer.
+    await saveArtifact(artifact({ status: "awaiting", summary: "", comments: [], run: null }));
+    const res = await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect(submit).not.toHaveBeenCalled();
+    const saved = await loadArtifact(ID);
+    expect(saved?.status).toBe("skipped");
+    expect(saved?.handoff?.to).toBe("maks");
+  });
+
   it("never submits a second review on a row that already sent one", async () => {
     await saveArtifact(
       withComment({

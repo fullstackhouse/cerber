@@ -971,7 +971,13 @@ export async function buildApp(
     let sent: Artifact["sent"] = null;
     let payload: ReturnType<typeof buildReviewPayload> | null = null;
     const alreadySent = postReview ? ((await loadArtifactByKey(key))?.sent ?? artifact.sent) : null;
-    if (postReview && !alreadySent) {
+    // And there has to be a review to post. The dialog only offers the box on a
+    // row that has one, but the dialog is not the guard: a stale tab or a direct
+    // call would otherwise submit a body that is nothing but cerber's footer,
+    // under the user's name, on a PR nobody has drafted a word about.
+    const somethingToSay =
+      artifact.summary !== "" || artifact.comments.some((cm) => cm.status !== "dropped");
+    if (postReview && !alreadySent && somethingToSay) {
       payload = buildReviewPayload(artifact, "COMMENT");
       try {
         const { url } = await submitReview(ref, {
