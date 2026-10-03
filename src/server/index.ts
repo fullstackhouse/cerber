@@ -66,7 +66,7 @@ const HandoffSchema = z.object({
   to: z
     .string()
     .transform((s) => s.trim().replace(/^@/, ""))
-    .refine((s) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(s), {
+    .refine((s) => /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$/.test(s), {
       message:
         "`to` must be one GitHub login — a handoff names a person, and asking a team is a different thing cerber does not do yet",
     }),
@@ -884,10 +884,11 @@ export async function buildApp(
    * Give this review to somebody else: GitHub's review request moves to them, a
    * note in the conversation says so, and the row settles here.
    *
-   * Two writes, neither of them a review: Send stays the one path by which a
-   * review of yours reaches anybody, and the note this posts is a plain comment.
-   * The draft is never part of it either — handing a PR over is deciding not to
-   * review it, so what the note announces is the handoff.
+   * Up to three writes. Two are never a review: the request swap, and the note,
+   * which is a plain issue comment. The third is the draft, and only when
+   * `postReview` asked for it — composed and submitted by the send path itself
+   * rather than a second composition, and always as COMMENT, because handing a
+   * PR over hands the judgement over with it.
    */
   app.post("/api/reviews/:key/handoff", async (c) => {
     const parsed = HandoffSchema.safeParse(await c.req.json().catch(() => null));
@@ -906,11 +907,19 @@ export async function buildApp(
     const key = c.req.param("key");
     const artifact = await loadArtifactByKey(key);
     if (!artifact) return c.json({ error: "not found" }, 404);
-    // Not while a run is rewriting the draft. The handoff doesn't post the
-    // draft, but it settles the row, and settling one out from under a run that
-    // is about to report on it is the same race the send path refuses.
+    // Not while a run is rewriting the draft. The handoff settles the row, and
+    // settling one out from under a run that is about to report on it is the
+    // same race the send path refuses.
     if (inFlight(artifact)) {
       return c.json({ error: "a review of this PR is running — wait for it to finish" }, 409);
+    }
+    // Nor while a chat turn is being answered. A turn's result is folded onto
+    // whatever the artifact says when it lands, and the fold is written for a
+    // row nobody gave away mid-turn: every field a handoff sets would have to
+    // survive it. One of them does now, and refusing here is what keeps the
+    // rest — the send record above all — from needing to.
+    if (turnInFlight(artifact)) {
+      return c.json({ error: "the reviewer is answering a question about this review — wait for it to land" }, 409);
     }
 
     let me: string;

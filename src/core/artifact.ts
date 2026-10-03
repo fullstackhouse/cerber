@@ -182,9 +182,12 @@ export type FiledInfo = z.infer<typeof FiledInfoSchema>;
  *
  * `note` is the comment that went on the PR announcing it, and null when none
  * did — either you cleared the text, or posting it failed after the request had
- * already moved, which is the one half-done state a handoff can end in. The
- * draft is never part of it: handing a PR over is deciding not to review it,
- * and what reaches GitHub as a review still only ever goes through Send.
+ * already moved, which is one of the half-done states a handoff can end in.
+ *
+ * The draft may go with it, if you ticked the box for that, in which case the
+ * row carries a `sent` record too. It posts as a COMMENT and never anything
+ * else: handing a PR over hands the judgement over with it, so a handoff forms
+ * no verdict of its own.
  */
 export const HandoffInfoSchema = z.object({
   at: z.string(),

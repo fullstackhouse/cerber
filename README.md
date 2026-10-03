@@ -13,8 +13,9 @@ with it.
 **Nothing reaches GitHub until you explicitly say so.** Reviewing is 100% local
 and read-only; three things can write, each one a click you make — the Send
 button, opt-in daemon auto-send you turn on yourself, and handing a review to
-somebody else. Only Send ever speaks as a *review*, and it goes out under your
-own account, as your review, because you decided each line of it should.
+somebody else. A review only ever goes out under your own account because you
+decided it should: Send posts the one you vouched for, and a handoff posts the
+draft only if you ticked the box to send it along, always as a comment.
 
 That gate is the whole point, and the reason this is not another review bot:
 

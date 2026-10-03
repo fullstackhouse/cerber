@@ -1470,10 +1470,10 @@ const suggestedNote = (login: string) =>
  * Give this review to somebody else.
  *
  * Two things leave this machine when the button is pressed — GitHub's review
- * request moves to them, and the note goes up as a plain comment — so the dialog
- * names both before either happens. What it does not do is post the draft:
- * handing a PR over is deciding not to review it, and Send stays the only way a
- * review of yours reaches anybody.
+ * request moves to them, and the note goes up as a plain comment — and a third
+ * does if the box for it is ticked: the draft, as a COMMENT review. The dialog
+ * names each before any of them happens, and shows the body of the third, which
+ * is what ticking the box is for.
  *
  * A real `<dialog>`, opened modally. The page behind it is a review you are
  * deciding *not* to read, so it should stop taking the keys — and the element
@@ -1516,6 +1516,7 @@ function HandoffDialog({
   // is on screen before the button is.
   const [withReview, setWithReview] = useState(false);
   const [preview, setPreview] = useState<SendPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   // Which suggestion the keyboard is on; -1 is none, and means Enter confirms
   // rather than picks.
@@ -1530,16 +1531,43 @@ function HandoffDialog({
   // What the draft would post. Fetched when it is asked for and not before —
   // the common handoff posts nothing, and composing a body for it would be work
   // for a string nobody reads.
+  //
+  // Keyed on what the body is *made of*, not on the artifact object, which a
+  // poll replaces every few seconds: the send panel does the same, for the same
+  // reason. Without it a chat turn landing after the preview loaded would leave
+  // the box showing one body while the button posts another.
+  const bodySource = withReview
+    ? JSON.stringify([
+        artifact.bodyOverride,
+        artifact.summary,
+        artifact.chapters.map((ch) => [ch.title, ch.explanation]),
+        artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+      ])
+    : "";
+
   useEffect(() => {
     if (!withReview) return;
     let stale = false;
+    setPreviewError(null);
     fetchSendPreview(reviewKey, "COMMENT")
       .then((p) => !stale && setPreview(p))
-      .catch(() => !stale && setPreview(null));
+      .catch((e) => {
+        // Said, not swallowed. Reported as null it rendered as "building the
+        // body…" for ever, over a live button — so the one thing ticking the
+        // box is supposed to buy you, seeing what posts, could silently fail
+        // and the review would go up unread.
+        if (stale) return;
+        setPreview(null);
+        setPreviewError(String(e?.message ?? e));
+      });
     return () => {
       stale = true;
     };
-  }, [withReview, reviewKey]);
+  }, [withReview, reviewKey, bodySource]);
+
+  // Whether the body about to be posted is actually on screen. Nothing to show
+  // and nothing to post are the same thing here; a tick with no preview is not.
+  const bodyShown = !withReview || preview != null;
 
   const all = useMemo(() => candidates(people ?? [], recent), [people, recent]);
   const shown = useMemo(() => matchCandidates(all, to), [all, to]);
@@ -1584,8 +1612,8 @@ function HandoffDialog({
   }, []);
 
   const confirm = () => {
-    // The button is disabled for both, but Enter in the name box is not.
-    if (busy || !ready) return;
+    // The button is disabled for all three, but Enter in the name box is not.
+    if (busy || !ready || !bodyShown) return;
     setBusy(true);
     setError(null);
     // Only the failure path comes back here — a handoff that lands closes this
@@ -1772,7 +1800,12 @@ function HandoffDialog({
                   are handing over the verdict, so it is @{ready ? login : "them"}'s to make. The
                   findings keep their grades.
                 </p>
-                {preview ? (
+                {previewError ? (
+                  <p className="error">
+                    cerber could not build the body this would post, so it will not post one:{" "}
+                    {previewError}
+                  </p>
+                ) : preview ? (
                   <pre className="body-preview">{preview.body}</pre>
                 ) : (
                   <p className="faint">building the body…</p>
@@ -1795,7 +1828,7 @@ function HandoffDialog({
         </p>
 
         <div className="card-actions">
-          <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready}>
+          <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready || !bodyShown}>
             <Icon name="arrowRight" />
             {busy ? "handing over…" : ready ? `hand off to @${login}` : "hand off"}
             <Key>⌘↵</Key>

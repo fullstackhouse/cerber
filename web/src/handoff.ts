@@ -11,8 +11,14 @@ export const HANDOFF_KEY = "cerber.handoff.recent";
 /** How many to keep: a list you glance at, not a directory of the org. */
 export const MAX_RECENT = 5;
 
-/** A GitHub login, as GitHub itself allows: 1-39 of alphanumerics and inner hyphens. */
-const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+/**
+ * A GitHub login, as GitHub itself allows: 1-39 characters, alphanumeric at
+ * each end, hyphens and underscores inside. The underscore is not decoration —
+ * an Enterprise Managed User's login carries one (`mona_acme`), and the
+ * suggestion list offers whatever the repo returns. Without it the box would
+ * offer a name and then refuse to send it.
+ */
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$/;
 
 export const isLogin = (s: string) => LOGIN.test(s);
 

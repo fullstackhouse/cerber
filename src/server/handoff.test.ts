@@ -256,6 +256,34 @@ describe("POST /api/reviews/:key/handoff — giving a review away", () => {
     expect((await loadArtifact(ID))?.handoff).toBeNull();
   });
 
+  it("refuses while the reviewer is answering a question about this review", async () => {
+    // A chat turn's result is folded onto whatever the artifact says when it
+    // lands, and that fold is written for a row nobody gave away mid-turn.
+    await saveArtifact(
+      artifact({
+        pendingChat: {
+          message: "why is this a blocker?",
+          refs: [],
+          startedAt: "2026-08-21T10:00:00.000Z",
+          progress: [],
+          error: null,
+        },
+      }),
+    );
+    const res = await handoff({ to: "maks", confirm: true });
+    expect(res.status).toBe(409);
+    expect(swap).not.toHaveBeenCalled();
+  });
+
+  it("takes a login with an underscore, which the suggestions can offer", async () => {
+    // GitHub Enterprise Managed Users carry one, and `/assignees` returns them
+    // — so refusing the shape meant offering a name the form would not send.
+    await saveArtifact(artifact());
+    const res = await handoff({ to: "mona_acme", confirm: true });
+    expect(res.status).toBe(200);
+    expect(swap).toHaveBeenCalledWith(REF, "mona_acme", "jacek");
+  });
+
   it("refuses while a run is rewriting the draft", async () => {
     await saveArtifact(artifact({ status: "running" }));
     const res = await handoff({ to: "maks", confirm: true });

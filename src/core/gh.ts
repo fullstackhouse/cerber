@@ -690,10 +690,12 @@ export async function postIssueComment(ref: PrRef, body: string): Promise<{ url:
 
 /**
  * THE ONLY GITHUB WRITE THAT SPEAKS AS A REVIEW.
- * Submits a review in one shot. Must only ever be called from an explicit
- * user action (cockpit Send button / `cerber send` after confirmation).
+ * Submits a review in one shot. Must only ever be called from a human act:
+ * the cockpit's Send button, `cerber send` after confirmation, opt-in
+ * auto-send, or a handoff that was ticked to carry the draft — which composes
+ * through this same path and always as COMMENT.
  * The two writes above are the other things that reach GitHub — a handoff's
- * request swap and its note — and neither of them is a review.
+ * request swap and its note — and neither of those is a review.
  */
 export async function submitReview(
   ref: PrRef,

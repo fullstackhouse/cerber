@@ -17,6 +17,13 @@ describe("isLogin", () => {
     expect(isLogin("dependabot-preview")).toBe(true);
   });
 
+  it("takes an Enterprise Managed User's login", () => {
+    // `mona_acme` is the shape an EMU org issues, and `/assignees` hands them
+    // back — so a pattern without `_` offered names the box then refused.
+    expect(isLogin("mona_acme")).toBe(true);
+    expect(isLogin("a_b")).toBe(true);
+  });
+
   it("refuses what would reach GitHub as something else", () => {
     // A team is a different request entirely, and the rest would be a write
     // built from whatever happened to be in the box.

@@ -39,10 +39,11 @@ GitHub. Everything before that click is read-only with respect to GitHub.
 act, and only three things ever do: (a) an explicit, user-confirmed Send, (b)
 daemon auto-send that the user explicitly enabled with `--auto-send` —
 approve-only, confidence-threshold-gated, every decision logged, and (c) a
-handoff — one confirmed click that moves the review request to another person and
-posts the plain comment saying so (§14.6). Send is the only one of the three that
-speaks as a review; auto-send can never hand off. No pending reviews, no
-reactions. Reviewing itself is read-only.
+handoff — one confirmed click that moves the review request to another person,
+posts the plain comment saying so, and, only when the user ticked the box for it,
+sends the draft along as a COMMENT review through (a)'s own composition (§14.6).
+Auto-send can never hand off, and a handoff never forms a verdict. No pending
+reviews, no reactions. Reviewing itself is read-only.
 
 ## 2. Goals and Non-Goals
 
@@ -1338,8 +1339,9 @@ one.
 
 Submitting a review (`POST …/pulls/N/reviews`) is one shot — body, event and all
 inline comments in a single request, no retry, no partial send. Reachable from
-exactly three places: the cockpit send (requires `confirm: true` in the request), `cerber
-send` (interactive `[y/N]` unless `--yes`), and daemon auto-send (§15).
+exactly four places, every one of them a human act: the cockpit send (requires `confirm: true` in the request), `cerber
+send` (interactive `[y/N]` unless `--yes`), daemon auto-send (§15), and a
+handoff asked to carry the draft (§14.6 — this same composition, always COMMENT).
 
 Payload construction (pure, previewable without side effects):
 
