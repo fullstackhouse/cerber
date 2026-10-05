@@ -38,6 +38,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     refresh: null,
     filed: null,
     handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
   chat: [],
@@ -70,7 +71,7 @@ describe("evaluateAutoSend", () => {
     const finding = {
       id: "1", path: "f", line: 1, body: "broken", chapterId: null,
       severity: "blocker" as const, origin: "ai" as const, status: "draft" as const,
-      editedByUser: false, originalLine: null, drifted: false,
+      editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null,
     };
     const d = evaluateAutoSend(makeArtifact({ comments: [finding] }), 90);
     expect(d.eligible).toBe(false);
@@ -81,7 +82,7 @@ describe("evaluateAutoSend", () => {
     const c = (severity: "blocker" | "minor" | "nit", status: "draft" | "dropped") => ({
       id: severity, path: "f", line: 1, body: "x", chapterId: null,
       severity, origin: "ai" as const, status, editedByUser: false,
-      originalLine: null, drifted: false,
+      originalLine: null, drifted: false, alreadyRaised: null,
     });
     expect(
       evaluateAutoSend(makeArtifact({ comments: [c("blocker", "dropped")] }), 90).eligible,
@@ -90,6 +91,39 @@ describe("evaluateAutoSend", () => {
       evaluateAutoSend(makeArtifact({ comments: [c("minor", "draft"), c("nit", "draft")] }), 90)
         .eligible,
     ).toBe(true);
+  });
+
+  it("leaves out a duplicate nobody decided about, and says so in the log line", () => {
+    const dup = {
+      id: "1", path: "f", line: 1, body: "repeat", chapterId: null,
+      severity: "minor" as const, origin: "ai" as const, status: "draft" as const,
+      editedByUser: false, originalLine: null, drifted: false,
+      alreadyRaised: {
+        remarkId: "T_1", by: "someone", at: "x", url: null, reason: "same",
+        where: { kind: "thread" as const, path: "f", line: 1, state: "open" as const, replyTo: "1" },
+        decision: null, replied: null,
+      },
+    };
+    const d = evaluateAutoSend(makeArtifact({ comments: [dup] }), 90);
+    expect(d.eligible).toBe(true);
+    expect(d.reason).toContain("1 finding(s) already raised by another reviewer left out");
+
+    // A reply is a person's decision to answer somebody; auto-send never posts one.
+    const reply = { ...dup, alreadyRaised: { ...dup.alreadyRaised, decision: "reply" as const } };
+    const r = evaluateAutoSend(makeArtifact({ comments: [reply] }), 90);
+    expect(r.eligible).toBe(false);
+    expect(r.reason).toContain("only a human Send posts replies");
+  });
+
+  it("waits for a human when the check for duplicates could not run", () => {
+    const d = evaluateAutoSend(
+      makeArtifact({
+        raisedCheck: { at: "t", checkingSince: null, remarks: [], findings: [], error: "gh: rate limited" },
+      }),
+      90,
+    );
+    expect(d.eligible).toBe(false);
+    expect(d.reason).toContain("gh: rate limited");
   });
 
   it("rejects already-sent and non-ready artifacts", () => {
@@ -108,10 +142,10 @@ describe("computeCalibration", () => {
   it("counts AI comment outcomes and user additions", () => {
     const a = makeArtifact({
       comments: [
-        { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
-        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false },
-        { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     expect(computeCalibration(a, "COMMENT")).toEqual({

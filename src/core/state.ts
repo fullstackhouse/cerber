@@ -185,7 +185,8 @@ export async function updateArtifactByKey(
 
 /**
  * Clear AI work left in flight by a process that died mid-run — a review marked
- * "running", or a chat turn still waiting for its answer. Nothing in a freshly
+ * "running", a chat turn still waiting for its answer, or a check for findings
+ * others already raised (`raisedCheck.checkingSince`). Nothing in a freshly
  * started process is running, so anything still marked so is a leftover; without
  * this it stays wedged forever, with no way to retry it from the cockpit. A
  * `cerber review` running in another terminal is the one false positive; it
@@ -209,7 +210,8 @@ export async function reconcileRunning(
     const stuckRun = artifact.status === "running";
     const stuckChat =
       artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;
-    if (!stuckRun && !stuckChat) continue;
+    const stuckCheck = artifact.raisedCheck?.checkingSince != null;
+    if (!stuckRun && !stuckChat && !stuckCheck) continue;
     await saveArtifact({
       ...artifact,
       status: stuckRun ? "failed" : artifact.status,
@@ -221,6 +223,9 @@ export async function reconcileRunning(
       pendingChat: stuckChat
         ? { ...stuckChat, error: "interrupted — cerber restarted while this turn was running" }
         : artifact.pendingChat,
+      // A check that died with the process is simply not running: nothing to
+      // report, and the next open starts another.
+      raisedCheck: artifact.raisedCheck && { ...artifact.raisedCheck, checkingSince: null },
     });
     cleared++;
   }

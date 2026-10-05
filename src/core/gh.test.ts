@@ -12,6 +12,12 @@ import {
   latestOwnReview,
   mentionsYou,
   postIssueComment,
+  postReplies,
+  priorRemarks,
+  fetchPriorRemarks,
+  RawPrReview,
+  RawReviewThread,
+  replyInThread,
   resetLoginCache,
 } from "./gh.js";
 import { newSideLineText, splitDiffByFile } from "./diff.js";
@@ -615,5 +621,149 @@ describe("fetchAssignableUsers", () => {
     // A repo with nobody assignable, and the blank line `gh` leaves behind.
     exec.mockResolvedValue({ stdout: "\n" });
     expect(await fetchAssignableUsers({ owner: "o", repo: "r", number: 7 })).toEqual([]);
+  });
+});
+
+describe("priorRemarks", () => {
+  const people = { you: "me", author: "author" };
+  const thread = (over: Partial<RawReviewThread> = {}, by = "someone", typename = "User"): RawReviewThread => ({
+    id: "T_1",
+    isResolved: false,
+    isOutdated: false,
+    path: "src/a.ts",
+    line: 4,
+    comments: {
+      nodes: [
+        {
+          fullDatabaseId: "4100000001",
+          url: "https://gh/t/1",
+          createdAt: "2026-09-30T10:00:00Z",
+          body: "this double-counts",
+          author: { login: by, __typename: typename },
+        },
+      ],
+    },
+    ...over,
+  });
+  const review = (over: Partial<RawPrReview> = {}): RawPrReview => ({
+    id: "R_1",
+    state: "COMMENTED",
+    submittedAt: "2026-09-30T11:00:00Z",
+    url: "https://gh/r/1",
+    body: "Found two problems.",
+    author: { login: "someone", __typename: "User" },
+    ...over,
+  });
+
+  it("reads a thread by its first comment, with what a reply needs", () => {
+    expect(priorRemarks({ threads: [thread()], reviews: [] }, people)).toEqual([
+      {
+        kind: "thread",
+        id: "T_1",
+        by: "someone",
+        bot: false,
+        at: "2026-09-30T10:00:00Z",
+        body: "this double-counts",
+        url: "https://gh/t/1",
+        path: "src/a.ts",
+        line: 4,
+        state: "open",
+        replyTo: "4100000001",
+      },
+    ]);
+  });
+
+  it("calls a thread resolved over outdated, and outdated over open", () => {
+    const states = priorRemarks(
+      {
+        threads: [
+          thread({ id: "a", isResolved: true, isOutdated: true }),
+          thread({ id: "b", isOutdated: true }),
+          thread({ id: "c" }),
+        ],
+        reviews: [],
+      },
+      people,
+    ).map((r) => (r.kind === "thread" ? r.state : null));
+    expect(states).toEqual(["resolved", "outdated", "open"]);
+  });
+
+  it("leaves out you and the author, case and all, and keeps bots", () => {
+    const remarks = priorRemarks(
+      {
+        threads: [thread({ id: "mine" }, "Me"), thread({ id: "theirs" }, "author"), thread({ id: "bot" }, "a-bot", "Bot")],
+        reviews: [review({ id: "my-review", author: { login: "me" } })],
+      },
+      people,
+    );
+    expect(remarks.map((r) => [r.id, r.bot])).toEqual([["bot", true]]);
+  });
+
+  it("reads review bodies that say something, and skips empty and pending ones", () => {
+    const remarks = priorRemarks(
+      {
+        threads: [],
+        reviews: [review(), review({ id: "empty", body: "  " }), review({ id: "pending", submittedAt: null })],
+      },
+      people,
+    );
+    expect(remarks.map((r) => r.id)).toEqual(["R_1"]);
+  });
+});
+
+describe("fetchPriorRemarks", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("asks GraphQL once, for the threads and the reviews together", async () => {
+    exec.mockResolvedValue({
+      stdout: JSON.stringify({
+        data: { repository: { pullRequest: { reviewThreads: { nodes: [] }, reviews: { nodes: [] } } } },
+      }),
+    });
+    expect(await fetchPriorRemarks({ owner: "o", repo: "r", number: 7 }, { you: "me", author: "a" })).toEqual([]);
+    expect(exec).toHaveBeenCalledTimes(1);
+    const args = exec.mock.calls[0]?.[1] as string[];
+    expect(args.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(args.join(" ")).toContain("isResolved");
+  });
+
+  it("throws rather than reporting silence when GitHub returned no PR", async () => {
+    exec.mockResolvedValue({ stdout: JSON.stringify({ data: { repository: null } }) });
+    await expect(
+      fetchPriorRemarks({ owner: "o", repo: "r", number: 7 }, { you: "me", author: "a" }),
+    ).rejects.toThrow("no pull request");
+  });
+});
+
+describe("replyInThread / postReplies", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("posts on the thread's replies endpoint", async () => {
+    exec.mockResolvedValue({ stdout: JSON.stringify({ html_url: "https://gh/reply/1" }) });
+    expect(await replyInThread({ owner: "o", repo: "r", number: 7 }, "4100000001", "and here too")).toEqual({
+      url: "https://gh/reply/1",
+    });
+    expect(exec.mock.calls[0]?.[1]).toEqual([
+      "api",
+      "repos/o/r/pulls/7/comments/4100000001/replies",
+      "--method",
+      "POST",
+      "-f",
+      "body=and here too",
+    ]);
+  });
+
+  it("lets each reply fail on its own", async () => {
+    exec
+      .mockRejectedValueOnce(Object.assign(new Error("boom"), { stderr: "HTTP 404" }))
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ html_url: "https://gh/reply/2" }) });
+    const outcomes = await postReplies({ owner: "o", repo: "r", number: 7 }, [
+      { commentId: "c1", replyTo: "1", body: "one" },
+      { commentId: "c2", replyTo: "2", body: "two" },
+    ]);
+    expect(outcomes.map((o) => [o.commentId, o.url, o.error != null])).toEqual([
+      ["c1", null, true],
+      ["c2", "https://gh/reply/2", false],
+    ]);
   });
 });

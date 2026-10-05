@@ -36,13 +36,18 @@ edits, discusses and finally — by an explicit click — sends the review to
 GitHub. Everything before that click is read-only with respect to GitHub.
 
 **The one hard boundary:** nothing reaches GitHub without a deliberate human
-act, and only three things ever do: (a) an explicit, user-confirmed Send, (b)
+act, and only three things ever do: (a) an explicit, user-confirmed Send —
+which, for a finding another reviewer already raised, MAY answer in their
+thread instead of opening a second one, but only where the user chose that on
+the finding (§14.7), (b)
 daemon auto-send that the user explicitly enabled with `--auto-send` —
 approve-only, confidence-threshold-gated, every decision logged, and (c) a
 handoff — one confirmed click that moves the review request to another person,
 posts the plain comment saying so, and, only when the user ticked the box for it,
-sends the draft along as a COMMENT review through (a)'s own composition (§14.6).
-Auto-send can never hand off, and a handoff never forms a verdict. No pending
+sends the draft along as a COMMENT review through (a)'s own composition (§14.6),
+thread replies the user chose included.
+Auto-send can never hand off or reply in a thread, and a handoff never forms a
+verdict. No pending
 reviews, no reactions. Reviewing itself is read-only.
 
 ## 2. Goals and Non-Goals
@@ -198,6 +203,7 @@ absent on read and materialize with the stated value.
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
 | `notified` | `{ at, drafted }` \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a record = already announced and *what* was said, absent = never meant to be announced |
 | `refresh` | RefreshInfo \| null | default `null` |
+| `raisedCheck` | RaisedCheck \| null | default `null`; the last comparison of the draft with what others already said on the PR (§14.7) — null: never checked |
 | `calibration` | Calibration \| null | default `null` |
 | `chat` | ChatTurn[] | default `[]`; never sent to GitHub |
 | `pendingChat` | PendingChat \| null | default `null` |
@@ -229,6 +235,7 @@ chapter (enforced by de-duplication on ingest, §11.6).
 | `editedByUser` | boolean | default `false`; set when the user rewrites an AI comment (a calibration signal, and an ownership marker for chat, §12.4) |
 | `originalLine` | int \| null | default `null`; where the comment was originally written when a refresh moved it |
 | `drifted` | boolean | default `false`; the commented line is no longer in the diff, so the comment cannot post inline |
+| `alreadyRaised` | AlreadyRaised \| null | default `null`; another reviewer already raised the same defect on the PR (§14.7). Set on `ai` comments only |
 
 Comments are drafts. They MUST NOT reach GitHub except inside an explicitly
 sent review. Both `draft` and `approved` comments are included in a send;
@@ -281,6 +288,22 @@ it.
 
 **RefreshInfo:** `at`, `fromSha`, `toSha` REQUIRED; `moved`, `drifted`
 counters default `0`.
+
+**AlreadyRaised:** `remarkId` (GitHub node id of the thread or review), `by`,
+`at`, `where`, `reason` REQUIRED; `url` default `null`; `decision`
+(`send` \| `reply` \| null) default `null` — null is "not decided", which Send
+reads as the default for the place (§14.7); `replied` (`{at, url}`) default
+`null`, set when Send posted the reply. `where` is a union on `kind`:
+`{kind: "thread", path, line | null, state ∈ {open, resolved, outdated},
+replyTo}` — `replyTo` the REST id of the thread's first comment, and resolved
+wins over outdated — or `{kind: "review"}` for a review body. Dropping is the
+comment's own `status`, not a decision here.
+
+**RaisedCheck:** `at` (last finished or failed, null while the first runs),
+`checkingSince` (non-null while a detached check runs; cleared by startup
+reconciliation like a stuck run), `remarks` and `findings` (the ids compared
+so far — what makes the check incremental), `error` (why the last check could
+not finish; the matches from before it stand). All defaulted.
 
 **Calibration** (written at send time, §14.4): `aiRecommendation` (nullable),
 `aiConfidence` (nullable), `sentEvent`, `aiCommentsTotal`,
@@ -1306,7 +1329,8 @@ specification-level defect. Auth is entirely `gh`'s. Reads used: PR view, PR
 diff, review-request search (`--review-requested=@me`, open, non-archived,
 limit 50), issue-comment pagination, PR review listing, review-request
 listing, the review-request timeline (GraphQL, one call, for the reopen check
-of §9.6), org/team membership probes, current login (cached per process,
+of §9.6), the PR's review threads with their resolution state and its review
+bodies (GraphQL, one call, last 100 of each, for §14.7), org/team membership probes, current login (cached per process,
 cache dropped on failure). Membership probes MUST rethrow anything that is not a
 clean 404 — a missing scope or an outage must never read as membership (and a
 `pending` team invitation is not membership).
@@ -1350,8 +1374,21 @@ exactly four places, every one of them a human act: the cockpit send (requires `
 send` (interactive `[y/N]` unless `--yes`), daemon auto-send (§15), and a
 handoff asked to carry the draft (§14.6 — this same composition, always COMMENT).
 
+A Send MAY carry **replies** besides the review: one `POST
+…/pulls/N/comments/{replyTo}/replies` per finding the user marked "reply in
+their thread" (§14.7). They are posted **after** the review and only once it
+succeeded — a failed review leaves nothing behind for a retry to post twice —
+and each MAY fail on its own: the artifact is already `sent`, the reply's
+`alreadyRaised.replied` stays null, and the response carries `replyError`
+naming the failures. Replies are never posted except as part of a Send, and
+never by auto-send (§15.2).
+
 Payload construction (pure, previewable without side effects):
 
+- Comments somebody else already raised are taken out first, by the one rule
+  the cockpit also uses (`sendTreatment`, §14.7): **held** ones are not
+  posted at all, and **reply** ones become the replies above. The payload
+  lists both (`held`, `replies`) so a preview can say so.
 - Active comments (non-dropped) split into **inline** — `!drifted`,
   `line != null`, and the line is an anchorable new-side line of the stored
   diff — and **folded**, which land in the review body under
@@ -1443,7 +1480,8 @@ than anything that stops a handoff.
 
 **The draft may go with it, when asked for.** `postReview` sends the draft
 through §14.4's own composition and submission — same body, same inline
-anchoring, `bodyOverride` honoured — so there is one way a review is built and
+anchoring, `bodyOverride` honoured, the same held findings and the same
+replies (§14.7), posted only if the review went — so there is one way a review is built and
 one way it is posted, reached from a second place rather than reimplemented.
 
 It posts as **COMMENT**, always, whatever the draft's verdict says. Handing a PR
@@ -1489,6 +1527,77 @@ reads as work dropped where this is work passed on. In the open-requests tab
 (§17.2) it outranks `sent` too, because the handoff is the thing that changed the
 request that tab is about.
 
+### 14.7 Already Raised — Findings Another Reviewer Posted First
+
+A draft can repeat what another reviewer — a person or a bot — already said
+on the PR. Cerber finds those repeats and lets the user decide; it MUST NOT
+drop or rewrite one on its own.
+
+**The review stays blind.** The review prompt and the chat prompt MUST NOT
+contain other reviewers' comments, nor the matches. A review that has read
+earlier comments anchors on them and searches less on its own (two blind
+reviews finding the same defect is confirmation worth keeping), and PR
+comments are third-party text — one more path for prompt injection, for
+nothing gained.
+
+**The comparison runs after the review**, as a separate small-model call with
+every tool off, an empty working directory and the credential-free
+environment of §14.3. Its prompt marks the earlier comments as data, not
+instructions; its output is validated, and pairs naming ids it was not given
+are discarded. The worst a hostile comment can do is win or lose a match,
+which the cockpit shows with its reason.
+
+- **What is compared:** the artifact's `ai` comments that are not dropped,
+  against every thread (by its first comment) and every non-empty submitted
+  review body on the PR — excluding the user's own and the PR author's, and
+  including bots. Path and line MUST NOT decide a match by themselves: two
+  reviewers routinely anchor one defect on different lines or files.
+- **When:** at the end of every review run (inside the run, so it holds the
+  in-flight claim); on opening a review in the cockpit (`POST …/raised`); after
+  a chat turn that added a comment (marked in the same write that lands the
+  turn). Never on a sent artifact. On open, the GitHub read happens in the
+  request; when nothing needs the model the answer is 200, and the artifact is
+  written only if something changed (`raisedChanged`) — opening a review MUST
+  NOT move `updatedAt`, which orders and ages the queue. Only a model call is
+  detached: 202, `raisedCheck.checkingSince` set before responding, the
+  in-flight claim held while it runs, and requests the claim refuses say it is
+  the check that is busy.
+- **Incremental:** `raisedCheck.remarks`/`findings` record what has been
+  compared. New remarks are compared with every finding and new findings with
+  every remark; with nothing new, no model call is made. A finding is compared
+  once: editing its body (by hand or by a chat turn) keeps its match rather
+  than re-judging it, because the user who edited it is the one deciding
+  about it anyway. Every check still
+  refreshes the state of existing matches (a thread resolved since), and a
+  remark gone from the PR clears its match.
+- **One match per comment.** Several matches resolve to the liveliest place —
+  open thread, then outdated, then review body, then resolved — ties to the
+  earliest. The user's decision survives a re-check only while the match is
+  still about the same remark.
+- **A failed check never fails the review.** It is written to
+  `raisedCheck.error`, the matches from before it stand, and every surface
+  that shows the counts says the check could not run.
+
+**What Send does** (`sendTreatment`, shared by Send, the preview and the
+cockpit's counts):
+
+| decision | where | Send |
+|---|---|---|
+| none | open or outdated thread, review body | **held** — not posted |
+| none | resolved thread | posted as usual — somebody thought it settled, and the draft found it in the current code |
+| `send` | any | posted as usual |
+| `reply` | thread | posted as a reply in that thread (§14.4) |
+| `reply` | review body | refused at the API (409); held if it ever appears |
+
+Drop is the comment's ordinary `status`. While a check is running the cockpit
+MUST NOT let Send go: what posts is what the check says.
+
+**Merges.** `alreadyRaised` and `raisedCheck` belong to the check: a chat
+turn's fold (§12.5) takes both from the artifact on disk, and a re-review
+starts with `raisedCheck: null` and new comment ids, so its own check compares
+everything afresh. Re-anchoring (§13) carries `alreadyRaised` with the
+comment.
+
 ## 15. Auto-Send
 
 ### 15.1 Activation
@@ -1512,7 +1621,17 @@ re-logged. All of, in order, first failure terminal:
    for a human, at any confidence;
 5. zero non-dropped blocker findings standing (an approve over a live blocker
    is a contradiction a human resolves);
-6. confidence ≥ threshold (equality is eligible).
+6. confidence ≥ threshold (equality is eligible);
+7. no finding marked "reply in their thread" (§14.7) — a reply is a person's
+   decision to answer somebody, and auto-send posts one review and nothing
+   else;
+8. the check for already-raised findings did not fail (`raisedCheck.error`
+   null) — nobody is watching an auto-send, so a check that never ran must
+   not read as one that found nothing.
+
+Findings somebody else already raised follow Send's default (§14.7): an
+undecided one on an open thread or a review body is left out of the
+auto-sent review, and the decision string says how many were.
 
 An eligible artifact in `on` mode is submitted as `APPROVE` with the standard
 payload; the artifact becomes `sent` with `auto: true` plus calibration. A
@@ -1551,15 +1670,16 @@ static assets included. No CORS: same-origin only.
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
-| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI |
+| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
+| `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
 | `POST …/chat` · `DELETE …/chat/pending` · `POST …/chat/reset` | §12 | **202**; 409 sent/in-flight; dismiss clears only *failed* turns |
 | `GET …/export` | markdown export | standalone document; verdict basis = blockers + confidence |
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
-| `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified |
+| `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified; 200 is the artifact plus `replyError` — non-null when the review posted but a reply did not |
 | `GET …/reviewers` | §14.6 suggestions | `{logins}` minus you and the author; 404 unknown review; 502 when the repo's list could not be read — the dialog says so and carries on |
-| `POST …/handoff` | §14.6 | requires `{confirm: true}`; optional `postReview`; 400 on a team, a malformed login or yourself; 409 while a run or a chat turn is in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, sendError, noteError}` — either non-null when that half alone failed |
+| `POST …/handoff` | §14.6 | requires `{confirm: true}`; optional `postReview`; 400 on a team, a malformed login or yourself; 409 while a run or a chat turn is in flight; 502 when the request could not be moved (nothing written); 200 `{artifact, sendError, noteError, replyError}` — each non-null when that part alone failed |
 | `GET /*` | cockpit SPA | plain-text pointer when the web build is absent |
 
 ### 16.3 The 202-Detached Pattern
@@ -2078,6 +2198,7 @@ An implementation conforms when all of the following hold:
 | §12 chat | `src/runner/chat.ts`, `src/core/revise.ts`, `src/server/progress.ts` |
 | §13 re-anchoring | `src/core/anchor.ts`, `src/core/refresh.ts` |
 | §14 GitHub | `src/core/gh.ts`, `src/core/trust.ts`, `src/core/send.ts` |
+| §14.7 already raised | `src/core/raised.ts`, `src/runner/raised.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
 | §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `handoff.ts`, `Markdown.tsx`, `mdblocks.ts` |

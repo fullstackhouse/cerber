@@ -14,6 +14,7 @@ import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "
 import { withGrade } from "../../src/core/severity";
 import {
   addComment,
+  checkRaised,
   deleteComment,
   dismissPendingChat,
   exportUrl,
@@ -50,6 +51,8 @@ import {
   eventForVerdict,
   inlineComments,
   payloadSummary,
+  raisedFate,
+  raisedWhere,
   rowLine,
   severitySummary,
   splitComments,
@@ -743,6 +746,135 @@ function DiffBlock({
   );
 }
 
+/**
+ * The rail's line about what others already said: how many of the findings
+ * somebody else raised first, and what Send does with them — or that the check
+ * is running, or could not run. Said even when it found nothing, once it has
+ * looked, because silence would read the same as never having checked.
+ */
+function RaisedFacts({
+  check,
+  raised,
+  held,
+  replies,
+}: {
+  check: Artifact["raisedCheck"] | null;
+  raised: number;
+  held: number;
+  replies: number;
+}) {
+  if (!check) return null;
+  const fate = [held > 0 && `${held} left out`, replies > 0 && `${replies} as replies`].filter(Boolean);
+  // The counts stand whatever the latest check did: the matches from before
+  // it are still on the comments, still deciding what Send posts.
+  const counts =
+    raised > 0 ? (
+      <div className="warn" title="Findings another reviewer already raised on the PR — each card says who, and what Send does with it.">
+        {raised} already raised{fate.length > 0 ? ` · ${fate.join(" · ")}` : ""}
+      </div>
+    ) : null;
+  if (check.checkingSince) {
+    return (
+      <>
+        {counts}
+        <div className="faint">checking what others already raised…</div>
+      </>
+    );
+  }
+  if (check.error) {
+    return (
+      <>
+        {counts}
+        <div className="warn" title={check.error}>
+          couldn't check what others already raised
+        </div>
+      </>
+    );
+  }
+  if (counts) return counts;
+  return check.remarks.length > 0 ? <div className="faint">none already raised by others</div> : null;
+}
+
+/** What a comment card can change about its comment. */
+type CommentPatch = { body?: string; status?: string; raisedDecision?: "send" | "reply" | null };
+
+/**
+ * Somebody else already raised this finding on the PR — who, where, and what
+ * Send will do about it.
+ *
+ * The comparison is cerber's, so the reason is shown with it: it is a model's
+ * judgement that two comments are about one defect, and the user decides on
+ * it rather than taking it on faith. Drop sits on the card already, with every
+ * other comment's; the two decisions only this card has are the ones here.
+ */
+function RaisedNote({
+  comment,
+  readOnly,
+  onDecide,
+}: {
+  comment: ReviewComment;
+  readOnly: boolean;
+  onDecide: (decision: "send" | "reply" | null) => void;
+}) {
+  const raised = comment.alreadyRaised;
+  if (!raised) return null;
+  const fate = raisedFate(comment, readOnly);
+  const canReply = raised.where.kind === "thread";
+  const live = !readOnly && comment.status !== "dropped";
+  return (
+    <div className="raised">
+      <div className="raised-head">
+        <span className="tag tag-raised">
+          <Icon name="comment" />
+          already raised by @{raised.by} · {raisedWhere(raised)}
+        </span>
+        {raised.url && (
+          <a href={raised.url} target="_blank" rel="noreferrer" className="faint">
+            see it on GitHub <Icon name="external" />
+          </a>
+        )}
+        <span className="grow" />
+        {live && (
+          <>
+            {canReply && (
+              <button
+                className={`btn btn-sm${raised.decision === "reply" ? " btn-keep-on" : ""}`}
+                title="Send posts this as a reply in their thread instead of a new comment — for when it adds something"
+                onClick={() => onDecide(raised.decision === "reply" ? null : "reply")}
+              >
+                reply in their thread
+              </button>
+            )}
+            <button
+              className={`btn btn-sm${raised.decision === "send" ? " btn-keep-on" : ""}`}
+              title="Send posts it as a comment of its own all the same"
+              onClick={() => onDecide(raised.decision === "send" ? null : "send")}
+            >
+              send anyway
+            </button>
+          </>
+        )}
+      </div>
+      <p className="raised-reason">
+        {raised.reason}
+        {fate && (
+          <span className="raised-fate">
+            {" — "}
+            {raised.replied?.url ? (
+              <a href={raised.replied.url} target="_blank" rel="noreferrer">
+                {fate}
+              </a>
+            ) : (
+              fate
+            )}
+            .
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
+
 function CommentCard({
   comment,
   onUpdate,
@@ -752,7 +884,7 @@ function CommentCard({
   flash,
 }: {
   comment: ReviewComment;
-  onUpdate: (patch: { body?: string; status?: string }) => void;
+  onUpdate: (patch: CommentPatch) => void;
   onDelete: () => void;
   onDiscuss?: () => void;
   readOnly: boolean;
@@ -863,6 +995,11 @@ function CommentCard({
             </>
           ))}
       </div>
+      <RaisedNote
+        comment={comment}
+        readOnly={readOnly}
+        onDecide={(raisedDecision) => onUpdate({ raisedDecision })}
+      />
       {editing ? (
         <>
           <textarea
@@ -988,7 +1125,7 @@ function ChapterSection({
   heavy: number | null;
   onToggle: () => void;
   flash: string | null;
-  onUpdateComment: (id: string, patch: { body?: string; status?: string }) => void;
+  onUpdateComment: (id: string, patch: CommentPatch) => void;
   onDeleteComment: (id: string) => void;
   onAddComment: (c: { path: string; line: number | null; body: string; chapterId: string | null }) => void;
   onDiscuss?: (ref: ChatRef) => void;
@@ -1541,7 +1678,16 @@ function HandoffDialog({
         artifact.bodyOverride,
         artifact.summary,
         artifact.chapters.map((ch) => [ch.title, ch.explanation]),
-        artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+        artifact.comments.map((c) => [
+          c.path,
+          c.line,
+          c.body,
+          c.severity,
+          c.status,
+          c.drifted,
+          c.alreadyRaised?.decision,
+          c.alreadyRaised?.where,
+        ]),
       ])
     : "";
 
@@ -1868,6 +2014,7 @@ function SendPanel({
   reviewKey,
   event,
   sending,
+  checking,
   onSend,
   error,
   footer,
@@ -1880,6 +2027,12 @@ function SendPanel({
   reviewKey: string;
   event: ReviewEvent;
   sending: boolean;
+  /**
+   * A check for findings others already raised is running. Send waits for it,
+   * so what posts is what the check says. Under a minute, and only when
+   * somebody said something new since the last check; the button says why.
+   */
+  checking: boolean;
   onSend: () => void;
   error: string | null;
   /** The ways out that don't touch GitHub — kept here because this is where
@@ -1928,7 +2081,16 @@ function SendPanel({
           artifact.bodyOverride,
           artifact.summary,
           artifact.chapters.map((ch) => [ch.title, ch.explanation]),
-          artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+          artifact.comments.map((c) => [
+            c.path,
+            c.line,
+            c.body,
+            c.severity,
+            c.status,
+            c.drifted,
+            c.alreadyRaised?.decision,
+            c.alreadyRaised?.where,
+          ]),
         ])
       : "";
 
@@ -2008,11 +2170,16 @@ function SendPanel({
       <div className="send-action">
         <button
           className={`send-btn tone-bg-${EVENT_TONE[event]}`}
-          disabled={sending}
+          disabled={sending || checking}
           onClick={onSend}
         >
           <Icon name={event === "APPROVE" ? "approve" : event === "COMMENT" ? "comment" : "changes"} size={15} />
-          {sending ? "sending…" : `${EVENT_LABEL[event]} on ${artifact.id}`} <Key>s</Key>
+          {sending
+            ? "sending…"
+            : checking
+              ? "checking what others already raised…"
+              : `${EVENT_LABEL[event]} on ${artifact.id}`}{" "}
+          <Key>s</Key>
         </button>
       </div>
 
@@ -2430,7 +2597,20 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             setFreshness(r);
             if (r.changed) setArtifact(r.artifact);
           })
-          .catch((e) => !cancelled && setFreshnessError(String(e.message ?? e)));
+          .catch((e) => !cancelled && setFreshnessError(String(e.message ?? e)))
+          .then(() => {
+            // Then compare the draft with what others have said on the PR
+            // since it was written — after the refresh, so a thread is matched
+            // against the code as it stands. Nothing to do on a sent review or
+            // one a run is about to replace; the run checks for itself.
+            if (cancelled || a.sent || a.status === "running" || a.comments.length === 0) return;
+            return checkRaised(reviewKey)
+              .then((checking) => !cancelled && setArtifact(checking))
+              .catch(() => {
+                // Refused because a run or a turn got there first, which checks
+                // when it lands. Anything else surfaces on the artifact itself.
+              });
+          });
       })
       .catch((e) => !cancelled && setError(String(e)));
     return () => {
@@ -2463,11 +2643,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     };
   }, [artifact?.id]);
 
-  // While AI work is in flight — a re-review, or a chat turn — follow it until
-  // it lands. Both run detached, so the artifact is the only thing that knows.
+  // While AI work is in flight — a re-review, a chat turn, or the check for
+  // findings others already raised — follow it until it lands. All of them run
+  // detached, so the artifact is the only thing that knows.
   const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
+  const raisedChecking = artifact?.raisedCheck?.checkingSince != null;
   useEffect(() => {
-    if (artifact?.status !== "running" && !chatInFlight) return;
+    if (artifact?.status !== "running" && !chatInFlight && !raisedChecking) return;
     const timer = setInterval(() => {
       fetchReview(reviewKey)
         .then((a) => {
@@ -2479,7 +2661,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         });
     }, 3000);
     return () => clearInterval(timer);
-  }, [artifact?.status, chatInFlight, reviewKey]);
+  }, [artifact?.status, chatInFlight, raisedChecking, reviewKey]);
 
   const readOnly = artifact?.sent != null;
   // The walk is the queue as it stood when this page opened. Deliberately not
@@ -2597,12 +2779,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   useEffect(() => setSendError(null), [event]);
 
   const doSend = () => {
-    if (!artifact || artifact.sent || sending) return;
+    if (!artifact || artifact.sent || sending || raisedChecking) return;
     setSending(true);
     setSendError(null);
     sendReview(reviewKey, event)
-      .then((a) => {
+      .then(({ replyError, ...a }) => {
         setArtifact(a);
+        // The review is up by now; a reply that failed is said, not retried.
+        if (replyError) setSendError(`Sent — but ${replyError}`);
         // A send settles this review too — it stays on screen showing what
         // landed, but the arrows have no reason to come back to it.
         markSettled(reviewKey);
@@ -2623,7 +2807,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prev?.key, next?.key, chapters, focused, readOnly, event, artifact?.sent, sending]);
+  }, [prev?.key, next?.key, chapters, focused, readOnly, event, artifact?.sent, sending, raisedChecking]);
 
   // Only a review that failed to load has nothing to show; anything else is a
   // note on a page that still works.
@@ -2664,7 +2848,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
    */
   const handOff = (to: string, note: string, postReview: boolean) =>
     handOffReview(reviewKey, { to, note, postReview }).then(
-      ({ artifact: handed, noteError, sendError }) => {
+      ({ artifact: handed, noteError, sendError, replyError }) => {
         rememberHandoff(to);
         setArtifact(handed);
         setHandingOff(false);
@@ -2677,13 +2861,14 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         // other one landed.
         const missed = [
           sendError && `the review did not post: ${sendError}`,
+          replyError,
           noteError && `the note did not post: ${noteError}`,
         ].filter(Boolean);
         if (missed.length > 0) setError(`Handed to @${to}, but ${missed.join("; and ")}`);
         else advance();
       },
     );
-  const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
+  const onUpdateComment = (id: string, patch: CommentPatch) =>
     apply(patchComment(reviewKey, id, patch));
   const onDeleteComment = (id: string) => apply(deleteComment(reviewKey, id));
   const onAddComment = (c: { path: string; line: number | null; body: string; chapterId: string | null }) =>
@@ -2692,7 +2877,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const orphanComments = artifact.comments.filter(
     (c) => !c.chapterId || !chapters.some((ch) => ch.id === c.chapterId),
   );
-  const { inline, folded, dropped } = splitComments(artifact);
+  const { inline, folded, dropped, held, replies } = splitComments(artifact);
+  const raisedCount = artifact.comments.filter((c) => c.alreadyRaised && c.status !== "dropped").length;
   const drifted = artifact.comments.filter((c) => c.status !== "dropped" && c.drifted).length;
   const tone = artifact.verdict ? TONE[artifact.verdict.recommendation] : "none";
   // The findings changed under the verdict (a blocker dropped, a grade edited).
@@ -2977,6 +3163,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 {drifted} drifted
               </div>
             )}
+            <RaisedFacts
+              check={artifact.raisedCheck ?? null}
+              raised={raisedCount}
+              held={held.length}
+              replies={replies.length}
+            />
           </div>
         </aside>
 
@@ -3136,6 +3328,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               reviewKey={reviewKey}
               event={event}
               sending={sending}
+              checking={raisedChecking}
               onSend={doSend}
               error={sendError}
               next={next}

@@ -13,6 +13,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id" | "path" | "li
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...overrides,
   };
 }
@@ -100,7 +101,7 @@ describe("reanchorComments", () => {
   });
 
   it("clears a drift flag when the code comes back", () => {
-    const c = comment({ id: "1", path: "src/a.ts", line: 2, drifted: true });
+    const c = comment({ id: "1", path: "src/a.ts", line: 2, drifted: true, alreadyRaised: null });
     const { comments } = reanchorComments([c], BEFORE, BEFORE);
     expect(comments[0]!.drifted).toBe(false);
   });

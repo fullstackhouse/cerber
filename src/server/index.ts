@@ -25,6 +25,7 @@ import {
   handOffReview,
   parsePrRef,
   postIssueComment,
+  postReplies,
   submitReview,
 } from "../core/gh.js";
 import { z } from "zod";
@@ -32,7 +33,20 @@ import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/
 import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
-import { ReviewEvent, buildReviewPayload, computeCalibration } from "../core/send.js";
+import {
+  ReviewEvent,
+  buildReviewPayload,
+  computeCalibration,
+  describeReplyFailures,
+  recordReplies,
+} from "../core/send.js";
+import { raisedChanged, startRaisedCheck } from "../core/raised.js";
+import {
+  RaisedStep,
+  checkAlreadyRaised,
+  isRaisedCheckRunning,
+  prepareRaisedCheck,
+} from "../runner/raised.js";
 import {
   listArtifacts,
   loadArtifact,
@@ -54,6 +68,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * own decision about a PR. Everything else is a fact some other path owns.
  */
 const SETTLEABLE = ["reviewed", "skipped"];
+
+/** What the user may decide about a finding somebody else already raised. */
+const RaisedDecisionSchema = z.enum(["send", "reply"]).nullable();
 
 /**
  * What a handoff needs: one person, a note to post, and a confirmation.
@@ -93,6 +110,26 @@ const HandoffSchema = z.object({
  * that has not written yet.
  */
 const inFlight = (a: Artifact) => a.status === "running" || isReviewRunning(a.id);
+
+/**
+ * What to say when the in-flight claim is why a request was refused. The check
+ * for findings others already raised holds the claim too, for up to a minute,
+ * and "a review is running" would send the user looking for a run that isn't.
+ */
+const busy = (a: Artifact, otherwise: string) =>
+  isRaisedCheckRunning(a.id)
+    ? "cerber is checking which findings other reviewers already raised — give it a minute"
+    : otherwise;
+
+/** Run a check for already-raised findings detached; its failures land on the artifact. */
+function checkInBackground(artifact: Artifact, step?: RaisedStep): Promise<unknown> {
+  return checkAlreadyRaised(artifact, {
+    step,
+    log: (m) => console.log(`[raised ${artifact.id}] ${m}`),
+  }).catch((err: unknown) => {
+    console.error(`[raised ${artifact.id}] ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
 
 export interface ServeOptions {
   port: number;
@@ -380,6 +417,7 @@ export async function buildApp(
       refresh: null,
       filed: null,
       handoff: null,
+      raisedCheck: null,
       settledAt: null,
       calibration: null,
       chat: [],
@@ -485,12 +523,38 @@ export async function buildApp(
   app.patch("/api/reviews/:key/comments/:id", async (c) => {
     const body = await c.req.json();
     const id = c.req.param("id");
+    // What Send does with a finding somebody else already raised: post it
+    // anyway, answer in their thread, or — null — the default for where they
+    // raised it. Refused rather than coerced when it cannot mean anything: a
+    // comment nobody else raised has no thread to answer, and neither does a
+    // review body.
+    const decision = RaisedDecisionSchema.safeParse(body.raisedDecision);
+    if (body.raisedDecision !== undefined) {
+      if (!decision.success) {
+        return c.json({ error: "raisedDecision must be \"send\", \"reply\", or null for the default" }, 400);
+      }
+      const artifact = await loadArtifactByKey(c.req.param("key"));
+      const target = artifact?.comments.find((cm) => cm.id === id);
+      if (!artifact || !target) return c.json({ error: "not found" }, 404);
+      if (!target.alreadyRaised) {
+        return c.json({ error: "nobody else raised this comment, so there is nothing to decide" }, 409);
+      }
+      if (decision.data === "reply" && target.alreadyRaised.where.kind !== "thread") {
+        return c.json(
+          { error: `@${target.alreadyRaised.by} raised it in a review body, which has no thread to reply in` },
+          409,
+        );
+      }
+    }
     const updated = await updateArtifactByKey(c.req.param("key"), (a) => ({
       ...a,
       comments: a.comments.map((cm) =>
         cm.id === id
           ? {
               ...cm,
+              ...(decision.success && body.raisedDecision !== undefined && cm.alreadyRaised
+                ? { alreadyRaised: { ...cm.alreadyRaised, decision: decision.data } }
+                : {}),
               ...(body.body !== undefined ? { body: String(body.body) } : {}),
               ...(body.severity !== undefined
                 ? { severity: SeveritySchema.nullable().parse(body.severity) }
@@ -527,6 +591,7 @@ export async function buildApp(
           editedByUser: false,
           originalLine: null,
           drifted: false,
+          alreadyRaised: null,
         },
       ],
     }));
@@ -611,7 +676,7 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
     if (isReviewRunning(artifact.id)) {
-      return c.json({ error: "a review of this PR is already running" }, 409);
+      return c.json({ error: busy(artifact, "a review of this PR is already running") }, 409);
     }
 
     const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
@@ -682,7 +747,7 @@ export async function buildApp(
     // rewrite history that GitHub already has.
     if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
     if (isReviewRunning(artifact.id) || turnInFlight(artifact)) {
-      return c.json({ error: "a run for this PR is already in flight" }, 409);
+      return c.json({ error: busy(artifact, "a run for this PR is already in flight") }, 409);
     }
 
     let request;
@@ -729,10 +794,17 @@ export async function buildApp(
         // The cockpit stays live throughout, so fold the result onto whatever
         // is on disk now rather than overwriting it — an edit the user made
         // while waiting must not vanish when the answer lands.
-        await updateArtifactByKey(key, (current) => ({
-          ...mergeConcurrentEdits(artifact, result.artifact, current),
-          pendingChat: null,
-        }));
+        // A finding the turn added is compared with what others said, like
+        // the review's own were. Marked in the same write that clears the
+        // turn, so the cockpit's poll has no gap in which nothing is pending.
+        const added = result.artifact.comments.some(
+          (cm) => !artifact.comments.some((before) => before.id === cm.id),
+        );
+        const landed = await updateArtifactByKey(key, (current) => {
+          const merged = { ...mergeConcurrentEdits(artifact, result.artifact, current), pendingChat: null };
+          return added ? startRaisedCheck(merged, new Date().toISOString()) : merged;
+        });
+        if (added && landed) void checkInBackground(landed);
       })
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
@@ -816,25 +888,67 @@ export async function buildApp(
     // run used to save `sent: null` back over the record when it landed, so the
     // guard above would wave a *second* submission through afterwards.
     if (inFlight(artifact)) {
-      return c.json({ error: "a review of this PR is running — wait for it to finish" }, 409);
+      return c.json({ error: busy(artifact, "a review of this PR is running — wait for it to finish") }, 409);
     }
 
     const payload = buildReviewPayload(artifact, event as ReviewEvent);
+    const ref = { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number };
+    let url: string | null;
     try {
-      const { url } = await submitReview(
-        { owner: artifact.pr.owner, repo: artifact.pr.repo, number: artifact.pr.number },
-        { event: payload.event, body: payload.body, comments: payload.comments, commitId: payload.commitId },
-      );
-      const updated = await updateArtifactByKey(c.req.param("key"), (a) => ({
-        ...a,
-        status: "sent" as const,
-        sent: { at: new Date().toISOString(), event: payload.event, url, auto: false },
-        calibration: computeCalibration(a, payload.event),
+      ({ url } = await submitReview(ref, {
+        event: payload.event,
+        body: payload.body,
+        comments: payload.comments,
+        commitId: payload.commitId,
       }));
-      return c.json(updated);
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
     }
+    // Recorded before the replies go: the review is up, and a reply failing
+    // must not leave the row claiming it isn't — the "already sent" guard is
+    // what keeps a retry from posting the review twice.
+    await updateArtifactByKey(c.req.param("key"), (a) => ({
+      ...a,
+      status: "sent" as const,
+      sent: { at: new Date().toISOString(), event: payload.event, url, auto: false },
+      calibration: computeCalibration(a, payload.event),
+    }));
+    const outcomes = await postReplies(ref, payload.replies);
+    const updated = await updateArtifactByKey(c.req.param("key"), (a) => recordReplies(a, outcomes));
+    const replyError = describeReplyFailures(outcomes);
+    if (replyError) console.error(`[send ${artifact.id}] ${replyError}`);
+    return c.json({ ...updated, replyError });
+  });
+
+  // ---- Already raised: compare the draft with what others said on the PR ----
+  // Read-only against GitHub. Detached, like a chat turn: the cockpit polls
+  // `raisedCheck.checkingSince` until it clears.
+
+  app.post("/api/reviews/:key/raised", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    // A sent review is history, and a running one checks for itself when it lands.
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    if (inFlight(artifact) || turnInFlight(artifact)) {
+      return c.json({ error: "a run for this PR is in flight — it checks when it lands" }, 409);
+    }
+    if (isRaisedCheckRunning(artifact.id)) return c.json(artifact, 202);
+    // The GitHub read happens here, in the request — a second, like the
+    // refresh before it. Only a model call is detached, and only when somebody
+    // said something new since the last check.
+    const step = await prepareRaisedCheck(artifact, { log: (m) => console.log(`[raised ${artifact.id}] ${m}`) });
+    if (!step.needsModel) {
+      const current = await loadArtifactByKey(key);
+      if (!current) return c.json({ error: "not found" }, 404);
+      // Nothing new is no write: `updatedAt` is what the queue sorts and ages
+      // rows by, and merely opening a review must not move it.
+      if (!raisedChanged(current, step.fold(current))) return c.json(current);
+      return c.json(await updateArtifactByKey(key, step.fold));
+    }
+    const marked = await updateArtifactByKey(key, (a) => startRaisedCheck(a, new Date().toISOString()));
+    if (marked) void checkInBackground(marked, step);
+    return c.json(marked, 202);
   });
 
   // Preview what send would post, without posting anything.
@@ -911,7 +1025,7 @@ export async function buildApp(
     // settling one out from under a run that is about to report on it is the
     // same race the send path refuses.
     if (inFlight(artifact)) {
-      return c.json({ error: "a review of this PR is running — wait for it to finish" }, 409);
+      return c.json({ error: busy(artifact, "a review of this PR is running — wait for it to finish") }, 409);
     }
     // Nor while a chat turn is being answered. A turn's result is folded onto
     // whatever the artifact says when it lands, and the fold is written for a
@@ -992,6 +1106,11 @@ export async function buildApp(
         console.error(`[handoff ${artifact.id}] the review did not post: ${sendError}`);
       }
     }
+    // The draft carries its replies too, when it went: they are part of the
+    // composition the box sends, and only ever ones the user chose to make.
+    const replies = sent && payload ? await postReplies(ref, payload.replies) : [];
+    const replyError = describeReplyFailures(replies);
+    if (replyError) console.error(`[handoff ${artifact.id}] ${replyError}`);
 
     let noteError: string | null = null;
     let posted: { body: string; url: string | null } | null = null;
@@ -1013,7 +1132,7 @@ export async function buildApp(
       // deciding not to review this one, which is a skip.
       const settles = !sent && !a.sent;
       return {
-        ...a,
+        ...recordReplies(a, replies),
         status: sent ? ("sent" as const) : a.sent ? a.status : ("skipped" as const),
         settledAt: settles ? at : a.settledAt,
         // Cerber's account of why a row is filed away cannot stand next to your
@@ -1033,7 +1152,7 @@ export async function buildApp(
       };
     });
     if (!updated) return c.json({ error: "not found" }, 404);
-    return c.json({ artifact: updated, noteError, sendError });
+    return c.json({ artifact: updated, noteError, sendError, replyError });
   });
 
   // Static cockpit build. In the published package web/dist ships alongside dist/.

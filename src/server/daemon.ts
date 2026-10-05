@@ -172,6 +172,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     refresh: null,
     filed: null,
     handoff: null,
+    raisedCheck: null,
     settledAt: null,
     // Null, not absent: the poll found this PR, so it owes the machine a tap
     // for it — once there is something to tap you about (§9.8).

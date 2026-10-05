@@ -210,6 +210,11 @@ if the run fails. This is a decision rather than an oversight, and it is stated
 here rather than left to be discovered: if you have written comments you want
 to keep, send the review or copy them out before pressing re-review.
 
+The same goes for what you decided about findings another reviewer already
+raised (`alreadyRaised`, `src/core/raised.ts`): a re-review writes new findings,
+compares them afresh against what is on the PR by then, and every match comes
+back undecided — left out of Send unless its thread was resolved.
+
 What a re-review does *not* touch are the decisions you have made
 (`mergeRunResult`, `src/core/refresh.ts`). The run's result is folded onto
 whatever the artifact says now rather than written over it, so a send stands, a

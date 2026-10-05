@@ -9,8 +9,15 @@ import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
-import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
-import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
+import { PrRef, parsePrRef, postReplies, searchAwaitingMe, submitReview } from "../core/gh.js";
+import {
+  ReviewEvent,
+  buildReviewPayload,
+  computeCalibration,
+  describeReplyFailures,
+  eventForRecommendation,
+  recordReplies,
+} from "../core/send.js";
 import {
   cerberHome,
   listArtifacts,
@@ -275,6 +282,18 @@ program
     if (payload.folded.length > 0) {
       console.log(`  comments folded into body (no diff anchor): ${payload.folded.length}`);
     }
+    if (payload.replies.length > 0) {
+      console.log(`  replies in another reviewer's thread: ${payload.replies.length}`);
+    }
+    if (payload.held.length > 0) {
+      console.log(
+        `  left out — already raised by another reviewer: ${payload.held.length}` +
+          ` (decide in the cockpit to post or reply instead)`,
+      );
+    }
+    if (artifact.raisedCheck?.error) {
+      console.log(`  ⚠ could not check what others already raised: ${artifact.raisedCheck.error}`);
+    }
     console.log(`  body: ${payload.body.length} chars\n`);
 
     if (!opts.yes) {
@@ -300,6 +319,15 @@ program
       calibration: computeCalibration(a, event),
     }));
     console.log(`✔ Review sent${url ? `: ${url}` : "."}`);
+    const outcomes = await postReplies(ref, payload.replies);
+    await updateArtifactByKey(artifactKey(id), (a) => recordReplies(a, outcomes));
+    const replyError = describeReplyFailures(outcomes);
+    if (replyError) {
+      console.error(`✖ ${replyError}`);
+      process.exitCode = 1;
+    } else if (outcomes.length > 0) {
+      console.log(`✔ ${outcomes.length} ${outcomes.length === 1 ? "reply" : "replies"} posted in existing threads.`);
+    }
   });
 
 program

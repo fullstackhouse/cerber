@@ -59,7 +59,16 @@ export const patchReview = (
     body: JSON.stringify(body),
   });
 
-export const patchComment = (key: string, id: string, body: { body?: string; status?: string }) =>
+export const patchComment = (
+  key: string,
+  id: string,
+  body: {
+    body?: string;
+    status?: string;
+    /** About a finding somebody else already raised: post it anyway, reply in their thread, or null for the default. */
+    raisedDecision?: "send" | "reply" | null;
+  },
+) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/comments/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -137,11 +146,24 @@ export const resetReviewToPreChat = (key: string) =>
 export const fetchSendPreview = (key: string, event: string) =>
   request<SendPreview>(`/api/reviews/${encodeURIComponent(key)}/send-preview?event=${event}`);
 
+/**
+ * Send the review. Resolves with the sent row and, separately, any replies in
+ * other reviewers' threads that did not post — by then the review is up, so a
+ * failed reply is a thing to say, not a reason to send again.
+ */
 export const sendReview = (key: string, event: string) =>
-  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/send`, {
+  request<Artifact & { replyError: string | null }>(`/api/reviews/${encodeURIComponent(key)}/send`, {
     method: "POST",
     body: JSON.stringify({ event, confirm: true }),
   });
+
+/**
+ * Compare the draft with what other reviewers already said on the PR. Starts a
+ * check and returns at once with `raisedCheck.checkingSince` set; poll the
+ * review until it clears.
+ */
+export const checkRaised = (key: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/raised`, { method: "POST" });
 
 /**
  * Who this review could be handed to, for the dialog's suggestions. Read-only,
@@ -167,7 +189,12 @@ export const handOffReview = (
   key: string,
   body: { to: string; note: string; postReview: boolean },
 ) =>
-  request<{ artifact: Artifact; noteError: string | null; sendError: string | null }>(
+  request<{
+    artifact: Artifact;
+    noteError: string | null;
+    sendError: string | null;
+    replyError: string | null;
+  }>(
     `/api/reviews/${encodeURIComponent(key)}/handoff`,
     { method: "POST", body: JSON.stringify({ ...body, confirm: true }) },
   );
