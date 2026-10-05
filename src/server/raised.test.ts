@@ -7,7 +7,7 @@ import { postReplies, submitReview } from "../core/gh.js";
 import { loadArtifact, saveArtifact } from "../core/state.js";
 import type { ChatTurnResult } from "../runner/chat.js";
 import { runChatTurn } from "../runner/chat.js";
-import { checkAlreadyRaised, prepareRaisedCheck } from "../runner/raised.js";
+import { checkAlreadyRaised, finishRaisedCheck, prepareRaisedCheck } from "../runner/raised.js";
 import { buildApp } from "./index.js";
 
 // Both GitHub writes Send can make are stubbed (the replies at `postReplies`,
@@ -20,17 +20,27 @@ vi.mock("../core/gh.js", async (orig) => ({
 }));
 vi.mock("../runner/review.js", () => ({ reviewPr: vi.fn(), pool: vi.fn() }));
 vi.mock("../runner/chat.js", () => ({ runChatTurn: vi.fn() }));
-vi.mock("../runner/raised.js", () => ({
-  checkAlreadyRaised: vi.fn(async () => null),
-  prepareRaisedCheck: vi.fn(),
-  isRaisedCheckRunning: vi.fn(() => false),
-}));
+// The claim is real — it is in memory, and what Send waits on is the subject of
+// some of these. Only the parts that would read GitHub or ask a model are stubbed.
+vi.mock("../runner/raised.js", async (orig) => {
+  const real = await orig<typeof import("../runner/raised.js")>();
+  return {
+    ...real,
+    checkAlreadyRaised: vi.fn(async () => null),
+    prepareRaisedCheck: vi.fn(),
+    finishRaisedCheck: vi.fn(async (a: Artifact) => {
+      real.releaseRaisedCheck(a.id);
+      return null;
+    }),
+  };
+});
 
 const submit = submitReview as Mock;
 const reply = postReplies as Mock;
 const turn = runChatTurn as Mock;
 const check = checkAlreadyRaised as Mock;
 const prepare = prepareRaisedCheck as Mock;
+const finish = finishRaisedCheck as Mock;
 
 process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-raised-api-"));
 
@@ -47,7 +57,7 @@ function raised(over: Partial<AlreadyRaised> = {}): AlreadyRaised {
     where: { kind: "thread", path: "a.ts", line: 2, state: "open", replyTo: "4100000001" },
     reason: "both say y is unused",
     decision: null,
-    replied: null,
+    replied: null, others: [],
     ...over,
   };
 }
@@ -216,7 +226,27 @@ describe("POST /raised", () => {
     const res = await call("POST", `/api/reviews/${KEY}/raised`);
     expect(res.status).toBe(202);
     expect((await res.json()).raisedCheck.checkingSince).toEqual(expect.any(String));
-    expect(check).toHaveBeenCalledWith(expect.objectContaining({ id: ID }), expect.objectContaining({ step }));
+    expect(finish).toHaveBeenCalledWith(expect.objectContaining({ id: ID }), step);
+  });
+
+  it("holds Send off while the GitHub read is still out, and lets go after it", async () => {
+    let read: (step: unknown) => void = () => {};
+    prepare.mockImplementation(() => new Promise((resolve) => (read = resolve)));
+    await saveArtifact(artifact({ comments: [finding("c1", null)] }));
+    const opening = call("POST", `/api/reviews/${KEY}/raised`);
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
+
+    const refused = await call("POST", `/api/reviews/${KEY}/send`, { event: "COMMENT", confirm: true });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toContain("checking which findings");
+    expect(submit).not.toHaveBeenCalled();
+
+    // A second open while this one is out is answered, not refused.
+    expect((await call("POST", `/api/reviews/${KEY}/raised`)).status).toBe(202);
+
+    read({ needsModel: false, fold: (a: Artifact) => a });
+    expect((await opening).status).toBe(200);
+    expect((await call("POST", `/api/reviews/${KEY}/send`, { event: "COMMENT", confirm: true })).status).toBe(200);
   });
 
   it("answers at once and writes nothing when nothing changed — opening a review does not move its row", async () => {

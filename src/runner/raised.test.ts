@@ -185,7 +185,7 @@ describe("checkForRaised", () => {
   it("writes a failure down instead of throwing, and keeps the matches it had", async () => {
     remarksOf.mockRejectedValue(new Error("gh: rate limited"));
     const match = {
-      remarkId: "T_1", by: "x", at: "t", url: null, reason: "same", decision: "send" as const, replied: null,
+      remarkId: "T_1", by: "x", at: "t", url: null, reason: "same", decision: "send" as const, replied: null, others: [],
       where: { kind: "thread" as const, path: "p", line: 1, state: "open" as const, replyTo: "1" },
     };
     const before = artifact({ comments: [finding({ alreadyRaised: match })] });

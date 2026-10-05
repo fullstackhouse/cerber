@@ -142,6 +142,8 @@ export interface AlreadyRaised {
   decision: "send" | "reply" | null;
   /** The reply Send posted into their thread. */
   replied: { at: string; url: string | null } | null;
+  /** Other remarks that raised the same thing, behind the one shown. */
+  others?: { remarkId: string; reason: string }[];
 }
 
 /** The last comparison of the draft with what others said on the PR. */

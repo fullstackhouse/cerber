@@ -293,7 +293,10 @@ counters default `0`.
 `at`, `where`, `reason` REQUIRED; `url` default `null`; `decision`
 (`send` \| `reply` \| null) default `null` — null is "not decided", which Send
 reads as the default for the place (§14.7); `replied` (`{at, url}`) default
-`null`, set when Send posted the reply. `where` is a union on `kind`:
+`null`, set when Send posted the reply; `others` (`{remarkId, reason}[]`)
+default `[]` — the other remarks that matched, behind the one shown, so the
+next best takes over if it disappears (each was compared once and is not
+asked about again). `where` is a union on `kind`:
 `{kind: "thread", path, line | null, state ∈ {open, resolved, outdated},
 replyTo}` — `replyTo` the REST id of the thread's first comment, and resolved
 wins over outdated — or `{kind: "review"}` for a review body. Dropping is the
@@ -1555,13 +1558,17 @@ which the cockpit shows with its reason.
 - **When:** at the end of every review run (inside the run, so it holds the
   in-flight claim); on opening a review in the cockpit (`POST …/raised`); after
   a chat turn that added a comment (marked in the same write that lands the
-  turn). Never on a sent artifact. On open, the GitHub read happens in the
-  request; when nothing needs the model the answer is 200, and the artifact is
-  written only if something changed (`raisedChanged`) — opening a review MUST
-  NOT move `updatedAt`, which orders and ages the queue. Only a model call is
-  detached: 202, `raisedCheck.checkingSince` set before responding, the
-  in-flight claim held while it runs, and requests the claim refuses say it is
-  the check that is busy.
+  turn). Never on a sent artifact. On open, the in-flight claim is taken
+  **before** the GitHub read and held through it — a Send landing mid-read
+  would post the duplicate the read was about to find — and the read happens
+  in the request; when nothing needs the model the answer is 200, and the
+  artifact is written only if something changed (`raisedChanged`) — opening a
+  review MUST NOT move `updatedAt`, which orders and ages the queue. Only a
+  model call is detached: 202, `raisedCheck.checkingSince` set before
+  responding, the claim kept until it lands, and requests the claim refuses
+  say it is the check that is busy. A second open while a check is out gets
+  202 with the artifact as it stands. `cerber send`, which cannot see another
+  process's claim, refuses while `checkingSince` is set.
 - **Incremental:** `raisedCheck.remarks`/`findings` record what has been
   compared. New remarks are compared with every finding and new findings with
   every remark; with nothing new, no model call is made. A finding is compared
@@ -1570,9 +1577,10 @@ which the cockpit shows with its reason.
   about it anyway. Every check still
   refreshes the state of existing matches (a thread resolved since), and a
   remark gone from the PR clears its match.
-- **One match per comment.** Several matches resolve to the liveliest place —
-  open thread, then outdated, then review body, then resolved — ties to the
-  earliest. The user's decision survives a re-check only while the match is
+- **One match shown per comment.** Several matches resolve to the liveliest
+  place — open thread, then outdated, then review body, then resolved — ties
+  to the earliest; the rest are kept in `others` and re-ranked on every
+  check. The user's decision survives a re-check only while the match is
   still about the same remark.
 - **A failed check never fails the review.** It is written to
   `raisedCheck.error`, the matches from before it stand, and every surface
@@ -1625,9 +1633,10 @@ re-logged. All of, in order, first failure terminal:
 7. no finding marked "reply in their thread" (§14.7) — a reply is a person's
    decision to answer somebody, and auto-send posts one review and nothing
    else;
-8. the check for already-raised findings did not fail (`raisedCheck.error`
-   null) — nobody is watching an auto-send, so a check that never ran must
-   not read as one that found nothing.
+8. the check for already-raised findings finished cleanly — `raisedCheck`
+   present, `at` set, `checkingSince` and `error` null. Nobody is watching an
+   auto-send, so a check that never ran, is still running or failed must not
+   read as one that found nothing.
 
 Findings somebody else already raised follow Send's default (§14.7): an
 undecided one on an open thread or a review body is left out of the

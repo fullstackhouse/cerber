@@ -38,7 +38,8 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     refresh: null,
     filed: null,
     handoff: null,
-    raisedCheck: null,
+    // A finished, clean check — what every fresh run leaves behind.
+    raisedCheck: { at: "2026-01-01T00:00:00Z", checkingSince: null, remarks: [], findings: [], error: null },
     settledAt: null,
     calibration: null,
   chat: [],
@@ -101,7 +102,7 @@ describe("evaluateAutoSend", () => {
       alreadyRaised: {
         remarkId: "T_1", by: "someone", at: "x", url: null, reason: "same",
         where: { kind: "thread" as const, path: "f", line: 1, state: "open" as const, replyTo: "1" },
-        decision: null, replied: null,
+        decision: null, replied: null, others: [],
       },
     };
     const d = evaluateAutoSend(makeArtifact({ comments: [dup] }), 90);
@@ -124,6 +125,16 @@ describe("evaluateAutoSend", () => {
     );
     expect(d.eligible).toBe(false);
     expect(d.reason).toContain("gh: rate limited");
+  });
+
+  it("waits for a human when the check never ran, or has not finished", () => {
+    const never = evaluateAutoSend(makeArtifact({ raisedCheck: null }), 90);
+    expect(never.eligible).toBe(false);
+    expect(never.reason).toContain("has not finished");
+    const running = makeArtifact({
+      raisedCheck: { at: "t", checkingSince: "t2", remarks: [], findings: [], error: null },
+    });
+    expect(evaluateAutoSend(running, 90).eligible).toBe(false);
   });
 
   it("rejects already-sent and non-ready artifacts", () => {

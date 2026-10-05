@@ -63,6 +63,13 @@ export const AlreadyRaisedSchema = z.object({
   decision: z.enum(["send", "reply"]).nullable().default(null),
   /** The reply Send posted into their thread. */
   replied: z.object({ at: z.string(), url: z.string().nullable().default(null) }).nullable().default(null),
+  /**
+   * The other remarks that raised the same thing, behind the one shown. Kept
+   * because each was compared once and will not be asked about again: if the
+   * one shown is deleted, the next best takes its place instead of the
+   * finding quietly posting as new.
+   */
+  others: z.array(z.object({ remarkId: z.string(), reason: z.string() })).default([]),
 });
 export type AlreadyRaised = z.infer<typeof AlreadyRaisedSchema>;
 

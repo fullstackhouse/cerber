@@ -2552,6 +2552,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
+  // The open-time check's GitHub read is in flight. Before any model call it
+  // starts, so nothing on the artifact says so yet.
+  const [raisedReading, setRaisedReading] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // The comment the rail just sent you to, marked until you've had time to see it.
   const [flash, setFlash] = useState<string | null>(null);
@@ -2583,6 +2586,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setFreshness(null);
     setFreshnessError(null);
     setSendError(null);
+    setRaisedReading(false);
     fetchReview(reviewKey)
       .then((a) => {
         if (cancelled) return;
@@ -2604,12 +2608,16 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             // against the code as it stands. Nothing to do on a sent review or
             // one a run is about to replace; the run checks for itself.
             if (cancelled || a.sent || a.status === "running" || a.comments.length === 0) return;
+            // Send waits for the GitHub read too, not only for a model call
+            // the read may start: the read is what finds a new duplicate.
+            setRaisedReading(true);
             return checkRaised(reviewKey)
               .then((checking) => !cancelled && setArtifact(checking))
               .catch(() => {
                 // Refused because a run or a turn got there first, which checks
                 // when it lands. Anything else surfaces on the artifact itself.
-              });
+              })
+              .finally(() => !cancelled && setRaisedReading(false));
           });
       })
       .catch((e) => !cancelled && setError(String(e)));
@@ -2647,7 +2655,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // findings others already raised — follow it until it lands. All of them run
   // detached, so the artifact is the only thing that knows.
   const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
-  const raisedChecking = artifact?.raisedCheck?.checkingSince != null;
+  const raisedChecking = artifact?.raisedCheck?.checkingSince != null || raisedReading;
   useEffect(() => {
     if (artifact?.status !== "running" && !chatInFlight && !raisedChecking) return;
     const timer = setInterval(() => {

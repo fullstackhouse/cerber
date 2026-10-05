@@ -193,7 +193,7 @@ describe("findings somebody else already raised", () => {
     where: { kind: "thread", path: "src/a.ts", line: 2, state, replyTo: "4100000001" },
     reason: "same double count",
     decision: null,
-    replied: null,
+    replied: null, others: [],
     ...over,
   });
   const finding = (id: string, alreadyRaised: AlreadyRaised | null): Comment => ({

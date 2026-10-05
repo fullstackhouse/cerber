@@ -266,6 +266,17 @@ program
       process.exit(1);
     }
 
+    // The same wait the cockpit makes. A check run by `serve` leaves the status
+    // `ready`, so the guard above cannot see it — and sending now would post
+    // the duplicates it is about to find.
+    if (artifact.raisedCheck?.checkingSince) {
+      console.error(
+        `cerber is checking which findings of ${id} other reviewers already raised — send once it finishes. ` +
+          `If nothing is running, restart \`cerber serve\`, which clears a check that died mid-flight.`,
+      );
+      process.exit(1);
+    }
+
     const event = (
       opts.event ??
       (artifact.verdict ? eventForRecommendation(artifact.verdict.recommendation) : "COMMENT")

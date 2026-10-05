@@ -83,6 +83,7 @@ export function raisedFrom(remark: PriorRemark, reason: string): AlreadyRaised {
     reason,
     decision: null,
     replied: null,
+    others: [],
   };
 }
 
@@ -165,19 +166,34 @@ export function foldRaised(current: Artifact, result: RaisedCheckResult): Artifa
 
   const comments = current.comments.map((c) => {
     const before = c.alreadyRaised;
-    const stillThere = before ? remarks.get(before.remarkId) : undefined;
-    // The remark refreshed — its state, its line, its link — and nothing the
-    // user decided about it touched.
-    const kept: AlreadyRaised | null =
-      before && stillThere
-        ? { ...raisedFrom(stillThere, before.reason), decision: before.decision, replied: before.replied }
-        : null;
-    const fresh = (found.get(c.id) ?? []).flatMap((m) => {
-      const remark = remarks.get(m.remarkId);
-      return remark && remark.id !== kept?.remarkId ? [raisedFrom(remark, m.reason)] : [];
+    // Every remark this comment has ever matched that is still on the PR —
+    // the one shown, the ones behind it, and whatever this check found — each
+    // refreshed from the remark itself, so a thread resolved since reads as
+    // resolved without asking anyone.
+    const known = new Map<string, string>();
+    for (const m of [
+      ...(before ? [{ remarkId: before.remarkId, reason: before.reason }, ...before.others] : []),
+      ...(found.get(c.id) ?? []),
+    ]) {
+      if (remarks.has(m.remarkId) && !known.has(m.remarkId)) known.set(m.remarkId, m.reason);
+    }
+    const candidates = [...known].flatMap(([id, reason]) => {
+      const remark = remarks.get(id);
+      return remark ? [raisedFrom(remark, reason)] : [];
     });
-    const best = pickMatch(kept ? [kept, ...fresh] : fresh);
-    return best === null && before === null ? c : { ...c, alreadyRaised: best };
+    const best = pickMatch(candidates);
+    if (best === null) return before === null ? c : { ...c, alreadyRaised: null };
+    // The user's decision belongs to the remark it was made about.
+    const same = before !== null && before.remarkId === best.remarkId;
+    return {
+      ...c,
+      alreadyRaised: {
+        ...best,
+        decision: same ? before.decision : null,
+        replied: same ? before.replied : null,
+        others: candidates.filter((x) => x !== best).map((x) => ({ remarkId: x.remarkId, reason: x.reason })),
+      },
+    };
   });
 
   return {

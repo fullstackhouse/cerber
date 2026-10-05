@@ -42,10 +42,12 @@ import {
 } from "../core/send.js";
 import { raisedChanged, startRaisedCheck } from "../core/raised.js";
 import {
-  RaisedStep,
   checkAlreadyRaised,
+  claimRaisedCheck,
+  finishRaisedCheck,
   isRaisedCheckRunning,
   prepareRaisedCheck,
+  releaseRaisedCheck,
 } from "../runner/raised.js";
 import {
   listArtifacts,
@@ -122,9 +124,8 @@ const busy = (a: Artifact, otherwise: string) =>
     : otherwise;
 
 /** Run a check for already-raised findings detached; its failures land on the artifact. */
-function checkInBackground(artifact: Artifact, step?: RaisedStep): Promise<unknown> {
+function checkInBackground(artifact: Artifact): Promise<unknown> {
   return checkAlreadyRaised(artifact, {
-    step,
     log: (m) => console.log(`[raised ${artifact.id}] ${m}`),
   }).catch((err: unknown) => {
     console.error(`[raised ${artifact.id}] ${err instanceof Error ? err.message : String(err)}`);
@@ -930,25 +931,37 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     // A sent review is history, and a running one checks for itself when it lands.
     if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
-    if (inFlight(artifact) || turnInFlight(artifact)) {
+    // Before the in-flight guard, which a running check also trips: a second
+    // open while one is out is answered with what is on disk, not refused.
+    if (isRaisedCheckRunning(artifact.id)) return c.json(artifact, 202);
+    if (inFlight(artifact) || turnInFlight(artifact) || !claimRaisedCheck(artifact.id)) {
       return c.json({ error: "a run for this PR is in flight — it checks when it lands" }, 409);
     }
-    if (isRaisedCheckRunning(artifact.id)) return c.json(artifact, 202);
-    // The GitHub read happens here, in the request — a second, like the
-    // refresh before it. Only a model call is detached, and only when somebody
-    // said something new since the last check.
-    const step = await prepareRaisedCheck(artifact, { log: (m) => console.log(`[raised ${artifact.id}] ${m}`) });
-    if (!step.needsModel) {
-      const current = await loadArtifactByKey(key);
-      if (!current) return c.json({ error: "not found" }, 404);
-      // Nothing new is no write: `updatedAt` is what the queue sorts and ages
-      // rows by, and merely opening a review must not move it.
-      if (!raisedChanged(current, step.fold(current))) return c.json(current);
-      return c.json(await updateArtifactByKey(key, step.fold));
+    // The claim is held from here, across the GitHub read as well as any model
+    // call: Send waits on it, and a Send landing mid-read would post the
+    // duplicate the read was about to find. It is in memory, so a check that
+    // finds nothing new still writes nothing.
+    let detached = false;
+    try {
+      const step = await prepareRaisedCheck(artifact, { log: (m) => console.log(`[raised ${artifact.id}] ${m}`) });
+      if (!step.needsModel) {
+        const current = await loadArtifactByKey(key);
+        if (!current) return c.json({ error: "not found" }, 404);
+        // Nothing new is no write: `updatedAt` is what the queue sorts and ages
+        // rows by, and merely opening a review must not move it.
+        if (!raisedChanged(current, step.fold(current))) return c.json(current);
+        return c.json(await updateArtifactByKey(key, step.fold));
+      }
+      const marked = await updateArtifactByKey(key, (a) => startRaisedCheck(a, new Date().toISOString()));
+      if (!marked) return c.json({ error: "not found" }, 404);
+      detached = true;
+      void finishRaisedCheck(marked, step).catch((err: unknown) => {
+        console.error(`[raised ${artifact.id}] ${err instanceof Error ? err.message : String(err)}`);
+      });
+      return c.json(marked, 202);
+    } finally {
+      if (!detached) releaseRaisedCheck(artifact.id);
     }
-    const marked = await updateArtifactByKey(key, (a) => startRaisedCheck(a, new Date().toISOString()));
-    if (marked) void checkInBackground(marked, step);
-    return c.json(marked, 202);
   });
 
   // Preview what send would post, without posting anything.

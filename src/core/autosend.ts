@@ -44,12 +44,20 @@ export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSen
       reason: `confidence ${artifact.verdict.confidence}% < threshold ${threshold}%`,
     };
   }
-  // Nobody is watching an auto-send, so a check that never ran is not the same
-  // as one that found nothing: it would post every duplicate it missed.
-  if (artifact.raisedCheck?.error) {
+  // Nobody is watching an auto-send, so a check that never ran, is still
+  // running, or failed is not the same as one that found nothing: each would
+  // post every duplicate it missed. Only a finished, clean check will do.
+  const check = artifact.raisedCheck;
+  if (check?.error) {
     return {
       eligible: false,
-      reason: `could not check which findings other reviewers already raised (${artifact.raisedCheck.error})`,
+      reason: `could not check which findings other reviewers already raised (${check.error})`,
+    };
+  }
+  if (check == null || check.at == null || check.checkingSince != null) {
+    return {
+      eligible: false,
+      reason: "the check for findings other reviewers already raised has not finished",
     };
   }
   const live = artifact.comments.filter((c) => c.status !== "dropped");

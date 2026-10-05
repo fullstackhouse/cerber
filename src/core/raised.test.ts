@@ -248,6 +248,38 @@ describe("foldRaised", () => {
     expect(folded.comments[0]?.alreadyRaised).toMatchObject({ remarkId: "T_2", decision: null });
   });
 
+  it("keeps the matches behind the one shown, and falls back to them when it goes", () => {
+    const open = thread({ id: "T_open", state: "open" });
+    const resolved = thread({ id: "T_resolved", state: "resolved", replyTo: "2002" });
+    const first = foldRaised(artifact(), {
+      at,
+      remarks: [open, resolved],
+      findings: ["c1"],
+      matches: [
+        { findingId: "c1", remarkId: "T_open", reason: "open one" },
+        { findingId: "c1", remarkId: "T_resolved", reason: "resolved one" },
+      ],
+    });
+    expect(first.comments[0]?.alreadyRaised).toMatchObject({
+      remarkId: "T_open",
+      others: [{ remarkId: "T_resolved", reason: "resolved one" }],
+    });
+
+    // The open thread is deleted. Both remarks were compared already, so no
+    // model call will bring the resolved one back — it has to be remembered.
+    const decided = {
+      ...first,
+      comments: first.comments.map((c) => ({ ...c, alreadyRaised: c.alreadyRaised && { ...c.alreadyRaised, decision: "reply" as const } })),
+    };
+    const after = foldRaised(decided, { at, remarks: [resolved], findings: ["c1"], matches: [] });
+    expect(after.comments[0]?.alreadyRaised).toMatchObject({
+      remarkId: "T_resolved",
+      reason: "resolved one",
+      decision: null,
+      others: [],
+    });
+  });
+
   it("ignores matches for comments that are no longer there", () => {
     const folded = foldRaised(artifact(), {
       at,

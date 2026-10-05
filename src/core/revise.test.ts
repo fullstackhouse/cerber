@@ -268,7 +268,7 @@ describe("mergeConcurrentEdits", () => {
       where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
       reason: "same defect",
       decision: "reply" as const,
-      replied: null,
+      replied: null, others: [],
     };
     const raisedCheck = { at: "2026-08-21T10:01:00.000Z", checkingSince: null, remarks: ["T_1"], findings: ["c1"], error: null };
     const current = artifact({ comments: [comment({ id: "c1", alreadyRaised: match })], raisedCheck });

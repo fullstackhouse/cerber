@@ -201,36 +201,62 @@ export function isRaisedCheckRunning(id: string): boolean {
 }
 
 /**
- * Finish a check outside a review run — the model half of one started by
- * opening a review, or a whole one after a chat turn added a finding — and fold
- * it onto the artifact on disk. The caller has set `checkingSince`.
+ * Claim the slot for a check outside a review run: the in-flight claim every AI
+ * run takes, plus this file's own mark so the server can tell a check from a
+ * run. False when anything holds it.
  *
- * Holds the in-flight claim like any other AI run, so a re-review cannot start
- * under it and Send waits for it. If a run or a turn holds the claim, it stands
- * down and clears the mark: a review run does its own check, and a chat turn
- * starts one once it lets go. If another check holds it, that one clears the
- * mark when it lands, so this leaves it alone.
+ * Taken before the GitHub read, not only around the model call: Send waits on
+ * the claim, and a Send that slipped in while the read was still out would
+ * post a duplicate the read was about to find.
  */
-export async function checkAlreadyRaised(
-  artifact: Artifact,
-  opts: RaisedOptions & { step?: RaisedStep } = {},
-): Promise<Artifact | null> {
-  const key = artifactKey(artifact.id);
-  if (checking.has(artifact.id)) return null;
+export function claimRaisedCheck(id: string): boolean {
+  if (checking.has(id)) return false;
   try {
-    beginReview(artifact.id);
+    beginReview(id);
   } catch {
-    return updateArtifactByKey(key, (a) =>
+    return false;
+  }
+  checking.add(id);
+  return true;
+}
+
+export function releaseRaisedCheck(id: string): void {
+  checking.delete(id);
+  endReview(id);
+}
+
+/** Finish a check whose claim the caller holds, fold it onto the artifact on disk, and let go. */
+export async function finishRaisedCheck(artifact: Artifact, step: RaisedStep): Promise<Artifact | null> {
+  try {
+    const fold = step.needsModel ? await step.finish() : step.fold;
+    return await updateArtifactByKey(artifactKey(artifact.id), fold);
+  } finally {
+    releaseRaisedCheck(artifact.id);
+  }
+}
+
+/**
+ * A whole check outside a review run — after a chat turn added a finding — and
+ * folded onto the artifact on disk. The caller has set `checkingSince`.
+ *
+ * If a run or a turn holds the claim, it stands down and clears the mark: a
+ * review run does its own check, and a chat turn starts one once it lets go.
+ * If another check holds it, that one clears the mark when it lands, so this
+ * leaves it alone.
+ */
+export async function checkAlreadyRaised(artifact: Artifact, opts: RaisedOptions = {}): Promise<Artifact | null> {
+  if (checking.has(artifact.id)) return null;
+  if (!claimRaisedCheck(artifact.id)) {
+    return updateArtifactByKey(artifactKey(artifact.id), (a) =>
       a.raisedCheck ? { ...a, raisedCheck: { ...a.raisedCheck, checkingSince: null } } : a,
     );
   }
-  checking.add(artifact.id);
+  let step: RaisedStep;
   try {
-    const step = opts.step ?? (await prepareRaisedCheck(artifact, opts));
-    const fold = step.needsModel ? await step.finish() : step.fold;
-    return await updateArtifactByKey(key, fold);
-  } finally {
-    checking.delete(artifact.id);
-    endReview(artifact.id);
+    step = await prepareRaisedCheck(artifact, opts);
+  } catch (err: unknown) {
+    releaseRaisedCheck(artifact.id);
+    throw err;
   }
+  return finishRaisedCheck(artifact, step);
 }
