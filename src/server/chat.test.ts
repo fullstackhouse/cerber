@@ -55,6 +55,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     refresh: null,
     filed: null,
     handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
     chat: [],

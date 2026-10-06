@@ -67,6 +67,7 @@ function artifact(status: ArtifactStatus): Artifact {
     sent: null,
     filed: null,
     handoff: null,
+    raisedCheck: null,
     settledAt: null,
     refresh: null,
     calibration: null,

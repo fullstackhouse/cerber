@@ -39,10 +39,10 @@ queue, the same send path.
 
 | | |
 |---|---|
-| `bin/gh` | Answers every `gh` argv shape cerber uses, from `fixtures/`. The writes are recorded under `$CERBER_HOME/` and never leave the machine: a send to `sent/`, and a handoff's two to `handoffs/` (the review request moving) and `comments/` (its note). |
-| `bin/claude` | Reads the prompt on stdin, decides whether it is cerber's review prompt or its chat prompt, and replays the canned payload for that PR as `stream-json` events. |
+| `bin/gh` | Answers every `gh` argv shape cerber uses, from `fixtures/`. The writes are recorded under `$CERBER_HOME/` and never leave the machine: a send to `sent/` and its replies in other reviewers' threads to `replies/`, and a handoff's two to `handoffs/` (the review request moving) and `comments/` (its note). |
+| `bin/claude` | Reads the prompt on stdin, decides whether it is cerber's review prompt, its chat prompt, or its comparison with what others already said, and replays the canned payload as `stream-json` events. |
 | `bin/package.json` | One line: `{"type": "module"}`. The stubs are extensionless so they can be named `gh` and `claude`; this is what tells Node they are ESM. |
-| `fixtures/` | The data. One directory per PR, plus one per PR of canned model output, plus `people.json` — the demo org's cast, which is who the handoff dialog offers you. |
+| `fixtures/` | The data. One directory per PR, plus one per PR of canned model output, plus `people.json` — the demo org's cast, which is who the handoff dialog offers you. A PR's `prior-remarks.json` is what other reviewers already said on it (northwind/checkout#812 has an open bot thread and a resolved one), and its `claude/…/raised.json` is which draft comments repeat them. |
 | `home/` | The scratch `CERBER_HOME`. Gitignored, wiped on every run. |
 
 **Unknown invocations fail loudly.** A stub that answered an unrecognised call

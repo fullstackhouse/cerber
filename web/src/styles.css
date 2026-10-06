@@ -2638,3 +2638,44 @@ button {
   padding: 10px 12px;
   border-radius: 4px;
 }
+
+/* ---- already raised: another reviewer made this point first ---- */
+
+.raised {
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+  border-radius: 0 3px 3px 0;
+}
+
+.raised-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.raised-head a {
+  font-size: 10.5px;
+}
+
+.tag-raised {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+.raised-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 640px;
+}
+
+.raised-fate {
+  color: var(--fg);
+}

@@ -237,6 +237,24 @@ if (argv[0] === "api") {
     process.exit(0);
   }
 
+  // A Send's reply in somebody else's thread, for a finding they raised first.
+  const replyWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/comments\/\d+\/replies$/.test(a));
+  if (method === "POST" && replyWrite) {
+    const [, owner, repo, , number, , commentId] = replyWrite.split("/");
+    const body = fields("body")[0] ?? "";
+    const at = record("replies", owner, repo, number, { endpoint: replyWrite, method, inReplyTo: commentId, body });
+    const id = 700000000 + Number(number);
+    out(
+      JSON.stringify({
+        id,
+        html_url: `https://github.com/${owner}/${repo}/pull/${number}#discussion_r${id}`,
+        created_at: at,
+        body,
+      }),
+    );
+    process.exit(0);
+  }
+
   if (argv[1] === "user" && flag("--jq") === ".login") {
     out(readJson(path.join(FIXTURES, "account.json")).login);
     process.exit(0);
@@ -255,6 +273,20 @@ if (argv[0] === "api") {
     const owner = named("owner");
     const repo = named("repo");
     const n = Number(named("number"));
+    const query = fields("query")[0] ?? "";
+    // What others already said on the PR: its review threads and review bodies.
+    // A PR without the fixture is one nobody else has reviewed.
+    if (query.includes("reviewThreads")) {
+      const file = path.join(prDir(owner, repo, n), "prior-remarks.json");
+      const { threads, reviews } = existsSync(file) ? readJson(file) : { threads: [], reviews: [] };
+      out(
+        JSON.stringify({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: threads }, reviews: { nodes: reviews } } } },
+        }),
+      );
+      process.exit(0);
+    }
+    if (!query.includes("REVIEW_REQUESTED_EVENT")) unsupported("unhandled graphql query");
     const nodes = readJson(path.join(prDir(owner, repo, n), "review-request-events.json"));
     out(
       JSON.stringify({

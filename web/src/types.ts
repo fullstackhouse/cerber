@@ -114,6 +114,46 @@ export interface ReviewComment {
   originalLine?: number | null;
   /** The commented code is gone from the diff — it can't post inline. */
   drifted?: boolean;
+  /** Somebody else already raised this on the PR. */
+  alreadyRaised?: AlreadyRaised | null;
+}
+
+/** Where somebody else already made a point: an inline thread, or a review's body. */
+export type RaisedPlace =
+  | {
+      kind: "thread";
+      path: string;
+      line: number | null;
+      state: "open" | "resolved" | "outdated";
+      replyTo: string;
+    }
+  | { kind: "review" };
+
+/** Another reviewer already raised the same defect. Mirrors src/core/artifact.ts. */
+export interface AlreadyRaised {
+  remarkId: string;
+  by: string;
+  at: string;
+  url: string | null;
+  where: RaisedPlace;
+  /** Why the two are the same defect — and what this one adds, if anything. */
+  reason: string;
+  /** Post it anyway, or answer in their thread. Null: the default for the place. */
+  decision: "send" | "reply" | null;
+  /** The reply Send posted into their thread. */
+  replied: { at: string; url: string | null } | null;
+  /** Other remarks that raised the same thing, behind the one shown. */
+  others?: { remarkId: string; reason: string }[];
+}
+
+/** The last comparison of the draft with what others said on the PR. */
+export interface RaisedCheck {
+  at: string | null;
+  /** Set while a check runs. */
+  checkingSince: string | null;
+  remarks: string[];
+  findings: string[];
+  error: string | null;
 }
 
 /** What the user pointed at with "discuss this". */
@@ -198,6 +238,8 @@ export interface Artifact {
   filed?: Filed | null;
   /** Set when you handed this review to somebody else, and to whom. */
   handoff?: Handoff | null;
+  /** The last check for findings somebody else already raised. */
+  raisedCheck?: RaisedCheck | null;
   /** The conversation about this review. Never sent to GitHub. */
   chat?: ChatTurn[];
   /** A turn being answered right now, or the one that failed. */
@@ -294,6 +336,8 @@ export interface SendPreview {
   body: string;
   comments: { path: string; line: number; side: "RIGHT"; body: string }[];
   folded: ReviewComment[];
+  replies: { commentId: string; replyTo: string; body: string }[];
+  held: ReviewComment[];
 }
 
 export interface TrustEntry {

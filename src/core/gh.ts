@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { PrInfo, PrInfoSchema } from "./artifact.js";
+import type { PriorRemark } from "./raised.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -567,6 +568,147 @@ export async function fetchLastReviewRequest(ref: PrRef, login: string): Promise
   return lastRequestOf(raw.data?.repository?.pullRequest?.timelineItems?.nodes ?? [], login);
 }
 
+/** A review thread as GraphQL returns it, root comment only. */
+export interface RawReviewThread {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  path: string;
+  line: number | null;
+  comments: {
+    nodes: {
+      fullDatabaseId: string | number | null;
+      url: string | null;
+      createdAt: string;
+      body: string | null;
+      author: { login: string; __typename?: string } | null;
+    }[];
+  };
+}
+
+export interface RawPrReview {
+  id: string;
+  state: string;
+  submittedAt: string | null;
+  url: string | null;
+  body: string | null;
+  author: { login: string; __typename?: string } | null;
+}
+
+/**
+ * Everything others have said on the PR in review form: the inline threads, by
+ * their first comment, and the review bodies.
+ *
+ * Yours are left out — what you already said is not something a draft of yours
+ * repeats from somebody else — and so are the author's: a thread the author
+ * opens on their own PR is an explanation, not a finding. Bots stay in. A bot
+ * is very often the first to raise a thing, and some put their findings only in
+ * the review body, which is why bodies are read at all.
+ *
+ * Replies inside a thread are not read. The finding is what opened the thread;
+ * the rest is the conversation about it.
+ */
+export function priorRemarks(
+  raw: { threads: RawReviewThread[]; reviews: RawPrReview[] },
+  people: { you: string; author: string },
+): PriorRemark[] {
+  const skip = new Set([people.you.toLowerCase(), people.author.toLowerCase()]);
+  const remarks: PriorRemark[] = [];
+  for (const t of raw.threads) {
+    const first = t.comments.nodes[0];
+    // GitHub's own deleted-user placeholder, so a thread whose author left is
+    // still a thing somebody raised.
+    const by = first?.author?.login ?? "ghost";
+    if (!first || first.fullDatabaseId == null || skip.has(by.toLowerCase())) continue;
+    remarks.push({
+      kind: "thread",
+      id: t.id,
+      by,
+      bot: first.author?.__typename === "Bot",
+      at: first.createdAt,
+      body: first.body ?? "",
+      url: first.url,
+      path: t.path,
+      line: t.line,
+      state: t.isResolved ? "resolved" : t.isOutdated ? "outdated" : "open",
+      replyTo: String(first.fullDatabaseId),
+    });
+  }
+  for (const r of raw.reviews) {
+    const by = r.author?.login ?? "ghost";
+    // An empty body is a review whose whole say is in its threads, read above.
+    // A pending one is a draft nobody else can see.
+    if (!r.body?.trim() || r.submittedAt == null || skip.has(by.toLowerCase())) continue;
+    remarks.push({
+      kind: "review",
+      id: r.id,
+      by,
+      bot: r.author?.__typename === "Bot",
+      at: r.submittedAt,
+      body: r.body,
+      url: r.url,
+    });
+  }
+  return remarks;
+}
+
+// The last 100 of each, in one call. A PR past 100 threads loses its oldest
+// from the comparison — accepted rather than paginated, because the failure is
+// the conservative one: a duplicate that posts, which is what happened before
+// there was any comparison at all.
+const PRIOR_REMARKS_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      reviewThreads(last:100){
+        nodes{ id isResolved isOutdated path line
+          comments(first:1){ nodes{ fullDatabaseId url createdAt body author{ login __typename } } }
+        }
+      }
+      reviews(last:100){
+        nodes{ id state submittedAt url body author{ login __typename } }
+      }
+    }
+  }
+}`;
+
+/**
+ * Read what others have already said on a PR in review form.
+ *
+ * GraphQL because REST has no thread resolution: `pulls/N/comments` returns the
+ * comments but not whether anybody resolved the thread they are in, and that is
+ * the fact that decides what Send does with a match.
+ */
+export async function fetchPriorRemarks(
+  ref: PrRef,
+  people: { you: string; author: string },
+): Promise<PriorRemark[]> {
+  const out = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=${PRIOR_REMARKS_QUERY}`,
+    "-F",
+    `owner=${ref.owner}`,
+    "-F",
+    `repo=${ref.repo}`,
+    "-F",
+    `number=${ref.number}`,
+  ]);
+  const raw = JSON.parse(out) as {
+    data?: {
+      repository?: {
+        pullRequest?: {
+          reviewThreads?: { nodes?: RawReviewThread[] };
+          reviews?: { nodes?: RawPrReview[] };
+        };
+      };
+    };
+  };
+  const pr = raw.data?.repository?.pullRequest;
+  if (!pr) throw new Error(`GitHub returned no pull request for ${ref.owner}/${ref.repo}#${ref.number}`);
+  return priorRemarks({ threads: pr.reviewThreads?.nodes ?? [], reviews: pr.reviews?.nodes ?? [] }, people);
+}
+
 export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",
@@ -689,13 +831,78 @@ export async function postIssueComment(ref: PrRef, body: string): Promise<{ url:
 }
 
 /**
+ * Answer an existing review thread — a finding of yours that somebody else
+ * already raised, posted where they raised it instead of as a second thread.
+ *
+ * Part of Send and never anything on its own: it is called only by
+ * `postReplies`, after `submitReview` has posted the review it goes with, and
+ * only for comments the user marked "reply in their thread". GitHub files each
+ * reply under a small review of its own, which is GitHub's bookkeeping and not
+ * a second verdict: it carries no event, and the review that carries yours has
+ * already landed.
+ */
+export async function replyInThread(
+  ref: PrRef,
+  replyTo: string,
+  body: string,
+): Promise<{ url: string | null }> {
+  const out = await gh([
+    "api",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments/${replyTo}/replies`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+  ]);
+  try {
+    return { url: JSON.parse(out).html_url ?? null };
+  } catch {
+    return { url: null };
+  }
+}
+
+/** How one reply of a Send went. */
+export interface ReplyOutcome {
+  commentId: string;
+  at: string;
+  url: string | null;
+  error: string | null;
+}
+
+/**
+ * Post a Send's replies, one by one, each allowed to fail on its own.
+ *
+ * After the review, never before it: the review is the thing the user vouched
+ * for, and a review that failed must leave nothing behind for the retry to post
+ * twice. A reply that fails once the review is up is reported against its
+ * comment rather than rolled back into a claim that nothing was sent.
+ */
+export async function postReplies(
+  ref: PrRef,
+  replies: { commentId: string; replyTo: string; body: string }[],
+): Promise<ReplyOutcome[]> {
+  const outcomes: ReplyOutcome[] = [];
+  for (const r of replies) {
+    const at = new Date().toISOString();
+    try {
+      const { url } = await replyInThread(ref, r.replyTo, r.body);
+      outcomes.push({ commentId: r.commentId, at, url, error: null });
+    } catch (err: unknown) {
+      outcomes.push({ commentId: r.commentId, at, url: null, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return outcomes;
+}
+
+/**
  * THE ONLY GITHUB WRITE THAT SPEAKS AS A REVIEW.
  * Submits a review in one shot. Must only ever be called from a human act:
  * the cockpit's Send button, `cerber send` after confirmation, opt-in
  * auto-send, or a handoff that was ticked to carry the draft — which composes
  * through this same path and always as COMMENT.
- * The two writes above are the other things that reach GitHub — a handoff's
- * request swap and its note — and neither of those is a review.
+ * The other writes are a handoff's request swap and its note, neither of them
+ * a review, and the thread replies a Send carries for findings somebody else
+ * already raised (`replyInThread`).
  */
 export async function submitReview(
   ref: PrRef,

@@ -15,6 +15,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...over,
   };
 }
@@ -54,6 +55,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     refresh: null,
     filed: null,
     handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
     chat: [],
@@ -249,6 +251,31 @@ describe("mergeConcurrentEdits", () => {
     const current = artifact({ comments: [comment({ id: "c1", body: "The user's own rewrite.", editedByUser: true })] });
     const merged = mergeConcurrentEdits(b, after, current);
     expect(merged.comments[0]!.body).toBe("The user's own rewrite.");
+  });
+
+  it("keeps a match the check found, and your decision on it, under the turn's rewrite", () => {
+    // The check folds onto the disk on its own; the turn's copy of the comment
+    // predates it, and taking the turn's body must not take its stale match.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const match = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: "reply" as const,
+      replied: null, others: [],
+    };
+    const raisedCheck = { at: "2026-08-21T10:01:00.000Z", checkingSince: null, remarks: ["T_1"], findings: ["c1"], error: null };
+    const current = artifact({ comments: [comment({ id: "c1", alreadyRaised: match })], raisedCheck });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+    expect(merged.comments[0]!.alreadyRaised).toEqual(match);
+    expect(merged.raisedCheck).toEqual(raisedCheck);
   });
 
   it("does not hand a review back after you gave it away mid-turn", () => {
