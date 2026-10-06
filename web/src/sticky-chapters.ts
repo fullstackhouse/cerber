@@ -1,7 +1,7 @@
-// Whether a chapter's title stays pinned while you scroll through it. On by
-// default; browser state like the theme (theme.ts), since it is about this
-// screen rather than about reviews. Only "off" is stored - anything else,
-// or nothing, is on.
+// Whether a chapter's title, and each file's header under it, stays pinned
+// while you scroll through it. On by default; browser state like the theme
+// (theme.ts), since it is about this screen rather than about reviews. Only
+// "off" is stored - anything else, or nothing, is on.
 
 import { useState } from "react";
 

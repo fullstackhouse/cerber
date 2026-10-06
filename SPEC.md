@@ -1682,6 +1682,7 @@ static assets included. No CORS: same-origin only.
 | `GET /api/reviews/:key` | one artifact | 404 |
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
 | `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
+| `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
@@ -1813,8 +1814,11 @@ While you scroll through an open chapter its title stays pinned under the top
 bar, so ten files in you still know which chapter you are in. The pinned title
 offers the chapter's explanation, folded by default; the explanation in the
 chapter body stays where it is. Folding a pinned chapter returns to its top.
-The pin is on by default and a browser MAY switch it off from Settings; like
-the theme (§17.8) that is browser state, stored in localStorage
+Each file's header (its name and Viewed box) pins the same way, under the
+chapter's title, until the file scrolls away; folding a file from its pinned
+header returns to that header.
+The pin covers both, is on by default and a browser MAY switch it off from
+Settings; like the theme (§17.8) that is browser state, stored in localStorage
 (`cerber.stickyChapters`, `off`; anything else, or nothing, is on), not in
 `config.json`. Independently of the pin, the rail marks the chapter you are
 scrolled into.
