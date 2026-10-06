@@ -15,10 +15,11 @@ import { loadArtifact, noteHistory, saveArtifact, updateArtifactByKey } from "..
 import { withWriter } from "../core/history.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
-import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { ClaudeEvent, OFF_TOOLS, READ_TOOLS, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 import { describeEvent } from "./progress.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
+import { checkForRaised } from "./raised.js";
 
 export interface ReviewOptions {
   model?: string;
@@ -41,9 +42,6 @@ export interface ReviewOptions {
   trigger?: "daemon" | "user";
 }
 
-/** All an untrusted reviewer needs from a checkout — everything else stays off. */
-const READ_TOOLS = ["Read", "Grep", "Glob"];
-const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
 /** A trusted reviewer may run things. It still may not rewrite the PR. */
 const TRUSTED_TOOLS = [...READ_TOOLS, "Bash", "WebFetch", "WebSearch"];
 const TRUSTED_OFF_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -261,7 +259,10 @@ async function performReview(
     },
     sent: null,
     refresh: null,
+    // A new draft has new findings, compared afresh once the run has written them.
+    raisedCheck: null,
     filed: null,
+    handoff: null,
     settledAt: null,
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the
@@ -335,6 +336,7 @@ async function performReview(
         editedByUser: false,
         originalLine: null,
         drifted: false,
+        alreadyRaised: null,
       })),
       verdict: review.ai.verdict,
       run: {
@@ -373,6 +375,11 @@ async function performReview(
     if (!saved) await saveArtifact(artifact);
     throw err;
   }
+
+  // After the review and never inside it: the run writes its findings blind to
+  // what others said on the PR, and this compares them afterwards. It cannot
+  // fail the run — a check that could not finish says so on the artifact.
+  artifact = (await checkForRaised(artifact, { log }))(artifact);
 
   const merged = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
     mergeRunResult(artifact, current),

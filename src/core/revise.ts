@@ -70,9 +70,13 @@ export function mergeConcurrentEdits(
     return then.body !== now.body || then.status !== now.status || then.severity !== now.severity;
   };
 
-  const merged = current.comments.map((now) =>
-    userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now,
-  );
+  const merged = current.comments.map((now) => {
+    const chosen = userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now;
+    // Who else raised a comment is the check's to say, not the turn's: a check
+    // that landed while the turn ran — and a decision made about it — is only
+    // on disk, and the turn's copy predates both.
+    return chosen === now ? now : { ...chosen, alreadyRaised: now.alreadyRaised };
+  });
   // Comments the turn itself added are not in `current` yet. Only those: a
   // comment present in both `before` and `after` but missing from `current` is
   // one the user deleted while the turn ran, and pushing it back would undo
@@ -99,6 +103,13 @@ export function mergeConcurrentEdits(
     notified: current.notified,
     // Ticked while the turn ran, and never the turn's to touch.
     viewed: current.viewed,
+    // Nor does it compare the draft with what others said; that check folds
+    // onto the disk on its own.
+    raisedCheck: current.raisedCheck,
+    // Nor does it hand a review to anybody. A handoff that landed while the
+    // turn ran has already moved the request on GitHub, so restoring the
+    // pre-turn `null` would erase the only local record of where the PR went.
+    handoff: current.handoff,
   };
 }
 
@@ -225,6 +236,7 @@ export function applyRevisions(
               editedByUser: false,
               originalLine: null,
               drifted: false,
+              alreadyRaised: null,
             },
           ],
         };

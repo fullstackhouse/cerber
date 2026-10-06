@@ -5,6 +5,7 @@
 // the body" before anything is posted, without a round trip per keystroke.
 
 import { newSideLines } from "../../src/core/diff";
+import { sendTreatment } from "../../src/core/raised";
 import { SEVERITY_BADGE } from "../../src/core/severity";
 import { Artifact, ReviewComment, Severity, Verdict } from "./types";
 
@@ -63,18 +64,54 @@ export function rowLine(
 }
 
 /**
- * Mirrors buildReviewPayload: a comment posts inline when it can be anchored;
+ * Mirrors buildReviewPayload: a comment somebody else already raised is held
+ * back or answered in their thread (`sendTreatment`, the rule Send itself
+ * follows); of the rest, a comment posts inline when it can be anchored, and
  * everything else that isn't dropped folds into the review body.
  */
 export function splitComments(artifact: Artifact): {
   inline: ReviewComment[];
   folded: ReviewComment[];
   dropped: ReviewComment[];
+  replies: ReviewComment[];
+  held: ReviewComment[];
 } {
   const dropped = artifact.comments.filter((c) => c.status === "dropped");
-  const active = artifact.comments.filter((c) => c.status !== "dropped");
+  const live = artifact.comments.filter((c) => c.status !== "dropped");
+  const replies = live.filter((c) => sendTreatment(c) === "reply");
+  const held = live.filter((c) => sendTreatment(c) === "hold");
+  const active = live.filter((c) => sendTreatment(c) === "post");
   const inline = inlineComments(artifact.diff, active);
-  return { inline, folded: active.filter((c) => !inline.includes(c)), dropped };
+  return { inline, folded: active.filter((c) => !inline.includes(c)), dropped, replies, held };
+}
+
+/**
+ * What a comment somebody else already raised will do at Send, in the words
+ * the card uses. Null for a comment nobody else raised.
+ */
+export function raisedFate(comment: ReviewComment, sent: boolean): string | null {
+  const raised = comment.alreadyRaised;
+  if (!raised) return null;
+  if (comment.status === "dropped") return sent ? "dropped — not posted" : "dropped — never posts";
+  if (raised.replied) return "replied in their thread";
+  const treatment = sendTreatment(comment);
+  if (sent) {
+    return treatment === "reply"
+      ? "the reply in their thread did not post"
+      : treatment === "hold"
+        ? "left out of the review"
+        : "posted as a comment of its own";
+  }
+  if (treatment === "reply") return "replies in their thread when you send";
+  if (treatment === "hold") return "left out of Send";
+  return raised.decision === "send"
+    ? "posts as a comment of its own"
+    : "posts — their thread was resolved, and the problem is still here";
+}
+
+/** "open thread", "resolved thread", "review" — where they said it, in a word or two. */
+export function raisedWhere(raised: NonNullable<ReviewComment["alreadyRaised"]>): string {
+  return raised.where.kind === "thread" ? `${raised.where.state} thread` : "review";
 }
 
 /** "🚨 1 blocker · 🎨 2 nits" — live findings only; "" when nothing is graded. */
@@ -130,7 +167,16 @@ export function verdictMismatch(artifact: Artifact): string | null {
 
 /** "5 inline · 1 folded into the body" — what send is about to put on the PR. */
 export function payloadSummary(artifact: Artifact): string {
-  const { inline, folded } = splitComments(artifact);
+  const { inline, folded, replies, held } = splitComments(artifact);
+  // Said whichever body posts: neither kind of comment is in the body.
+  const raised = [
+    replies.length > 0 ? `${replies.length} ${replies.length === 1 ? "reply" : "replies"} in another reviewer's thread` : "",
+    held.length > 0 ? `${held.length} already raised, left out` : "",
+  ].filter(Boolean);
+  return [composedSummary(artifact, inline, folded), ...raised].join(" · ");
+}
+
+function composedSummary(artifact: Artifact, inline: ReviewComment[], folded: ReviewComment[]): string {
   // A hand-written body carries whatever the user left in it. "2 folded into
   // the body" is a claim about the composed one, and repeating it over a body
   // they may have cut those notes out of would be a lie in the one place the

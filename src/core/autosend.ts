@@ -1,4 +1,5 @@
 import { Artifact } from "./artifact.js";
+import { sendTreatment } from "./raised.js";
 
 export interface AutoSendDecision {
   eligible: boolean;
@@ -9,6 +10,12 @@ export interface AutoSendDecision {
  * Auto-send policy — deliberately narrow:
  * only APPROVE verdicts, at or above the confidence threshold, never a
  * re-send. COMMENT and REQUEST_CHANGES always wait for a human.
+ *
+ * Findings somebody else already raised go the way Send's default sends them:
+ * an undecided one is left out, and the reason says how many were. Nobody is
+ * there to decide, and the default is the side that posts less. A reply into
+ * someone's thread is never auto-sent — that is a decision only a person makes,
+ * and auto-send posts one review and nothing else.
  */
 export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSendDecision {
   if (artifact.sent) return { eligible: false, reason: "already sent" };
@@ -37,5 +44,35 @@ export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSen
       reason: `confidence ${artifact.verdict.confidence}% < threshold ${threshold}%`,
     };
   }
-  return { eligible: true, reason: `approve at ${artifact.verdict.confidence}% ≥ ${threshold}%` };
+  // Nobody is watching an auto-send, so a check that never ran, is still
+  // running, or failed is not the same as one that found nothing: each would
+  // post every duplicate it missed. Only a finished, clean check will do.
+  const check = artifact.raisedCheck;
+  if (check?.error) {
+    return {
+      eligible: false,
+      reason: `could not check which findings other reviewers already raised (${check.error})`,
+    };
+  }
+  if (check == null || check.at == null || check.checkingSince != null) {
+    return {
+      eligible: false,
+      reason: "the check for findings other reviewers already raised has not finished",
+    };
+  }
+  const live = artifact.comments.filter((c) => c.status !== "dropped");
+  const replies = live.filter((c) => sendTreatment(c) === "reply").length;
+  if (replies > 0) {
+    return {
+      eligible: false,
+      reason: `${replies} finding(s) marked to reply in another reviewer's thread — only a human Send posts replies`,
+    };
+  }
+  const held = live.filter((c) => sendTreatment(c) === "hold").length;
+  return {
+    eligible: true,
+    reason:
+      `approve at ${artifact.verdict.confidence}% ≥ ${threshold}%` +
+      (held > 0 ? `; ${held} finding(s) already raised by another reviewer left out` : ""),
+  };
 }

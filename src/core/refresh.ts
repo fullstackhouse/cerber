@@ -98,6 +98,11 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
     // Reading progress is the user's; a mark on a file the run saw change
     // unticks itself through its fingerprint.
     viewed: current.viewed,
+    // A decision of the user's, like the status above it: a handoff that landed
+    // while the run worked has already moved the request on GitHub, and a run
+    // that wrote `null` over it would leave the row reading "skipped" with
+    // nothing anywhere saying who has the PR now.
+    handoff: current.handoff,
     chat: current.chat,
     preChat: current.preChat,
     pendingChat: current.pendingChat,

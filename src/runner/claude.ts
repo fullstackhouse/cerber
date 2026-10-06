@@ -117,6 +117,10 @@ export function unauthenticatedEnv(base: NodeJS.ProcessEnv, emptyDir: string): N
 const NO_IDENTITY_SSH =
   "ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=/dev/null -o BatchMode=yes";
 
+/** All an untrusted reviewer needs from a checkout — everything else stays off. */
+export const READ_TOOLS = ["Read", "Grep", "Glob"];
+export const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
+
 /**
  * Generous, but finite: a wedged `claude` would otherwise hold the inflight
  * claim for that PR forever, and no re-review could ever start.

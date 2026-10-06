@@ -1,0 +1,7 @@
+[
+  { "login": "marta-k", "type": "User" },
+  { "login": "tomek-r", "type": "User" },
+  { "login": "ada-w", "type": "User" },
+  { "login": "you", "type": "User" },
+  { "login": "northwind-ci", "type": "Bot" }
+]

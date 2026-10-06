@@ -34,12 +34,44 @@ jobs:
   # commits since the last tag, bumps the version, tags, writes the GitHub
   # release notes, and publishes to npm over OIDC. Commits that change nothing
   # users can see (chore/docs/refactor/test) release nothing.
+  #
+  # Nothing here pushes to main, which is why the job's own GITHUB_TOKEN is
+  # enough. It writes two refs, neither of them a branch: the tag, and a note
+  # under refs/notes/semantic-release-* that records the release channel. The
+  # GitHub release and the npm publish are an API call and an OIDC exchange.
+  # The ruleset on main requires a pull request, and Actions cannot be excused —
+  # it is not an installable app, so the rulesets API refuses it as a bypass
+  # actor outright. A release that needs a branch push would therefore need a
+  # stored credential that can push to main; this one doesn't. See .releaserc.md.
   release:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Two merges in quick succession would otherwise run two releases at once,
+    # both computing the same next version from the same newest tag. Usually the
+    # loser is harmless — semantic-release checks `isBranchUpToDate` and
+    # declines to publish from a checkout behind the remote — but the window
+    # where neither has tagged yet is real, and the loser then fails at the tag
+    # push.
+    #
+    # `cancel-in-progress: false` is the half that matters. A release cancelled
+    # between its tag push and its publish leaves the tag standing with nothing
+    # behind it, which is the state here that needs a human judgement;
+    # `.releaserc.md` has the recovery. Note this serialises rather than queues: Actions keeps
+    # one run pending per group and cancels an older *pending* one, which is
+    # safe because whichever run survives releases every commit since the tag.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    # A timeout cannot avoid the stranded-tag state: Actions kills a wedged job
+    # at its own 360-minute default anyway, in exactly that state. All a
+    # timeout changes is how long a wedge holds this group — and since the
+    # group is serialised, that is how long every later release waits. So have
+    # one, generously above the ~1 minute a release actually takes, and accept
+    # that a wedge past the tag push needs `.releaserc.md` either way.
+    timeout-minutes: 30
     permissions:
-      contents: write # bump commit, tag, GitHub release
+      contents: write # tag, GitHub release
       issues: write # release comments
       pull-requests: write # release comments
       id-token: write # npm trusted publishing + provenance
