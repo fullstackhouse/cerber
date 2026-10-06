@@ -35,6 +35,8 @@ describe("startsInsideComment", () => {
 
   it("leaves plain code alone", () => {
     expect(startsInsideComment("const a = 1;\nconst b = a\n  * 2;")).toBe(false);
+    // A changed multiplication line comes with its context, which isn't a ` * ` line.
+    expect(startsInsideComment("function area() {\n  const x = width\n    * scale;\n  return x;\n}")).toBe(false);
     expect(startsInsideComment("")).toBe(false);
   });
 });
