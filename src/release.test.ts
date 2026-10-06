@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  */
 const require = createRequire(import.meta.url);
 const root = (name: string): URL => new URL(`../${name}`, import.meta.url);
-const releaserc = JSON.parse(readFileSync(root(".releaserc.json"), "utf8")) as {
+const releaserc = JSON.parse(readFileSync(root(".releaserc.json"), "utf8")) as Record<string, unknown> & {
   plugins: (string | [string, unknown])[];
 };
 const manifest = require("../package.json") as { version: string; release?: unknown };
@@ -29,6 +29,21 @@ describe("release config", () => {
   it("is loaded from the file these tests check", () => {
     expect(manifest.release, "a `release` key in package.json outranks .releaserc.json").toBeUndefined();
     expect(existsSync(root(".releaserc")), "a bare .releaserc outranks .releaserc.json").toBe(false);
+  });
+
+  /**
+   * `plugins` is not the only key that loads one. `lib/plugins/index.js` does
+   * `options = { ...plugins, ...options }`, so a top-level step key —
+   * `prepare`, `publish`, `verifyConditions`, … — loads a plugin on its own,
+   * and `extends` pulls in a shared config's step keys wholesale. Either would
+   * put `@semantic-release/git` back in `prepare` with the allowlist below
+   * still passing, so pin the file's shape before reading it.
+   */
+  it("wires plugins only through the key these tests check", () => {
+    expect(
+      Object.keys(releaserc).sort(),
+      "a step key or `extends` can load a release plugin past the allowlist; see .releaserc.md",
+    ).toEqual(["branches", "plugins"]);
   });
 
   it("runs only plugins that write no branch", () => {
