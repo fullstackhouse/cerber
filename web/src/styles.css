@@ -89,7 +89,7 @@
   --d2h-info-bg-color: light-dark(#f8fafd, rgba(56, 139, 253, 0.1));
   --d2h-info-border-color: light-dark(#d5e4f2, rgba(56, 139, 253, 0.4));
   --d2h-change-label-color: light-dark(#d0b44c, #d29922);
-  --d2h-moved-label-color: light-dark(#3572b0, #3572b0);
+  --d2h-moved-label-color: light-dark(#3572b0, #58a6ff);
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
@@ -312,6 +312,15 @@ button {
   border-color: var(--green-fill);
 }
 
+/* `.btn:hover` outranks the fill's class and would paint the text in --fg -
+   dark on green in light, washed out in dark. Keep the white text and shift
+   the fill instead, so the hover still shows. */
+.btn-keep-on:hover:not(:disabled) {
+  color: var(--on-fill);
+  background: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+  border-color: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+}
+
 .btn-drop-on {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 40%, transparent);
@@ -323,6 +332,14 @@ button {
   border-color: var(--fg);
   font-size: 11.5px;
   padding: 7px 14px;
+}
+
+/* `.btn:hover` outranks `.btn-dark` and would paint the text in --fg, which
+   is this button's own background. Keep the text and lighten the fill. */
+.btn-dark:hover:not(:disabled) {
+  color: var(--bg);
+  background: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  border-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
 }
 
 .btn-dark:disabled {

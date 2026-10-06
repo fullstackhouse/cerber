@@ -1905,6 +1905,10 @@ Settings; the pin is browser state, stored in localStorage (`cerber.theme`,
 pinned theme MUST apply before the first paint, so a reload never flashes the
 other one.
 
+Colours are CSS `light-dark()` pairs, so the cockpit needs a browser that has
+it: Chrome/Edge 123, Safari 17.5, Firefox 120 or newer. An older one draws the
+page without its colours.
+
 ### 17.9 Browser-Held State
 
 Three things live in localStorage rather than `config.json`, on the same rule:
@@ -2212,7 +2216,7 @@ An implementation conforms when all of the following hold:
 | §14.7 already raised | `src/core/raised.ts`, `src/runner/raised.ts` |
 | §15 auto-send | `src/core/autosend.ts` |
 | §16 HTTP API | `src/server/index.ts` |
-| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `handoff.ts`, `Markdown.tsx`, `mdblocks.ts` |
+| §17 cockpit | `web/src/inbox.ts`, `notify.ts`, `favicon.ts`, `review.ts`, `handoff.ts`, `Markdown.tsx`, `mdblocks.ts`, `theme.ts`, `styles.css` |
 | §18 CLI | `src/cli/index.ts` |
 
 ## Appendix B. Known Divergences in the Reference Implementation (non-normative)
