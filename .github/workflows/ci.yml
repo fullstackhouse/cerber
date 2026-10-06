@@ -47,6 +47,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Two merges in quick succession would otherwise run two releases at once,
+    # both computing the same next version, and the loser fails at the tag push
+    # having already published nothing — or worse, after. Queue them instead.
+    # Never cancel-in-progress: a release that is interrupted between its tag
+    # push and its publish leaves the tag standing with no version behind it,
+    # which is the one state here that needs a human to clean up.
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write # tag, GitHub release
       issues: write # release comments

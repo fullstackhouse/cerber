@@ -1919,7 +1919,10 @@ putting nonsense in front of a GitHub write.
 
 ## 18. CLI
 
-`cerber` (version derived from the package — see Appendix B.1):
+`cerber` (`--version` reports the manifest's version: the published one in an
+installed package, and the sentinel `0.0.0-development` in a build from source,
+because the release writes the version on the way to the registry and never
+commits it back — see `.releaserc.md`):
 
 - **`serve`** — the default command: reconcile (§5.3), start the daemon
   (unless `--no-poll`), start the server. Flags: `-p/--port` (4820),
@@ -2219,19 +2222,16 @@ An implementation conforms when all of the following hold:
 Found while writing this specification; the spec text above follows the code
 and tests.
 
-1. **CLI version string** — `src/cli/index.ts` pins `.version("0.5.0")` while
-   the package is well past that. The version SHOULD be derived from
-   `package.json`.
-2. **Re-review comment carryover** — README ("When the PR moves under you")
+1. **Re-review comment carryover** — README ("When the PR moves under you")
    and the cockpit's re-review tooltip say user comments survive a
    re-review; the code, its tests and `docs/lifecycle.md` implement and
    document wholesale replacement (§8.5), which CLAUDE.md records as a
    deliberate decision. The prose should be corrected to match.
-3. **Severity vocabulary** — the artifact model has three grades
+2. **Severity vocabulary** — the artifact model has three grades
    (`blocker/minor/nit`, §7.1) while `CODE_REVIEW.md`'s process ladder for
    reviewing *cerber's own PRs* uses four (`blocker/major/minor/nit`). These
    are different domains, but the collision invites confusion.
-4. **`allowUserComments`** — plumbed end-to-end (API → runner → revision
+3. **`allowUserComments`** — plumbed end-to-end (API → runner → revision
    application) but no cockpit control sets it; today it is reachable only by
    direct API call or by the model choosing to honor an in-conversation
    grant.

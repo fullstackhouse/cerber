@@ -41,7 +41,7 @@
     "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "node scripts/refuse-sentinel-publish.mjs && pnpm build"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
