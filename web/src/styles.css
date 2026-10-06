@@ -1746,6 +1746,9 @@ button {
 .hljs-symbol {
   color: var(--syn-variable);
 }
+.hljs-subst {
+  color: var(--fg);
+}
 .hljs-comment,
 .hljs-code,
 .hljs-formula {
