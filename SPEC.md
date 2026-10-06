@@ -1920,9 +1920,7 @@ putting nonsense in front of a GitHub write.
 ## 18. CLI
 
 `cerber` (`--version` reports the manifest's version: the published one in an
-installed package, and the sentinel `0.0.0-development` in a build from source,
-because the release writes the version on the way to the registry and never
-commits it back — see `.releaserc.md`):
+installed package, and `0.0.0-development` in a build from source):
 
 - **`serve`** — the default command: reconcile (§5.3), start the daemon
   (unless `--no-poll`), start the server. Flags: `-p/--port` (4820),

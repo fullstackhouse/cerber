@@ -14,7 +14,7 @@
 
 The verdict follows from these, so calibrate deliberately:
 
-- **Blocker** — breaks the no-write promise, grants the run a tool or credential it should not have, weakens trust evaluation, discards human review work, corrupts artifacts on disk, edits `version` away from the `0.0.0-development` sentinel, or cuts a tag.
+- **Blocker** — breaks the no-write promise, grants the run a tool or credential it should not have, weakens trust evaluation, discards human review work, corrupts artifacts on disk, edits `version` away from the `0.0.0-development` sentinel, or cuts a tag outside the release recovery in `.releaserc.md`.
 - **Major** — an unversioned breaking schema change, a non-atomic artifact write, an unvalidated model response, a missing `runner/inflight` claim, a shell-string command built from external input, or a `src/core/` behavior change with no test.
 - **Minor** — naming, structure, duplication, a missing graceful-degradation path for something optional.
 - **Nit** — formatting and wording. Non-blocking; prefer a follow-up issue over holding a PR.

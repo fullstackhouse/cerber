@@ -217,7 +217,9 @@ left unwritten. Code and tests win when they disagree.
 - Conventional commits — they drive the release: every green merge to `main`
   runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
   hand-bump `version` or cut a tag/release; CI owns the tag and the published
-  version. The committed `version` is the sentinel `0.0.0-development` and
+  version. The sole exception is recovering a half-finished release, which
+  deletes and re-cuts refs by hand — `.releaserc.md` has the procedure and
+  the order to check things in. The committed `version` is the sentinel `0.0.0-development` and
   stays that way — the real one is written on the way to the registry, never
   committed back, because the release may not push to `main`. Don't "fix" the
   sentinel, and don't add `@semantic-release/git` back to do it for you;
