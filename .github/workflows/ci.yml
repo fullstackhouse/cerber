@@ -34,12 +34,19 @@ jobs:
   # commits since the last tag, bumps the version, tags, writes the GitHub
   # release notes, and publishes to npm over OIDC. Commits that change nothing
   # users can see (chore/docs/refactor/test) release nothing.
+  #
+  # Nothing here pushes to main, which is why the job's own GITHUB_TOKEN is
+  # enough: the only refs it writes are the tag and the release. The ruleset on
+  # main requires a pull request, and GitHub Actions cannot be excused from it —
+  # it is not an installable app, so the rulesets API refuses it as a bypass
+  # actor outright. A release that needs a branch push would therefore need a
+  # stored credential that can push to main; this one doesn't. See .releaserc.md.
   release:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: write # bump commit, tag, GitHub release
+      contents: write # tag, GitHub release
       issues: write # release comments
       pull-requests: write # release comments
       id-token: write # npm trusted publishing + provenance
