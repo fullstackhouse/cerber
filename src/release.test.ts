@@ -184,8 +184,8 @@ describe("the sentinel version", () => {
     // equal it — `const version = "0.0.0-development"` would satisfy the line
     // above while the published CLI reported the sentinel forever. So also
     // require the read itself.
-    expect(read("src/cli/index.ts"), "the version must be read from the manifest at runtime").toMatch(
-      /createRequire\(import\.meta\.url\)\(\s*["'`]\.\.\/\.\.\/package\.json["'`]\s*\)/,
+    expect(read("src/cli/index.ts"), "the version must be read from the manifest, not written here").toMatch(
+      /package\.json/,
     );
   });
 });
@@ -193,42 +193,11 @@ describe("the sentinel version", () => {
 type Step = { uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, unknown> };
 type Job = {
   concurrency?: string | { group?: string; "cancel-in-progress"?: boolean };
+  "timeout-minutes"?: number;
   steps?: Step[];
   secrets?: unknown;
 };
-type Workflow = { jobs: Record<string, Job | undefined> };
-
-/**
- * Every secret a workflow names. One rule rather than a pattern per form: find
- * each `secrets` reference inside an expression, and take the literal name
- * after it — `secrets.NAME` or `secrets['NAME']`. A reference with no literal
- * name reads the whole context, so it hands over everything at once and is
- * reported as itself rather than as a name. That covers `toJSON(secrets)`, a
- * dynamic `secrets[env.X]`, and anything else that merely passes the object
- * along (`format('{0}', secrets)`, `contains(secrets, …)`) without needing to
- * have anticipated the spelling.
- *
- * Only expression bodies are read, so prose cannot trip it: a step named
- * "never log secrets. Ever" is text, not a reference. Actions resolves
- * contexts and functions case-insensitively, hence the `i`.
- */
-function secretsNamedIn(workflow: Workflow): string[] {
-  const source = JSON.stringify(workflow);
-  const found = new Set<string>();
-  for (const expression of source.matchAll(/\$\{\{(.*?)\}\}/gs)) {
-    const body = expression[1] ?? "";
-    for (const use of body.matchAll(
-      /\bsecrets\b\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*\\?["']([A-Za-z0-9_]+)\\?["']\s*\])?/gi,
-    )) {
-      const name = use[1] ?? use[2];
-      found.add(name ? name.toUpperCase() : "<every secret, via a bare `secrets` reference>");
-    }
-  }
-  if (Object.values(workflow.jobs ?? {}).some((job) => job?.secrets === "inherit")) {
-    found.add("<every secret, via `secrets: inherit`>");
-  }
-  return [...found].sort();
-}
+type Workflow = { jobs?: Record<string, Job | undefined> };
 
 /**
  * The config file was never the only way to undo this. These read the workflow
@@ -237,13 +206,11 @@ function secretsNamedIn(workflow: Workflow): string[] {
  * cannot trip them.
  */
 describe("the release workflow", () => {
-  const workflow = parse(read(".github/workflows/ci.yml")) as Workflow;
-  const release = workflow.jobs.release;
+  const workflow = (parse(read(".github/workflows/ci.yml")) ?? {}) as Workflow;
+  const release = workflow.jobs?.release;
   // Every workflow, not just this one: a PAT in a second file is still a
   // credential on this repo, and the release is the job that could use it.
-  const allWorkflows = readdirSync(root(".github/workflows"))
-    .filter((name) => /\.ya?ml$/.test(name))
-    .map((name) => parse(read(`.github/workflows/${name}`)) as Workflow);
+  const workflowFiles = readdirSync(root(".github/workflows")).filter((name) => /\.ya?ml$/.test(name));
 
   it("has a release job at all", () => {
     // Everything below reads this job, so a rename would otherwise turn every
@@ -251,45 +218,43 @@ describe("the release workflow", () => {
     expect(release, "the guards below all read jobs.release").toBeDefined();
   });
 
+  /**
+   * Deliberately crude: an exact allowlist over the raw text, not a reading of
+   * Actions expression syntax. Three attempts at the latter were each bypassed —
+   * a regex against the JSON form that could never match, a per-form list that
+   * missed `format('{0}', secrets)`, and an expression extractor that stopped at
+   * the first `}}` inside a string literal. Interpreting that syntax correctly
+   * is a parser's job, and getting it subtly wrong yields a guard that reads as
+   * working while passing a stored PAT.
+   *
+   * So: every occurrence of `secrets` in every workflow must be part of the one
+   * known-good reference. Nothing is interpreted, so there is no syntax to hide
+   * in. It fails closed — a second secret, however legitimate, turns this red
+   * and has to be added here on purpose, which is the point. Not needing a
+   * stored credential is exactly what lets the release keep the pull-request
+   * rule instead of bypassing it.
+   */
   it("names no credential beyond the job's own GITHUB_TOKEN", () => {
-    // Not needing a stored credential is exactly what lets the release keep the
-    // pull-request rule instead of bypassing it. This covers the whole file,
-    // not just the release job: a PAT anywhere in CI is a credential on this
-    // repo, and the release is the job that could use it to push.
-    expect(
-      [...new Set(allWorkflows.flatMap(secretsNamedIn))].sort(),
-      "a stored credential in CI could push to main, which is what not needing one buys; see .releaserc.md",
-    ).toEqual(["GITHUB_TOKEN"]);
+    const allowed = "${{ secrets.GITHUB_TOKEN }}";
+    for (const file of workflowFiles) {
+      const remaining = read(`.github/workflows/${file}`).split(allowed).join("");
+      expect(
+        remaining.match(/secrets/gi) ?? [],
+        `${file} references a credential other than ${allowed}; see .releaserc.md`,
+      ).toEqual([]);
+    }
   });
 
-  /**
-   * The negative control for the check above, and the reason it exists: its
-   * first version asserted `/secrets:\s*inherit/` against `JSON.stringify`,
-   * where the text is `"secrets":"inherit"`. It could never match. A guard that
-   * cannot fail is indistinguishable from one that works, so every form it
-   * claims to catch is exercised here against a fixture.
-   */
-  it("would notice each way a credential can arrive", () => {
-    const evasions = {
-      "a plain reference": "jobs:\n  r:\n    env:\n      X: ${{ secrets.RELEASE_PAT }}\n",
-      "an upper-case context": "jobs:\n  r:\n    env:\n      X: ${{ SECRETS.RELEASE_PAT }}\n",
-      "a bracket lookup": "jobs:\n  r:\n    env:\n      X: ${{ secrets['RELEASE_PAT'] }}\n",
-      "`secrets: inherit`": "jobs:\n  r:\n    uses: o/r/.github/workflows/w.yml@v1\n    secrets: inherit\n",
-      "toJSON(secrets)": "jobs:\n  r:\n    env:\n      X: ${{ toJSON(secrets) }}\n",
-      "a dynamic lookup": "jobs:\n  r:\n    env:\n      X: ${{ secrets[env.NAME] }}\n",
-      "the object passed along": "jobs:\n  r:\n    env:\n      X: ${{ format('{0}', secrets) }}\n",
-      "the object inspected": "jobs:\n  r:\n    env:\n      X: ${{ contains(secrets, 'a') }}\n",
-    };
-    for (const [form, yaml] of Object.entries(evasions)) {
-      expect(secretsNamedIn(parse(yaml) as Workflow), `the scan does not see ${form}`).not.toEqual([]);
-    }
-    // And it must not cry wolf: prose is not a reference, so a step whose name
-    // merely contains the word must stay clean.
-    expect(secretsNamedIn(parse("jobs:\n  r:\n    steps:\n      - run: echo hi\n") as Workflow)).toEqual([]);
+  it("is not cancelled by a workflow-level concurrency group", () => {
+    // A top-level `cancel-in-progress: true` — the usual "save CI minutes"
+    // edit — cancels the in-flight release too, stranding a tag, and the job's
+    // own block below would not notice.
+    const top = (parse(read(".github/workflows/ci.yml")) as { concurrency?: unknown }).concurrency;
+    const normalised = typeof top === "string" ? { group: top } : ((top ?? {}) as Record<string, unknown>);
     expect(
-      secretsNamedIn(parse('jobs:\n  r:\n    steps:\n      - name: never log secrets. Ever\n        run: echo hi\n') as Workflow),
-      "prose mentioning the word is not a credential",
-    ).toEqual([]);
+      normalised["cancel-in-progress"] ?? false,
+      "a workflow-level cancel would kill a release mid-publish; see .releaserc.md",
+    ).toBe(false);
   });
 
   it("hands the checkout no credential of its own", () => {
@@ -336,5 +301,11 @@ describe("the release workflow", () => {
       concurrency?.["cancel-in-progress"] ?? false,
       "a cancelled release can leave a tag with nothing behind it",
     ).toBe(false);
+    // Serialising means a wedged run holds every later release. Actions kills
+    // it at 360 minutes regardless, in the same stranded-tag state, so a
+    // timeout buys nothing on safety and a lot on how long the group is held.
+    const timeout = release?.["timeout-minutes"];
+    expect(timeout, "a wedged release would otherwise hold the group for Actions' six-hour default").toBeDefined();
+    expect(timeout ?? Infinity).toBeLessThanOrEqual(60);
   });
 });

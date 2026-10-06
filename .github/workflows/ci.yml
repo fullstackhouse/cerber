@@ -63,13 +63,13 @@ jobs:
     concurrency:
       group: release
       cancel-in-progress: false
-    # And deliberately no `timeout-minutes`. A timeout kills the job exactly
-    # like a cancel does, so it can strand a tag mid-release — the state the
-    # line above exists to avoid, reached routinely instead of by hand. The
-    # cost of going without is that a wedged publish holds this group, and
-    # every later release, for the six hours Actions allows by default. That is
-    # visible, self-healing and needs no cleanup; a stranded tag is none of
-    # those.
+    # A timeout cannot avoid the stranded-tag state: Actions kills a wedged job
+    # at its own 360-minute default anyway, in exactly that state. All a
+    # timeout changes is how long a wedge holds this group — and since the
+    # group is serialised, that is how long every later release waits. So have
+    # one, generously above the ~1 minute a release actually takes, and accept
+    # that a wedge past the tag push needs `.releaserc.md` either way.
+    timeout-minutes: 30
     permissions:
       contents: write # tag, GitHub release
       issues: write # release comments
