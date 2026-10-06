@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,7 +111,9 @@ describe("the sentinel version", () => {
     expect(
       manifest.scripts.prepublishOnly,
       "the guard must run before the build, and its failure must stop the publish",
-    ).toMatch(/^node scripts\/refuse-sentinel-publish\.mjs && /);
+      // Anchored to the end: `… && pnpm build || true` passes a prefix match
+      // while making the whole script exit 0, so the refusal stops nothing.
+    ).toMatch(/^node scripts\/refuse-sentinel-publish\.mjs && [^|;&]+$/);
   });
 
   /**
@@ -178,6 +180,13 @@ describe("the sentinel version", () => {
     );
     expect(status, `the CLI must run: ${error?.message ?? ""}${stderr}`).toBe(0);
     expect(stdout.trim(), "--version must come from the manifest, not a literal").toBe(manifest.version);
+    // Comparing output to the manifest cannot catch a literal that happens to
+    // equal it — `const version = "0.0.0-development"` would satisfy the line
+    // above while the published CLI reported the sentinel forever. So also
+    // require the read itself.
+    expect(read("src/cli/index.ts"), "the version must be read from the manifest at runtime").toMatch(
+      /createRequire\(import\.meta\.url\)\(\s*["'`]\.\.\/\.\.\/package\.json["'`]\s*\)/,
+    );
   });
 });
 
@@ -190,25 +199,34 @@ type Job = {
 type Workflow = { jobs: Record<string, Job | undefined> };
 
 /**
- * Every secret the workflow names. Four of the forms hand over *all* of them at
- * once, so they cannot be reported as a name — they are reported as themselves,
- * which is what makes them fail the equality below rather than pass unseen.
+ * Every secret a workflow names. One rule rather than a pattern per form: find
+ * each `secrets` reference inside an expression, and take the literal name
+ * after it — `secrets.NAME` or `secrets['NAME']`. A reference with no literal
+ * name reads the whole context, so it hands over everything at once and is
+ * reported as itself rather than as a name. That covers `toJSON(secrets)`, a
+ * dynamic `secrets[env.X]`, and anything else that merely passes the object
+ * along (`format('{0}', secrets)`, `contains(secrets, …)`) without needing to
+ * have anticipated the spelling.
  *
- * Actions resolves contexts and functions case-insensitively, hence the `i`.
+ * Only expression bodies are read, so prose cannot trip it: a step named
+ * "never log secrets. Ever" is text, not a reference. Actions resolves
+ * contexts and functions case-insensitively, hence the `i`.
  */
 function secretsNamedIn(workflow: Workflow): string[] {
   const source = JSON.stringify(workflow);
   const found = new Set<string>();
-  for (const m of source.matchAll(
-    /secrets\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*\\?["']([A-Za-z0-9_]+)\\?["']\s*\])/gi,
-  )) {
-    found.add((m[1] ?? m[2] ?? "").toUpperCase());
+  for (const expression of source.matchAll(/\$\{\{(.*?)\}\}/gs)) {
+    const body = expression[1] ?? "";
+    for (const use of body.matchAll(
+      /\bsecrets\b\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*\\?["']([A-Za-z0-9_]+)\\?["']\s*\])?/gi,
+    )) {
+      const name = use[1] ?? use[2];
+      found.add(name ? name.toUpperCase() : "<every secret, via a bare `secrets` reference>");
+    }
   }
   if (Object.values(workflow.jobs ?? {}).some((job) => job?.secrets === "inherit")) {
     found.add("<every secret, via `secrets: inherit`>");
   }
-  if (/toJson\s*\(\s*secrets/i.test(source)) found.add("<every secret, via toJSON(secrets)>");
-  if (/secrets\s*\[\s*(?!\\?["'])/i.test(source)) found.add("<unknown secret, via a dynamic lookup>");
   return [...found].sort();
 }
 
@@ -221,6 +239,11 @@ function secretsNamedIn(workflow: Workflow): string[] {
 describe("the release workflow", () => {
   const workflow = parse(read(".github/workflows/ci.yml")) as Workflow;
   const release = workflow.jobs.release;
+  // Every workflow, not just this one: a PAT in a second file is still a
+  // credential on this repo, and the release is the job that could use it.
+  const allWorkflows = readdirSync(root(".github/workflows"))
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => parse(read(`.github/workflows/${name}`)) as Workflow);
 
   it("has a release job at all", () => {
     // Everything below reads this job, so a rename would otherwise turn every
@@ -234,7 +257,7 @@ describe("the release workflow", () => {
     // not just the release job: a PAT anywhere in CI is a credential on this
     // repo, and the release is the job that could use it to push.
     expect(
-      secretsNamedIn(workflow),
+      [...new Set(allWorkflows.flatMap(secretsNamedIn))].sort(),
       "a stored credential in CI could push to main, which is what not needing one buys; see .releaserc.md",
     ).toEqual(["GITHUB_TOKEN"]);
   });
@@ -254,12 +277,19 @@ describe("the release workflow", () => {
       "`secrets: inherit`": "jobs:\n  r:\n    uses: o/r/.github/workflows/w.yml@v1\n    secrets: inherit\n",
       "toJSON(secrets)": "jobs:\n  r:\n    env:\n      X: ${{ toJSON(secrets) }}\n",
       "a dynamic lookup": "jobs:\n  r:\n    env:\n      X: ${{ secrets[env.NAME] }}\n",
+      "the object passed along": "jobs:\n  r:\n    env:\n      X: ${{ format('{0}', secrets) }}\n",
+      "the object inspected": "jobs:\n  r:\n    env:\n      X: ${{ contains(secrets, 'a') }}\n",
     };
     for (const [form, yaml] of Object.entries(evasions)) {
       expect(secretsNamedIn(parse(yaml) as Workflow), `the scan does not see ${form}`).not.toEqual([]);
     }
-    // And it must not cry wolf on a workflow that names nothing.
+    // And it must not cry wolf: prose is not a reference, so a step whose name
+    // merely contains the word must stay clean.
     expect(secretsNamedIn(parse("jobs:\n  r:\n    steps:\n      - run: echo hi\n") as Workflow)).toEqual([]);
+    expect(
+      secretsNamedIn(parse('jobs:\n  r:\n    steps:\n      - name: never log secrets. Ever\n        run: echo hi\n') as Workflow),
+      "prose mentioning the word is not a credential",
+    ).toEqual([]);
   });
 
   it("hands the checkout no credential of its own", () => {
@@ -270,7 +300,8 @@ describe("the release workflow", () => {
     expect(checkouts.length, "the release job must still check out the repo").toBe(1);
     const given = Object.entries(checkouts[0]?.with ?? {}).filter(
       ([key, value]) =>
-        /^(token|ssh-key|password)$/i.test(key) || (/^persist-credentials$/i.test(key) && value !== false),
+        /^(token|ssh-key|password)$/i.test(key) ||
+        (/^persist-credentials$/i.test(key) && value !== false && value !== "false"),
     );
     expect(
       given.map(([key]) => key),
@@ -285,7 +316,7 @@ describe("the release workflow", () => {
     // as a block, so a flag cannot hide in the formatting.
     const invocations = (release?.steps ?? [])
       .map((step) => step.run)
-      .filter((run): run is string => !!run && /\bsemantic-release\b/.test(run));
+      .filter((run): run is string => !!run && /(?<![@/\w-])semantic-release\b/.test(run));
     expect(invocations.length, "the release step must still invoke semantic-release").toBe(1);
     expect(invocations[0]?.trim(), "a CLI flag overrides .releaserc.json; see .releaserc.md").toMatch(
       /^(pnpm exec|npx|yarn) semantic-release$/,

@@ -56,16 +56,20 @@ jobs:
     #
     # `cancel-in-progress: false` is the half that matters. A release cancelled
     # between its tag push and its publish leaves the tag standing with nothing
-    # behind it, which is the one state here that needs a human; `.releaserc.md`
-    # has the recovery. Note this serialises rather than queues: Actions keeps
+    # behind it, which is the state here that needs a human judgement;
+    # `.releaserc.md` has the recovery. Note this serialises rather than queues: Actions keeps
     # one run pending per group and cancels an older *pending* one, which is
     # safe because whichever run survives releases every commit since the tag.
     concurrency:
       group: release
       cancel-in-progress: false
-    # The cost of never cancelling: a wedged publish would hold the group, and
-    # with it every later release, for the six hours Actions allows by default.
-    timeout-minutes: 15
+    # And deliberately no `timeout-minutes`. A timeout kills the job exactly
+    # like a cancel does, so it can strand a tag mid-release — the state the
+    # line above exists to avoid, reached routinely instead of by hand. The
+    # cost of going without is that a wedged publish holds this group, and
+    # every later release, for the six hours Actions allows by default. That is
+    # visible, self-healing and needs no cleanup; a stranded tag is none of
+    # those.
     permissions:
       contents: write # tag, GitHub release
       issues: write # release comments
