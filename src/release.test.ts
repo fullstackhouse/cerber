@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,11 +63,12 @@ describe("release config", () => {
     ).toEqual(["branches", "plugins"]);
   });
 
-  it("runs only plugins that write no branch", () => {
+  it("runs only plugins that write no branch, npm before github", () => {
     // An allowlist rather than a ban on `@semantic-release/git`, because it is
     // not the only way back to the outage: `@semantic-release/exec` can run its
     // own `git push`, and a fork or shared config can arrive under any name.
-    // Adding a plugin should cost a deliberate edit here and in `.releaserc.md`.
+    // The order is load-bearing too — `.releaserc.md`'s recovery reasons from
+    // npm publishing before the GitHub release, which is this array, not code.
     expect(
       releaserc.plugins.map(pluginName),
       "a new release plugin must be checked for whether it pushes a branch; see .releaserc.md",
@@ -89,6 +90,12 @@ describe("release config", () => {
 
 describe("the sentinel version", () => {
   const guard = fileURLToPath(root("scripts/refuse-sentinel-publish.mjs"));
+  /** A dry-run flag leaking in from the caller would make the refusal vacuous. */
+  const cleanEnv = (): NodeJS.ProcessEnv => {
+    const env = { ...process.env };
+    delete env.npm_config_dry_run;
+    return env;
+  };
 
   it("is what the manifest carries", () => {
     // The real version is written on the way to the registry and never
@@ -115,7 +122,11 @@ describe("the sentinel version", () => {
    * merge to `main`, which is the failure class this file exists to prevent.
    */
   it("refuses a publish of the committed tree", () => {
-    const { status, stderr } = spawnSync(process.execPath, [guard], { encoding: "utf8" });
+    const { status, stderr } = spawnSync(process.execPath, [guard], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 30_000,
+    });
     expect(status, "a publish of the sentinel must be refused").toBe(1);
     expect(stderr).toMatch(/Refusing to publish 0\.0\.0-development/);
   });
@@ -127,51 +138,88 @@ describe("the sentinel version", () => {
     // rather than letting one through. The guard resolves the manifest relative
     // to itself, so the fixture mirrors the layout rather than the path.
     const dir = mkdtempSync(join(tmpdir(), "cerber-publish-guard-"));
-    mkdirSync(join(dir, "scripts"));
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "probe", version: "1.2.3" }));
-    const copy = join(dir, "scripts", "refuse-sentinel-publish.mjs");
-    writeFileSync(copy, readFileSync(guard));
-    const { status, stderr } = spawnSync(process.execPath, [copy], { encoding: "utf8" });
-    expect(status, `the guard must not block a real release: ${stderr}`).toBe(0);
+    try {
+      mkdirSync(join(dir, "scripts"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "probe", version: "1.2.3" }));
+      const copy = join(dir, "scripts", "refuse-sentinel-publish.mjs");
+      writeFileSync(copy, readFileSync(guard));
+      const { status, stderr } = spawnSync(process.execPath, [copy], {
+        encoding: "utf8",
+        env: cleanEnv(),
+        timeout: 30_000,
+      });
+      expect(status, `the guard must not block a real release: ${stderr}`).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("stands aside for a dry run, which publishes nothing", () => {
-    // Also the escape hatch for @semantic-release/npm's unused
-    // `attemptPublishDryRun`: were a later version to call it from
-    // `verifyConditions` — before `prepare` writes the real version — this
-    // guard would otherwise fail every release on a dependency bump.
+    // Both npm and pnpm set this for `publish --dry-run`. It is also the escape
+    // hatch for @semantic-release/npm's unused `attemptPublishDryRun`: were a
+    // later version to call it from `verifyConditions` — before `prepare`
+    // writes the real version — this guard would otherwise fail every release.
     const { status } = spawnSync(process.execPath, [guard], {
       encoding: "utf8",
-      env: { ...process.env, npm_config_dry_run: "true" },
+      env: { ...cleanEnv(), npm_config_dry_run: "true" },
+      timeout: 30_000,
     });
-    expect(status, "`npm publish --dry-run` publishes nothing, so there is nothing to refuse").toBe(0);
+    expect(status, "`publish --dry-run` publishes nothing, so there is nothing to refuse").toBe(0);
   });
 
   it("is what the CLI reports, because it reads the manifest", () => {
     // Not a source match: `const version = "0.5.0"` passed to `.version(version)`
     // satisfies any shape assertion while being the exact drift the comment
     // above that line records. Run it and compare.
-    const { stdout, status } = spawnSync(process.execPath, ["--import", "tsx", "src/cli/index.ts", "--version"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    expect(status, `the CLI must run: ${stdout}`).toBe(0);
+    const { stdout, stderr, status, error } = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli/index.ts", "--version"],
+      { cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(status, `the CLI must run: ${error?.message ?? ""}${stderr}`).toBe(0);
     expect(stdout.trim(), "--version must come from the manifest, not a literal").toBe(manifest.version);
   });
 });
 
+type Step = { uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, unknown> };
+type Job = {
+  concurrency?: string | { group?: string; "cancel-in-progress"?: boolean };
+  steps?: Step[];
+  secrets?: unknown;
+};
+type Workflow = { jobs: Record<string, Job | undefined> };
+
+/**
+ * Every secret the workflow names. Four of the forms hand over *all* of them at
+ * once, so they cannot be reported as a name — they are reported as themselves,
+ * which is what makes them fail the equality below rather than pass unseen.
+ *
+ * Actions resolves contexts and functions case-insensitively, hence the `i`.
+ */
+function secretsNamedIn(workflow: Workflow): string[] {
+  const source = JSON.stringify(workflow);
+  const found = new Set<string>();
+  for (const m of source.matchAll(
+    /secrets\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*\\?["']([A-Za-z0-9_]+)\\?["']\s*\])/gi,
+  )) {
+    found.add((m[1] ?? m[2] ?? "").toUpperCase());
+  }
+  if (Object.values(workflow.jobs ?? {}).some((job) => job?.secrets === "inherit")) {
+    found.add("<every secret, via `secrets: inherit`>");
+  }
+  if (/toJson\s*\(\s*secrets/i.test(source)) found.add("<every secret, via toJSON(secrets)>");
+  if (/secrets\s*\[\s*(?!\\?["'])/i.test(source)) found.add("<unknown secret, via a dynamic lookup>");
+  return [...found].sort();
+}
+
 /**
  * The config file was never the only way to undo this. These read the workflow
- * as YAML rather than as text, so they see what Actions sees: a `run: |` block,
- * a `secrets['NAME']` lookup and a flow-style `with: { token: … }` are all the
- * same to a parser, and comments cannot trip them.
+ * as YAML rather than as text, so they see what Actions sees: a `run: |` block
+ * and a flow-style `with: { token: … }` are the same to a parser, and a comment
+ * cannot trip them.
  */
 describe("the release workflow", () => {
-  type Step = { uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, unknown> };
-  type Job = { concurrency?: { group?: string; "cancel-in-progress"?: boolean }; steps?: Step[] };
-  const workflow = parse(read(".github/workflows/ci.yml")) as {
-    jobs: Record<string, Job | undefined>;
-  };
+  const workflow = parse(read(".github/workflows/ci.yml")) as Workflow;
   const release = workflow.jobs.release;
 
   it("has a release job at all", () => {
@@ -182,25 +230,51 @@ describe("the release workflow", () => {
 
   it("names no credential beyond the job's own GITHUB_TOKEN", () => {
     // Not needing a stored credential is exactly what lets the release keep the
-    // pull-request rule instead of bypassing it. A PAT in an env or handed to
-    // actions/checkout would restore the branch push and fail nothing else.
-    const source = JSON.stringify(workflow);
-    const named = [
-      ...source.matchAll(/secrets\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*\\?["']([A-Za-z0-9_]+)\\?["']\s*\])/g),
-    ].map((m) => (m[1] ?? m[2] ?? "").toUpperCase());
+    // pull-request rule instead of bypassing it. This covers the whole file,
+    // not just the release job: a PAT anywhere in CI is a credential on this
+    // repo, and the release is the job that could use it to push.
     expect(
-      [...new Set(named)].sort(),
+      secretsNamedIn(workflow),
       "a stored credential in CI could push to main, which is what not needing one buys; see .releaserc.md",
     ).toEqual(["GITHUB_TOKEN"]);
-    expect(source, "`secrets: inherit` passes every secret the repo has").not.toMatch(/secrets:\s*inherit/);
-    expect(source, "toJSON(secrets) passes every secret the repo has").not.toMatch(/toJSON\(\s*secrets/);
   });
 
-  it("hands no action a credential of its own", () => {
-    const inputs = (release?.steps ?? []).flatMap((step) => Object.keys(step.with ?? {}));
+  /**
+   * The negative control for the check above, and the reason it exists: its
+   * first version asserted `/secrets:\s*inherit/` against `JSON.stringify`,
+   * where the text is `"secrets":"inherit"`. It could never match. A guard that
+   * cannot fail is indistinguishable from one that works, so every form it
+   * claims to catch is exercised here against a fixture.
+   */
+  it("would notice each way a credential can arrive", () => {
+    const evasions = {
+      "a plain reference": "jobs:\n  r:\n    env:\n      X: ${{ secrets.RELEASE_PAT }}\n",
+      "an upper-case context": "jobs:\n  r:\n    env:\n      X: ${{ SECRETS.RELEASE_PAT }}\n",
+      "a bracket lookup": "jobs:\n  r:\n    env:\n      X: ${{ secrets['RELEASE_PAT'] }}\n",
+      "`secrets: inherit`": "jobs:\n  r:\n    uses: o/r/.github/workflows/w.yml@v1\n    secrets: inherit\n",
+      "toJSON(secrets)": "jobs:\n  r:\n    env:\n      X: ${{ toJSON(secrets) }}\n",
+      "a dynamic lookup": "jobs:\n  r:\n    env:\n      X: ${{ secrets[env.NAME] }}\n",
+    };
+    for (const [form, yaml] of Object.entries(evasions)) {
+      expect(secretsNamedIn(parse(yaml) as Workflow), `the scan does not see ${form}`).not.toEqual([]);
+    }
+    // And it must not cry wolf on a workflow that names nothing.
+    expect(secretsNamedIn(parse("jobs:\n  r:\n    steps:\n      - run: echo hi\n") as Workflow)).toEqual([]);
+  });
+
+  it("hands the checkout no credential of its own", () => {
+    // The checkout is the step whose credential would outlive it and enable the
+    // push. `persist-credentials: false` is the hardening, not a credential, so
+    // it is allowed — but `true`, a `token:` or an `ssh-key:` are not.
+    const checkouts = (release?.steps ?? []).filter((step) => /actions\/checkout/.test(step.uses ?? ""));
+    expect(checkouts.length, "the release job must still check out the repo").toBe(1);
+    const given = Object.entries(checkouts[0]?.with ?? {}).filter(
+      ([key, value]) =>
+        /^(token|ssh-key|password)$/i.test(key) || (/^persist-credentials$/i.test(key) && value !== false),
+    );
     expect(
-      inputs.filter((key) => /token|ssh-key|password|credential/i.test(key)),
-      "a credential given to an action outlives the step and can push; see .releaserc.md",
+      given.map(([key]) => key),
+      "a credential given to the checkout outlives the step and can push; see .releaserc.md",
     ).toEqual([]);
   });
 
@@ -213,8 +287,8 @@ describe("the release workflow", () => {
       .map((step) => step.run)
       .filter((run): run is string => !!run && /\bsemantic-release\b/.test(run));
     expect(invocations.length, "the release step must still invoke semantic-release").toBe(1);
-    expect(invocations[0]?.trim(), "a CLI flag overrides .releaserc.json; see .releaserc.md").toBe(
-      "pnpm exec semantic-release",
+    expect(invocations[0]?.trim(), "a CLI flag overrides .releaserc.json; see .releaserc.md").toMatch(
+      /^(pnpm exec|npx|yarn) semantic-release$/,
     );
   });
 
@@ -223,9 +297,12 @@ describe("the release workflow", () => {
     // version. Cancelling one mid-release is worse: between the tag push and
     // the publish, a cancel leaves a tag with nothing published behind it —
     // the one state here that needs a human, per .releaserc.md.
-    expect(release?.concurrency?.group, "concurrent releases race for the same version").toBe("release");
+    const concurrency =
+      typeof release?.concurrency === "string" ? { group: release.concurrency } : release?.concurrency;
+    expect(concurrency?.group, "concurrent releases race for the same version").toBe("release");
+    // Actions defaults this to false, so an omitted value is the safe one.
     expect(
-      release?.concurrency?.["cancel-in-progress"],
+      concurrency?.["cancel-in-progress"] ?? false,
       "a cancelled release can leave a tag with nothing behind it",
     ).toBe(false);
   });

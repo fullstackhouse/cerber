@@ -48,10 +48,11 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # Two merges in quick succession would otherwise run two releases at once,
-    # both computing the same next version. Usually the loser is harmless —
-    # semantic-release checks `isBranchUpToDate` and declines to publish from a
-    # checkout that is behind the remote — but the window where both runs see
-    # the same head is real, and the loser then fails at the tag push.
+    # both computing the same next version from the same newest tag. Usually the
+    # loser is harmless — semantic-release checks `isBranchUpToDate` and
+    # declines to publish from a checkout behind the remote — but the window
+    # where neither has tagged yet is real, and the loser then fails at the tag
+    # push.
     #
     # `cancel-in-progress: false` is the half that matters. A release cancelled
     # between its tag push and its publish leaves the tag standing with nothing
@@ -62,6 +63,9 @@ jobs:
     concurrency:
       group: release
       cancel-in-progress: false
+    # The cost of never cancelling: a wedged publish would hold the group, and
+    # with it every later release, for the six hours Actions allows by default.
+    timeout-minutes: 15
     permissions:
       contents: write # tag, GitHub release
       issues: write # release comments

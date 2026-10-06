@@ -216,14 +216,15 @@ left unwritten. Code and tests win when they disagree.
 - `pnpm typecheck && pnpm test` must pass before commit
 - Conventional commits — they drive the release: every green merge to `main`
   runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
-  hand-bump `version` or cut a tag/release; CI owns the tag and the published
-  version. The sole exception is recovering a half-finished release, which
-  deletes and re-cuts refs by hand — `.releaserc.md` has the procedure and
-  the order to check things in. The committed `version` is the sentinel `0.0.0-development` and
-  stays that way — the real one is written on the way to the registry, never
-  committed back, because the release may not push to `main`. Don't "fix" the
-  sentinel, and don't add `@semantic-release/git` back to do it for you;
-  `.releaserc.md` says why.
+  hand-bump `version`, and never let anything but CI cut a tag or a release.
+  The one exception is a human recovering a half-finished release — deleting
+  the stranded refs so CI can re-cut them, or creating the GitHub release npm
+  already has a version for (`.releaserc.md`). Not something to do on your own
+  initiative: an agent needs the user to ask for it by name. The committed
+  `version` is the sentinel `0.0.0-development` and stays that way — the real
+  one is written on the way to the registry, never committed back, because the
+  release may not push to `main`. Don't "fix" the sentinel, and don't add
+  `@semantic-release/git` back to do it for you; `.releaserc.md` says why.
 
 ## Don'ts
 
