@@ -27,6 +27,8 @@ Work enters through two paths: a free-form task brief handed to an agent, or a f
 
 Merging into `main` is also the release: every green merge runs semantic-release, which reads the conventional commits since the last tag, bumps the version, tags, writes the GitHub release notes, and publishes to npm. That is why commit type discipline (`feat:` ships a minor, `fix:` a patch) is a delivery gate here and not a style preference, and why nobody hand-bumps `version` or cuts a tag.
 
+The release pushes no branch — only a tag and a note under `refs/notes/semantic-release-*`, with the GitHub release an API call and the npm publish an OIDC exchange — so the ruleset's pull-request requirement holds for the robot too, and the job needs no stored credential beyond its own `GITHUB_TOKEN`. The price is that `package.json` in git reads `0.0.0-development`: the version is bumped on the way to the registry, not committed back. `.releaserc.md` has the reasoning, including why adding `@semantic-release/git` back would break every release.
+
 ## Label state machine
 
 Pipeline labels are mutually exclusive: a PR carries at most one, and it names where the PR sits in the flow.
