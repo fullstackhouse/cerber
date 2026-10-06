@@ -1,4 +1,4 @@
-import { Artifact } from "./artifact.js";
+import { Artifact, Comment } from "./artifact.js";
 import { withGrade } from "./severity.js";
 
 /** Render an artifact as a standalone markdown review document. */
@@ -48,9 +48,7 @@ export function toMarkdown(artifact: Artifact): string {
       lines.push("");
       const comments = artifact.comments.filter((c) => c.chapterId === ch.id && c.status !== "dropped");
       for (const c of comments) {
-        lines.push(
-          `> **${c.path}${c.line != null ? `:${c.line}` : ""}** — ${withGrade(c.body, c.severity).replace(/\n/g, "\n> ")}`,
-        );
+        lines.push(renderComment(c));
         lines.push("");
       }
     }
@@ -65,12 +63,17 @@ export function toMarkdown(artifact: Artifact): string {
     lines.push("## Other comments");
     lines.push("");
     for (const c of orphans) {
-      lines.push(
-        `> **${c.path}${c.line != null ? `:${c.line}` : ""}** — ${withGrade(c.body, c.severity).replace(/\n/g, "\n> ")}`,
-      );
+      lines.push(renderComment(c));
       lines.push("");
     }
   }
 
   return lines.join("\n");
+}
+
+function renderComment(c: Comment): string {
+  const text = `> **${c.path}${c.line != null ? `:${c.line}` : ""}** — ${withGrade(c.body, c.severity).replace(/\n/g, "\n> ")}`;
+  // Said here too, so a reader of the export does not take a repeat for news.
+  const raised = c.alreadyRaised;
+  return raised ? `${text}\n>\n> _Already raised by @${raised.by}: ${raised.reason}_` : text;
 }

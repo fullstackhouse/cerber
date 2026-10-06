@@ -89,7 +89,7 @@
   --d2h-info-bg-color: light-dark(#f8fafd, rgba(56, 139, 253, 0.1));
   --d2h-info-border-color: light-dark(#d5e4f2, rgba(56, 139, 253, 0.4));
   --d2h-change-label-color: light-dark(#d0b44c, #d29922);
-  --d2h-moved-label-color: light-dark(#3572b0, #3572b0);
+  --d2h-moved-label-color: light-dark(#3572b0, #58a6ff);
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
@@ -312,6 +312,15 @@ button {
   border-color: var(--green-fill);
 }
 
+/* `.btn:hover` outranks the fill's class and would paint the text in --fg -
+   dark on green in light, washed out in dark. Keep the white text and shift
+   the fill instead, so the hover still shows. */
+.btn-keep-on:hover:not(:disabled) {
+  color: var(--on-fill);
+  background: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+  border-color: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+}
+
 .btn-drop-on {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 40%, transparent);
@@ -323,6 +332,14 @@ button {
   border-color: var(--fg);
   font-size: 11.5px;
   padding: 7px 14px;
+}
+
+/* `.btn:hover` outranks `.btn-dark` and would paint the text in --fg, which
+   is this button's own background. Keep the text and lighten the fill. */
+.btn-dark:hover:not(:disabled) {
+  color: var(--bg);
+  background: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  border-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
 }
 
 .btn-dark:disabled {
@@ -1226,6 +1243,11 @@ button {
   color: var(--fainter);
 }
 
+/* The chapter you are scrolled into. */
+.rail-item-here {
+  color: var(--accent);
+}
+
 .rail-group {
   margin-bottom: 2px;
 }
@@ -1362,7 +1384,9 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin-bottom: 10px;
-  overflow: hidden;
+  /* clip, not hidden: hidden makes the chapter a scroll container, and a
+     sticky title inside one never sticks. */
+  overflow: clip;
 }
 
 .chapter-head {
@@ -1372,6 +1396,37 @@ button {
   padding: 11px 16px;
   cursor: pointer;
   user-select: none;
+}
+
+.chapter-head-sticky {
+  position: sticky;
+  top: var(--top-h, 0px);
+  z-index: 4;
+  flex-wrap: wrap;
+  background: var(--surface);
+}
+
+.chapter-head-stuck {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Holds its room while the title isn't pinned, so the bar doesn't grow the
+   moment it sticks. */
+.chapter-about-idle {
+  visibility: hidden;
+}
+
+.chapter-head-about {
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+  cursor: auto;
+  user-select: text;
+}
+
+/* A comment jumped to inside a pinned chapter must clear its title too. */
+.chapter-sticky .comment {
+  scroll-margin-top: calc(var(--top-h, 0px) + 60px);
 }
 
 .chapter-body {
@@ -2032,6 +2087,149 @@ button {
   font-size: 11px;
 }
 
+/* ---- handing a review to somebody else ---- */
+
+/* The element carries the frame and no padding of its own: the padding is the
+   body's, so a click landing on the dialog itself is a click on the backdrop
+   and nothing else — which is what closes it. */
+.handoff-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+/* Written out rather than mixed from a token: `::backdrop` does not inherit
+   the custom properties of the dialog it belongs to in every browser that
+   supports the element, and a scrim that silently resolves to nothing is worse
+   than one that is not themed. A dark scrim is right over either theme. */
+.handoff-dialog::backdrop {
+  background: rgb(14 17 20 / 0.45);
+}
+
+.handoff-body {
+  padding: 16px 18px 18px;
+}
+
+.handoff-dialog .send-top {
+  margin-bottom: 12px;
+}
+
+.handoff-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* The `@` belongs to the login, so it sits against the box rather than in it —
+   typed or not, the value reads the same way. */
+.handoff-at {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+.handoff-login {
+  width: 15ch;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg);
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--sunken);
+}
+
+/* The box and the list it drops: the list is positioned against this, so the
+   dialog's own flow decides nothing about where it lands. */
+.handoff-combo {
+  position: relative;
+}
+
+.handoff-options {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 232px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+.handoff-options li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* One highlight, driven by the keyboard — the pointer moves it rather than
+   lighting a second row, so there is never a question which Enter would take. */
+.handoff-options li.on {
+  background: var(--sunken-2);
+}
+
+.handoff-option-login {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.handoff-options .faint {
+  font-size: 10.5px;
+}
+
+/* Sending the draft along with it: a switch, then what it would post. */
+.handoff-with-review {
+  margin: 12px 0 4px;
+}
+
+.handoff-with-review label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.handoff-with-review p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.handoff-with-review .body-preview {
+  margin-top: 8px;
+  max-height: 180px;
+  font-size: 11.5px;
+}
+
+.handoff-who-note {
+  margin: -4px 0 10px;
+  font-size: 11px;
+}
+
+/* What the button is about to do, in the words of the thing it does. */
+.handoff-says {
+  margin: 10px 0 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
 .sent-strip {
   display: flex;
   align-items: baseline;
@@ -2531,4 +2729,45 @@ button {
   color: var(--amber-ink);
   padding: 10px 12px;
   border-radius: 4px;
+}
+
+/* ---- already raised: another reviewer made this point first ---- */
+
+.raised {
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+  border-radius: 0 3px 3px 0;
+}
+
+.raised-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.raised-head a {
+  font-size: 10.5px;
+}
+
+.tag-raised {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+.raised-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 640px;
+}
+
+.raised-fate {
+  color: var(--fg);
 }

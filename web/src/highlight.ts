@@ -99,12 +99,41 @@ function highlightSide(
   const text = lines.map((l) => l.ctn.textContent ?? "").join("\n");
   if (!text.trim() || text.length > maxHunkChars) return;
 
-  const highlighted = splitLines(hljs.highlight(text, { language, ignoreIllegals: true }).value);
+  // A hunk can open inside a block comment whose `/*` sits in the collapsed
+  // lines above it; without the opener the comment's prose reads as code.
+  const opener = startsInsideComment(text) && hasBlockComments(language) ? "/**\n" : "";
+  const highlighted = splitLines(
+    hljs.highlight(opener + text, { language, ignoreIllegals: true }).value,
+  ).slice(opener ? 1 : 0);
   lines.forEach((line, i) => {
     const value = highlighted[i];
     if (value === undefined || !apply(line)) return;
     paint(line.ctn, value);
   });
+}
+
+/** A comment closer starts its line or follows a space; in `/\s*\/` or `**\/` it doesn't. */
+const closer = /(^|\s)\*\//m;
+const continuation = /^\s*\*(\s|$)/;
+
+/**
+ * Whether a hunk side begins inside a block comment: a closer comes before any
+ * opener, or, with no closer in sight, every line is a ` * …` continuation. An
+ * opener on a continuation line is the comment's own text.
+ */
+export function startsInsideComment(text: string): boolean {
+  const close = text.search(closer);
+  if (close === -1) {
+    const filled = text.split("\n").filter((line) => line.trim());
+    return filled.length > 0 && filled.every((line) => continuation.test(line));
+  }
+  const lead = text.slice(0, close).split("\n");
+  return lead.every((line) => continuation.test(line) || !line.includes("/*"));
+}
+
+export function hasBlockComments(language: string): boolean {
+  const value = hljs.highlight("/* */", { language, ignoreIllegals: true }).value;
+  return value.startsWith('<span class="hljs-comment">');
 }
 
 /**

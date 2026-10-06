@@ -4,13 +4,14 @@ import { Artifact as CoreArtifact } from "../../src/core/artifact";
 import {
   eventForVerdict,
   payloadSummary,
+  raisedFate,
   rowLine,
   severitySummary,
   splitComments,
   verdictBasis,
   verdictMismatch,
 } from "./review";
-import { Artifact, ReviewComment, Verdict } from "./types";
+import { AlreadyRaised, Artifact, ReviewComment, Verdict } from "./types";
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -217,5 +218,58 @@ describe("rowLine", () => {
     expect(rowLine("", "")).toBeNull();
     expect(rowLine(null, undefined)).toBeNull();
     expect(rowLine("...", "...")).toBeNull();
+  });
+});
+
+describe("findings somebody else already raised", () => {
+  const raised = (over: Partial<AlreadyRaised> = {}): AlreadyRaised => ({
+    remarkId: "T_1",
+    by: "someone",
+    at: "2026-09-30T10:00:00Z",
+    url: null,
+    where: { kind: "thread", path: "src/a.ts", line: 2, state: "open", replyTo: "1" },
+    reason: "same defect",
+    decision: null,
+    replied: null,
+    ...over,
+  });
+  const comments = [
+    comment({ id: "new" }),
+    comment({ id: "dup", alreadyRaised: raised() }),
+    comment({ id: "answer", alreadyRaised: raised({ decision: "reply" }) }),
+    comment({ id: "anyway", alreadyRaised: raised({ decision: "send" }) }),
+    comment({
+      id: "resolved",
+      alreadyRaised: raised({ where: { kind: "thread", path: "src/a.ts", line: 2, state: "resolved", replyTo: "1" } }),
+    }),
+  ];
+
+  it("splits them the way the send path does", () => {
+    const a = artifact(comments);
+    const payload = buildReviewPayload(a as unknown as CoreArtifact, "COMMENT");
+    const split = splitComments(a);
+    expect(split.inline.map((c) => c.id)).toEqual(["new", "anyway", "resolved"]);
+    expect(split.inline.length).toBe(payload.comments.length);
+    expect(split.held.map((c) => c.id)).toEqual(payload.held.map((c) => c.id));
+    expect(split.replies.map((c) => c.id)).toEqual(payload.replies.map((r) => r.commentId));
+  });
+
+  it("says what send will do with them", () => {
+    expect(payloadSummary(artifact(comments))).toBe(
+      "3 inline · 1 reply in another reviewer's thread · 1 already raised, left out",
+    );
+  });
+
+  it("tells each card its fate, before and after the send", () => {
+    const [, dup, answer, anyway, resolved] = comments;
+    expect(raisedFate(comment(), false)).toBeNull();
+    expect(raisedFate(dup!, false)).toBe("left out of Send");
+    expect(raisedFate(answer!, false)).toBe("replies in their thread when you send");
+    expect(raisedFate(anyway!, false)).toBe("posts as a comment of its own");
+    expect(raisedFate(resolved!, false)).toContain("their thread was resolved");
+    expect(raisedFate(answer!, true)).toBe("the reply in their thread did not post");
+    expect(raisedFate({ ...answer!, alreadyRaised: raised({ decision: "reply", replied: { at: "t", url: null } }) }, true)).toBe(
+      "replied in their thread",
+    );
   });
 });
