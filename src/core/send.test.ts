@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Artifact } from "./artifact.js";
 import { newSideLines } from "./diff.js";
 import { toMarkdown } from "./export.js";
-import { buildReviewPayload, eventForRecommendation } from "./send.js";
+import { buildReviewPayload, describeReplyFailures, eventForRecommendation, recordReplies } from "./send.js";
+import { AlreadyRaised, Comment } from "./artifact.js";
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
 index 111..222 100644
@@ -49,6 +50,8 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
     chat: [],
@@ -72,10 +75,10 @@ describe("buildReviewPayload", () => {
   it("sends anchorable comments inline and folds the rest into the body", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, severity: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false },
-        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, severity: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -92,9 +95,9 @@ describe("buildReviewPayload", () => {
   it("badges graded comments, inline and folded, and leaves ungraded ones bare", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "will corrupt state", chapterId: null, severity: "blocker", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 999, body: "typo in the name", chapterId: null, severity: "nit", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "3", path: "src/a.ts", line: null, body: "why this order?", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "will corrupt state", chapterId: null, severity: "blocker", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "src/a.ts", line: 999, body: "typo in the name", chapterId: null, severity: "nit", origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "src/a.ts", line: null, body: "why this order?", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -109,7 +112,7 @@ describe("buildReviewPayload", () => {
     // gone — posting inline would attach it to whatever took that line over.
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "stale anchor", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: true },
+        { id: "1", path: "src/a.ts", line: 2, body: "stale anchor", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: true, alreadyRaised: null },
       ],
     });
     const payload = buildReviewPayload(artifact, "COMMENT");
@@ -124,8 +127,8 @@ describe("buildReviewPayload", () => {
     const artifact = makeArtifact({
       bodyOverride: "Looks good to me. I ran the migration locally.\n",
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     const payload = buildReviewPayload(artifact, "APPROVE");
@@ -168,8 +171,8 @@ describe("toMarkdown", () => {
   it("renders a full review document without dropped comments", () => {
     const artifact = makeArtifact({
       comments: [
-        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false },
-        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false },
+        { id: "1", path: "src/a.ts", line: 2, body: "note", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "src/a.ts", line: 3, body: "hidden", chapterId: "core", severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     const md = toMarkdown(artifact);
@@ -178,5 +181,76 @@ describe("toMarkdown", () => {
     expect(md).toContain("### Core");
     expect(md).toContain("src/a.ts:2");
     expect(md).not.toContain("hidden");
+  });
+});
+
+describe("findings somebody else already raised", () => {
+  const thread = (over: Partial<AlreadyRaised> = {}, state: "open" | "resolved" = "open"): AlreadyRaised => ({
+    remarkId: "T_1",
+    by: "a-bot[bot]",
+    at: "2026-09-30T10:00:00Z",
+    url: "https://gh/t/1",
+    where: { kind: "thread", path: "src/a.ts", line: 2, state, replyTo: "4100000001" },
+    reason: "same double count",
+    decision: null,
+    replied: null, others: [],
+    ...over,
+  });
+  const finding = (id: string, alreadyRaised: AlreadyRaised | null): Comment => ({
+    id, path: "src/a.ts", line: 2, body: `finding ${id}`, chapterId: "core", severity: "minor",
+    origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised,
+  });
+
+  it("holds an undecided duplicate out of the review, inline and body alike", () => {
+    const payload = buildReviewPayload(
+      makeArtifact({ comments: [finding("dup", thread()), { ...finding("dup-file", thread()), line: null }] }),
+      "COMMENT",
+    );
+    expect(payload.comments).toEqual([]);
+    expect(payload.folded).toEqual([]);
+    expect(payload.body).not.toContain("finding dup");
+    expect(payload.held.map((c) => c.id)).toEqual(["dup", "dup-file"]);
+  });
+
+  it("answers in their thread when the user chose to, with the grade on it", () => {
+    const payload = buildReviewPayload(
+      makeArtifact({ comments: [finding("r", thread({ decision: "reply" }))] }),
+      "COMMENT",
+    );
+    expect(payload.comments).toEqual([]);
+    expect(payload.replies).toEqual([{ commentId: "r", replyTo: "4100000001", body: "⚠️ **minor** — finding r" }]);
+  });
+
+  it("posts as usual on 'send anyway', and on a resolved thread nobody decided about", () => {
+    const payload = buildReviewPayload(
+      makeArtifact({
+        comments: [finding("anyway", thread({ decision: "send" })), finding("resolved", thread({}, "resolved"))],
+      }),
+      "COMMENT",
+    );
+    expect(payload.comments.map((c) => c.body)).toEqual(["⚠️ **minor** — finding anyway", "⚠️ **minor** — finding resolved"]);
+    expect(payload.held).toEqual([]);
+  });
+
+  it("records the replies that posted, and says which did not", () => {
+    const artifact = makeArtifact({
+      comments: [finding("ok", thread({ decision: "reply" })), finding("bad", thread({ decision: "reply" }))],
+    });
+    const outcomes = [
+      { commentId: "ok", at: "t", url: "https://gh/reply/1", error: null },
+      { commentId: "bad", at: "t", url: null, error: "HTTP 404" },
+    ];
+    const recorded = recordReplies(artifact, outcomes);
+    expect(recorded.comments.map((c) => c.alreadyRaised?.replied)).toEqual([
+      { at: "t", url: "https://gh/reply/1" },
+      null,
+    ]);
+    expect(describeReplyFailures(outcomes)).toBe("1 reply in an existing thread did not post: HTTP 404");
+    expect(describeReplyFailures([outcomes[0]!])).toBeNull();
+  });
+
+  it("says in the export who raised it first", () => {
+    const md = toMarkdown(makeArtifact({ comments: [finding("dup", thread())] }));
+    expect(md).toContain("Already raised by @a-bot[bot]: same double count");
   });
 });

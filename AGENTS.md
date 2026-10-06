@@ -1,19 +1,27 @@
 # AGENTS.md
 
 Cerber: AI code-review cockpit. Claude reviews PRs into local JSON artifacts;
-the user walks through them in a local React cockpit. **Hard rule: cerber never
-writes to GitHub except (a) an explicit, user-confirmed Send, or (b) daemon
-auto-send that the user explicitly enabled with --auto-send — approve-only,
-confidence-threshold-gated, every decision logged to autosend.ndjson. No
-pending reviews, no comments, no reactions — reviewing is read-only.**
+the user walks through them in a local React cockpit. **Hard rule: nothing
+reaches GitHub without a deliberate human act, and only three things ever do:
+(a) an explicit, user-confirmed Send — which, for a finding somebody else
+already raised, may answer in their thread instead of opening a second one,
+but only where you chose that on the finding, (b) daemon auto-send that the user
+explicitly enabled with --auto-send — approve-only, confidence-threshold-gated,
+every decision logged to autosend.ndjson, and (c) a handoff — one confirmed
+click that moves the review request to somebody else, posts the note saying so,
+and, only if you ticked the box for it, sends the draft along as a COMMENT
+review through Send's own composition, thread replies you chose included.
+Auto-send can never hand off or reply in a thread, and a handoff never forms a
+verdict. No pending reviews, no reactions, and reviewing itself is read-only.**
 
 ## Product principles
 
 - Fewest clicks wins every tie. A capability ships **on by default with a switch
   to turn it off**, never off with a switch to turn it on — source-backed
   review, the checkout, poll and auto-review all landed that way. The single
-  deliberate exception is the GitHub write path: Send stays a human click and
-  auto-send stays opt-in.
+  deliberate exception is the GitHub write path: Send stays a human click,
+  auto-send stays opt-in, and a handoff is a dialog you fill in rather than a
+  button that fires.
 - Never ship a default that half-works. If the obvious path (open cerber → see
   the PRs awaiting you, drafts already written) needs a manual step to be
   useful, the default is wrong; fix the default instead of documenting the step.
@@ -73,7 +81,10 @@ left unwritten. Code and tests win when they disagree.
 
 - `src/core/` — artifact schema (zod, versioned — the contract between AI and
   cockpit), state store (`~/.cerber/reviews/*.json`, plain JSON, no DB),
-  gh client (shells out to `gh`, no tokens handled), diff utils,
+  gh client (shells out to `gh`, no tokens handled — and holds all three
+  writes, each named as what it is; `fetchAssignableUsers` is the read behind
+  the handoff's suggestions, and uses `assignees` rather than `collaborators`
+  because only the first works without push access), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
   matching each comment's line *text*, never a fuzzy guess), review revision
   (`revise.ts` — applies a chat turn's edits, refuses the user's own comments,
@@ -159,6 +170,19 @@ left unwritten. Code and tests win when they disagree.
   identifier, a signature that survived the plist edits, and a home
   LaunchServices will register — the fallback for any of that failing is the
   plain `osascript` tap
+- `src/core/raised.ts` + `src/runner/raised.ts` — findings somebody else
+  already raised on the PR. The review is written **blind** to existing
+  comments (anchoring, and they are third-party text) and compared afterwards:
+  `fetchPriorRemarks` reads the threads (with resolution, which only GraphQL
+  has) and review bodies of everyone but you and the author, bots included; a
+  small model with no tools judges "same defect?" in one call; the match lands
+  on the comment as `alreadyRaised`. The check runs at the end of every review,
+  on opening a review in the cockpit, and after a chat turn that added a
+  finding — incrementally (`raisedCheck` lists what was compared), so with
+  nothing new it is one GitHub read and no model call. `sendTreatment` is the
+  one rule Send and the cockpit share: undecided is left out, except on a
+  resolved thread, which posts; the user can drop it, send it anyway, or reply
+  in their thread. Nothing is ever dropped without the user
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and
@@ -192,11 +216,38 @@ left unwritten. Code and tests win when they disagree.
 - `pnpm typecheck && pnpm test` must pass before commit
 - Conventional commits — they drive the release: every green merge to `main`
   runs semantic-release, so `feat:` ships a minor and `fix:` a patch. Never
-  hand-bump `version` or cut a tag/release; CI owns both.
+  hand-bump `version`, and never let anything but CI cut a tag or a release.
+  The one exception is recovering a half-finished release: deleting stranded
+  refs so CI can re-cut them, or creating the GitHub release npm already has a
+  version for. That is for a human, or an agent the user has explicitly asked, working through `.releaserc.md` — which never deletes a tag whose version is already on the registry. Never on your own initiative, and never a step
+  the runbook does not list. The committed
+  `version` is the sentinel `0.0.0-development` and stays that way — the real
+  one is written on the way to the registry, never committed back, because the
+  release may not push to `main`. Don't "fix" the sentinel, and don't add
+  `@semantic-release/git` back to do it for you; `.releaserc.md` says why.
 
 ## Don'ts
 
-- Don't add GitHub write calls anywhere except the (future) explicit send path
+- Don't add GitHub write calls outside the four that exist: Send
+  (`submitReview`, plus `replyInThread` for the findings you marked "reply in
+  their thread" — posted by `postReplies` after the review, never on their own
+  and never by auto-send), and a handoff's two (`handOffReview`,
+  `postIssueComment`). A fifth needs the hard rule at the top of this file
+  rewritten in the same PR, not bent — and it has to be the shape those are:
+  one human click, nothing inferred, and the panel saying what will happen
+  before it does. A handoff's note is a plain
+  issue comment on purpose: `pulls/…/reviews` with a COMMENT event looks the
+  same in the thread and is a review everywhere that counts one, and only Send
+  may speak as a review.
+- Don't let a handoff form a verdict, and don't let it post the draft by
+  itself. It can carry the draft — that is what the box is for, and it goes
+  through `buildReviewPayload`/`submitReview` rather than a second composition —
+  but always as COMMENT, because handing a PR over hands the judgement over with
+  it. And the box stays off by default: a handoff is reachable from a row nobody
+  opened, where the draft is whatever the poll wrote, so defaulting it on would
+  publish an unread review under the user's name. That is the one place a
+  capability here does not ship on-by-default, and the reason is the same one
+  Send exists for.
 - Don't add a database or config wizard — plain files, zero config. Settings
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
@@ -244,6 +295,10 @@ left unwritten. Code and tests win when they disagree.
   included, since there is no response left to hand them to. A held request dies
   at a reverse proxy's read timeout and tells the user it broke while the run
   quietly succeeds
+- Don't show the review run what others already said on the PR, and don't
+  let cerber drop a finding because somebody else raised it. The comparison
+  happens after the review (`runner/raised.ts`), and a match only changes what
+  Send does by default — the user decides
 - Don't give the review run a tool it doesn't need. The default run reads and
   nothing else, and treats everything in the checkout as untrusted PR content
   rather than instructions. Only a PR the user trusted (`config.json`, `--trust`)

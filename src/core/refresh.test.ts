@@ -33,6 +33,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id">): Comment {
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...overrides,
   };
 }
@@ -71,6 +72,8 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     sent: null,
     refresh: null,
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
   chat: [],

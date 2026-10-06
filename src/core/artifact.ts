@@ -12,6 +12,67 @@ export const SCHEMA_VERSION = 1 as const;
 export const SeveritySchema = z.enum(["blocker", "minor", "nit"]);
 export type Severity = z.infer<typeof SeveritySchema>;
 
+/**
+ * Where on the PR somebody else already made a point: an inline thread, or the
+ * body of a review — some bots put their findings there and nowhere else.
+ */
+export const RaisedPlaceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("thread"),
+    path: z.string(),
+    /** Null once GitHub can no longer place the thread on the current diff. */
+    line: z.number().int().positive().nullable(),
+    /** Outdated: the code it was on has changed since. Resolved wins over outdated. */
+    state: z.enum(["open", "resolved", "outdated"]),
+    /** REST id of the thread's first comment — what a reply is posted against. */
+    replyTo: z.string(),
+  }),
+  z.object({ kind: z.literal("review") }),
+]);
+export type RaisedPlace = z.infer<typeof RaisedPlaceSchema>;
+
+/**
+ * Another reviewer — a person or a bot, never you — already raised the same
+ * defect on the PR.
+ *
+ * Found after the review, never shown to it: a review that has read earlier
+ * comments anchors on them, and they are third-party text the prompt would
+ * have to treat as hostile. So the draft is written blind, and this is the
+ * comparison afterwards (`src/runner/raised.ts`).
+ *
+ * It changes what Send does with the comment and nothing else — the comment
+ * stays in the draft, as written. What Send does is `decision`, and while it
+ * is null the default for the place applies (`sendTreatment` in
+ * `src/core/raised.ts`): left out, unless the thread was resolved, because a
+ * problem somebody marked settled that is still in the code is news.
+ */
+export const AlreadyRaisedSchema = z.object({
+  /** GitHub node id of the thread or review — how the next check finds it again. */
+  remarkId: z.string(),
+  by: z.string(),
+  at: z.string(),
+  url: z.string().nullable().default(null),
+  where: RaisedPlaceSchema,
+  /** Why the two are the same defect, in a sentence — and what this one adds, if anything. */
+  reason: z.string(),
+  /**
+   * What you chose: post it as a comment of its own anyway, or answer in their
+   * thread. Null is "not decided", which Send reads as the default above. Drop
+   * is not here: dropping is the comment's own `status`, as for any comment.
+   */
+  decision: z.enum(["send", "reply"]).nullable().default(null),
+  /** The reply Send posted into their thread. */
+  replied: z.object({ at: z.string(), url: z.string().nullable().default(null) }).nullable().default(null),
+  /**
+   * The other remarks that raised the same thing, behind the one shown. Kept
+   * because each was compared once and will not be asked about again: if the
+   * one shown is deleted, the next best takes its place instead of the
+   * finding quietly posting as new.
+   */
+  others: z.array(z.object({ remarkId: z.string(), reason: z.string() })).default([]),
+});
+export type AlreadyRaised = z.infer<typeof AlreadyRaisedSchema>;
+
 /** A draft inline comment. Never sent to GitHub unless the user explicitly sends the review. */
 export const CommentSchema = z.object({
   id: z.string(),
@@ -30,8 +91,36 @@ export const CommentSchema = z.object({
   originalLine: z.number().int().positive().nullable().default(null),
   /** The commented line no longer exists in the diff — it can't post inline. */
   drifted: z.boolean().default(false),
+  /** Somebody else already raised this on the PR. AI comments only. */
+  alreadyRaised: AlreadyRaisedSchema.nullable().default(null),
 });
 export type Comment = z.infer<typeof CommentSchema>;
+
+/**
+ * The last comparison of the draft against what others already said on the PR.
+ *
+ * It is incremental, and these lists are why: a check compares only what is
+ * new since the last one — a remark nobody has looked at yet, or a finding a
+ * chat turn added — so opening a review costs one read of GitHub and no model
+ * call unless something actually changed.
+ */
+export const RaisedCheckSchema = z.object({
+  /**
+   * When the last check that changed anything finished, or failed. A check
+   * that found nothing new writes nothing (`raisedChanged`). Null while the
+   * first is still running.
+   */
+  at: z.string().nullable().default(null),
+  /** Set while a check runs detached, so the cockpit knows to wait for it. */
+  checkingSince: z.string().nullable().default(null),
+  /** GitHub node ids of every remark compared so far. */
+  remarks: z.array(z.string()).default([]),
+  /** Ids of every finding compared so far. */
+  findings: z.array(z.string()).default([]),
+  /** Why the last check could not finish. The matches from before it stand. */
+  error: z.string().nullable().default(null),
+});
+export type RaisedCheck = z.infer<typeof RaisedCheckSchema>;
 
 /** A logical group of changes — the unit of the review walkthrough. */
 export const ChapterSchema = z.object({
@@ -170,6 +259,38 @@ export const FiledInfoSchema = z.object({
     .default(null),
 });
 export type FiledInfo = z.infer<typeof FiledInfoSchema>;
+
+/**
+ * You gave this review to somebody else.
+ *
+ * The opposite of `filed` in every way that matters: that one is a record of
+ * cerber noticing GitHub had moved past a draft, this one is a decision of
+ * yours that *moved* GitHub — the review request is theirs now and no longer
+ * yours. It is why the row is settled, so it outranks the status wherever the
+ * queue tags one.
+ *
+ * `note` is the comment that went on the PR announcing it, and null when none
+ * did — either you cleared the text, or posting it failed after the request had
+ * already moved, which is one of the half-done states a handoff can end in.
+ *
+ * The draft may go with it, if you ticked the box for that, in which case the
+ * row carries a `sent` record too. It posts as a COMMENT and never anything
+ * else: handing a PR over hands the judgement over with it, so a handoff forms
+ * no verdict of its own.
+ */
+export const HandoffInfoSchema = z.object({
+  at: z.string(),
+  /** The login GitHub now asks for. */
+  to: z.string(),
+  /** Whether cerber also took your own review request off the PR. */
+  withdrewYours: z.boolean().default(true),
+  /** The note posted on the PR, if one was. */
+  note: z
+    .object({ body: z.string(), url: z.string().nullable().default(null) })
+    .nullable()
+    .default(null),
+});
+export type HandoffInfo = z.infer<typeof HandoffInfoSchema>;
 
 /** Result of pulling a review forward onto a newer head commit. */
 export const RefreshInfoSchema = z.object({
@@ -330,6 +451,8 @@ export const ArtifactSchema = z.object({
   sent: SentInfoSchema.nullable().default(null),
   /** Set when cerber filed this draft away itself, and why. Never on a sent one. */
   filed: FiledInfoSchema.nullable().default(null),
+  /** Set when you gave this review to somebody else. Mutually exclusive with `filed`. */
+  handoff: HandoffInfoSchema.nullable().default(null),
   /**
    * When this review was settled — marked `reviewed` or `skipped`, by you or by
    * cerber filing it. Null on anything not settled.
@@ -370,6 +493,8 @@ export const ArtifactSchema = z.object({
     .optional(),
   /** Last time this review was pulled forward onto a newer head commit. */
   refresh: RefreshInfoSchema.nullable().default(null),
+  /** The last check for findings somebody else already raised. Null: never checked. */
+  raisedCheck: RaisedCheckSchema.nullable().default(null),
   calibration: CalibrationSchema.nullable().default(null),
   /** The conversation about this review. Never sent to GitHub. */
   chat: z.array(ChatTurnSchema).default([]),

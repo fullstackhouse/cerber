@@ -52,6 +52,11 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   if (error && !config) return <p className="error">{error}</p>;
   if (!config) return <p className="muted">Loading…</p>;
 
+  // The daemon's word arrives on the bell's own poll, seconds behind a switch
+  // flipped here. Unticking the machine's notification is a request for this
+  // browser's, so the lock lifts with the click rather than on the next read.
+  const machineAnnounces = daemonAnnounces && config.daemon.poll && config.daemon.notify;
+
   return (
     <div className="settings">
       <a href="#/" className="back">
@@ -120,14 +125,14 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           type="checkbox"
           checked={notify === "on"}
           disabled={
-            notify === "unsupported" || notify === "blocked" || daemonAnnounces
+            notify === "unsupported" || notify === "blocked" || machineAnnounces
           }
           onChange={toggleNotify}
         />{" "}
-        {daemonAnnounces ? "let this browser announce them instead" : NOTIFY_LABEL[notify]}
+        {machineAnnounces ? "let this browser announce them instead" : NOTIFY_LABEL[notify]}
       </label>
       <p className="muted">
-        {daemonAnnounces ? (
+        {machineAnnounces ? (
           <>
             Standing down while the machine's own notification is on — two popups for one PR is
             one too many. Untick the machine one above and this browser takes over: it names the
