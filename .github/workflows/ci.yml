@@ -39,14 +39,27 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: write # bump commit, tag, GitHub release
-      issues: write # release comments
-      pull-requests: write # release comments
+      contents: read
       id-token: write # npm trusted publishing + provenance
     steps:
+      # The ruleset on main requires a pull request, and the bump commit is the one
+      # push that cannot come from one. GITHUB_TOKEN can never be excused from it:
+      # GitHub Actions is not an installable app, so it cannot be a ruleset bypass
+      # actor at all (the API rejects it outright). A dedicated app can — installed
+      # on this repo alone, listed as the single bypass actor, and minted fresh here
+      # so the credential that may push to main expires with the job rather than
+      # sitting in the repo's secrets. Everything semantic-release touches on GitHub
+      # rides this token, which is why the job needs no `contents`/`issues`/
+      # `pull-requests` permissions of its own any more.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # semantic-release needs the full history and tags
+          token: ${{ steps.app-token.outputs.token }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -59,4 +72,4 @@ jobs:
       - name: Release
         run: pnpm exec semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

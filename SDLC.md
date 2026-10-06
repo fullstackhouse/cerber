@@ -27,6 +27,8 @@ Work enters through two paths: a free-form task brief handed to an agent, or a f
 
 Merging into `main` is also the release: every green merge runs semantic-release, which reads the conventional commits since the last tag, bumps the version, tags, writes the GitHub release notes, and publishes to npm. That is why commit type discipline (`feat:` ships a minor, `fix:` a patch) is a delivery gate here and not a style preference, and why nobody hand-bumps `version` or cuts a tag.
 
+The bump commit is the one push to `main` that cannot come from a pull request, so it is the one identity the `main` ruleset excuses: a GitHub App installed on this repository alone, named as the ruleset's only bypass actor, whose token the release job mints for itself and which expires with the job. `GITHUB_TOKEN` cannot take that role — GitHub Actions is not an installable app and cannot be a bypass actor at all — so a release that fails on `GH013: Repository rule violations` means the app, the `RELEASE_APP_ID` variable, the `RELEASE_APP_PRIVATE_KEY` secret, or the bypass entry has gone missing, not that the commits were wrong.
+
 ## Label state machine
 
 Pipeline labels are mutually exclusive: a PR carries at most one, and it names where the PR sits in the flow.
