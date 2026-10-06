@@ -866,6 +866,22 @@ describe("the tap on the machine when a PR lands", () => {
     // A loop that isn't polling discovers nothing, so it promises nothing.
     expect((await pollTimes(1)).notify).toBe(false);
   });
+
+  // Unticking the machine's notification is how the browser's gets unlocked;
+  // waiting for the next poll kept it locked for up to the whole interval.
+  it("drops the promise the moment the toggle is saved, not at the next poll", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const handle = startDaemon(options);
+    await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    // Stopped first, so no poll can be what flips it.
+    await stopAndDrain(handle);
+    expect(handle.status().notify).toBe(true);
+
+    handle.reconfigure({ trust: [], daemon: { ...daemonKnobs, notify: false } });
+    expect(handle.status().notify).toBe(false);
+    handle.reconfigure({ trust: [], daemon: daemonKnobs });
+    expect(handle.status().notify).toBe(true);
+  });
 });
 
 describe("a review you settled, and were asked for again", () => {

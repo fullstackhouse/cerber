@@ -1,6 +1,6 @@
 import { Artifact, FiledInfo, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
-import { loadConfig } from "../core/config.js";
+import { Config, loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
   Reply,
@@ -130,6 +130,13 @@ export interface DaemonHandle {
    * its first poll is already running while the port is being bound.
    */
   cockpitAt: (url: string | null) => void;
+  /**
+   * The config was just saved. Brings the knob-derived status up to date now
+   * rather than at the next poll, which can be minutes away: the cockpit's own
+   * bell stands down on `status.notify`, so a stale one leaves the browser
+   * switch locked for the rest of the interval after you untick the machine's.
+   */
+  reconfigure: (config: Config) => void;
 }
 
 /**
@@ -883,6 +890,28 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     return { reviewed, skipped, failed };
   }
 
+  /**
+   * The status fields that follow the config, set from it. The poll calls this
+   * with what it just read, and `reconfigure` with what the cockpit just saved.
+   */
+  function applyKnobs(config: Config) {
+    const knobs = config.daemon;
+    const autoReview = opts.autoReview && knobs.autoReview;
+    status.pollEnabled = knobs.poll;
+    // What the cockpit's bell defers to: a loop that isn't polling announces
+    // nothing, whatever the notify toggle says.
+    const notifyOn = opts.notify && knobs.notify;
+    // Only true while all three hold, and the third is only knowable by
+    // having tried: a notifier that isn't there is not a bell the cockpit
+    // should be standing down for.
+    const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
+    status.notify = announcing();
+    status.autoReview = autoReview;
+    // Recomputed too, so a trust rule added mid-run shows up in the strip.
+    status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
+    return { knobs, autoReview, notifyOn, announcing };
+  }
+
   /** Everything a poll writes is the poll's — including the reviews it starts,
    *  which stamp themselves as runs from inside this. */
   const poll = () => withWriter({ by: "daemon", cause: "poll" }, runPoll);
@@ -898,20 +927,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // or the knobs), so a broken file skips the tick loudly instead of
       // proceeding on guessed defaults.
       const config = await loadConfig();
-      const knobs = config.daemon;
-      const autoReview = opts.autoReview && knobs.autoReview;
-      status.pollEnabled = knobs.poll;
-      // What the cockpit's bell defers to: a loop that isn't polling announces
-      // nothing, whatever the notify toggle says.
-      const notifyOn = opts.notify && knobs.notify;
-      // Only true while all three hold, and the third is only knowable by
-      // having tried: a notifier that isn't there is not a bell the cockpit
-      // should be standing down for.
-      const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
-      status.notify = announcing();
-      status.autoReview = autoReview;
-      // Recomputed too, so a trust rule added mid-run shows up in the strip.
-      status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
+      const { knobs, autoReview, notifyOn, announcing } = applyKnobs(config);
 
       if (!knobs.poll) {
         // Deliberately off is not an outage — don't leave a stale error up, or
@@ -1019,6 +1035,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     status: () => ({ ...status }),
     cockpitAt: (url) => {
       cockpitUrl = url;
+    },
+    reconfigure: (config) => {
+      applyKnobs(config);
     },
     stop: () => {
       stopped = true;

@@ -202,7 +202,8 @@ export async function buildApp(
   });
 
   // The inbox knobs. The daemon re-reads the config every poll, so a toggle
-  // here applies on the next tick without restarting serve.
+  // here applies on the next tick without restarting serve — and what the
+  // status reports about them applies at once, since the cockpit reads it.
   app.post("/api/config/daemon", async (c) => {
     let body: Record<string, unknown>;
     try {
@@ -214,6 +215,7 @@ export async function buildApp(
       const config = await loadConfig();
       const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
       await saveConfig({ ...config, daemon });
+      opts.daemon?.reconfigure({ ...config, daemon });
       return c.json({ path: configPath(), trust: trustView(config.trust), daemon });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) {
@@ -256,6 +258,7 @@ export async function buildApp(
       });
       const trust = remove === true ? without : [...without, canonical];
       await saveConfig({ ...config, trust });
+      opts.daemon?.reconfigure({ ...config, trust });
       // Full ConfigView — the cockpit replaces its config state with this
       // wholesale, so omitting daemon would crash the Settings toggles.
       return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon });

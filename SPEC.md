@@ -964,9 +964,10 @@ failure does not overrule it.
 - The notifier call MUST be bounded (5 s in the reference) and never throw:
   the poll awaits it, and an unbounded hang would stop discovery entirely.
 - The daemon publishes whether announcements actually work here
-  (`status.notify`), recomputed immediately after each attempt, so the
-  cockpit's browser bell can stand down when the machine tap works and take
-  over the moment it does not (§17.4).
+  (`status.notify`), recomputed immediately after each attempt and whenever
+  the config is saved through the server, so the cockpit's browser bell can
+  stand down when the machine tap works and take over the moment it does not,
+  or the moment the user switches it off (§17.4).
 - **Where the platform's notifier can carry a click, clicking one MUST open the
   review it is about** (the queue, for a batch), at the cockpit address reached
   from the machine `serve` runs on — the port it actually bound, since
