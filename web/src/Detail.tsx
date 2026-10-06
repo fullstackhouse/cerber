@@ -2726,6 +2726,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
   // Viewed files the reader opened back up without unticking them.
   const [peeked, setPeeked] = useState<Set<string>>(new Set());
+  const viewedQueue = useRef<Promise<void>>(Promise.resolve());
+  const viewedTick = useRef(0);
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
   const [stickyChapters] = useStickyChapters();
@@ -3014,8 +3016,17 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       else next[path] = fingerprint;
       return { ...a, viewed: next };
     });
-    setViewed(reviewKey, path, fingerprint)
-      .then(setArtifact)
+    // One write at a time, so two ticks never race on the server, and only the
+    // last one's answer lands: an earlier answer lacks the later tick and would
+    // untick it on screen. Only `viewed` is taken from it, so nothing else that
+    // changed meanwhile is overwritten.
+    const tick = ++viewedTick.current;
+    viewedQueue.current = viewedQueue.current
+      .then(() => setViewed(reviewKey, path, fingerprint))
+      .then((saved) => {
+        if (tick !== viewedTick.current) return;
+        setArtifact((a) => (a && a.id === saved.id ? { ...a, viewed: saved.viewed } : a));
+      })
       .catch((e) => setError(String(e)));
   };
   const viewedState: ViewedState = { viewed, peeked, onToggleViewed: toggleViewed, onTogglePeek: togglePeek };

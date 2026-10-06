@@ -222,7 +222,8 @@ whatever the artifact says now rather than written over it, so a send stands, a
 draft underneath it, which is what the row shows if you change your mind — a
 handoff stands, because by then GitHub has already been told somebody else is
 reviewing this, and the chat transcript and the files you marked as viewed are
-kept. Only the draft itself is the run's to replace. A chat turn's fold (`mergeConcurrentEdits`, `src/core/revise.ts`)
+kept. Only the draft itself is the
+run's to replace. A chat turn's fold (`mergeConcurrentEdits`, `src/core/revise.ts`)
 keeps the handoff for the same reason — and the handoff refuses to start while a
 turn is being answered, which is what spares the rest of that fold the question.
 

@@ -1684,6 +1684,7 @@ static assets included. No CORS: same-origin only.
 | `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
+| `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
 | `POST …/chat` · `DELETE …/chat/pending` · `POST …/chat/reset` | §12 | **202**; 409 sent/in-flight; dismiss clears only *failed* turns |
