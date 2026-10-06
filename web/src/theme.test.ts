@@ -94,18 +94,51 @@ describe("saveTheme", () => {
 });
 
 // index.html applies the pin before the first paint and can't import theme.ts,
-// so it repeats the key and the values. A rename on one side alone would bring
-// the flash back with the switch still working - nothing else would notice.
+// so it repeats the key and the values. A drift on one side alone would bring
+// the flash back with the switch still working - nothing else would notice -
+// so the script is run, not grepped: a string can stay in it after the
+// assignment it fed is gone.
 describe("index.html's pre-paint script", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
 
+  /** Run the script against this storage; what it put on <html>, and the keys it read. */
+  const run = (stored: Record<string, string>) => {
+    const read: string[] = [];
+    const localStorage = {
+      getItem: (key: string) => {
+        read.push(key);
+        return stored[key] ?? null;
+      },
+    };
+    const document = { documentElement: { dataset: {} as DOMStringMap } };
+    new Function("localStorage", "document", script)(localStorage, document);
+    return { theme: document.documentElement.dataset.theme, read };
+  };
+
   it("reads the same key", () => {
-    expect(script).toContain(`"${THEME_KEY}"`);
+    expect(run({}).read).toEqual([THEME_KEY]);
   });
 
-  it("applies the same values", () => {
-    expect(script).toContain(`"light"`);
-    expect(script).toContain(`"dark"`);
+  it("pins what theme.ts stores", () => {
+    expect(run({ [THEME_KEY]: "light" }).theme).toBe("light");
+    expect(run({ [THEME_KEY]: "dark" }).theme).toBe("dark");
+  });
+
+  it("follows the machine for anything else", () => {
+    expect(run({}).theme).toBeUndefined();
+    expect(run({ [THEME_KEY]: "system" }).theme).toBeUndefined();
+    expect(run({ [THEME_KEY]: "Dark" }).theme).toBeUndefined();
+  });
+
+  it("shrugs off storage that can't be reached", () => {
+    const blocked = {
+      getItem: () => {
+        throw new Error("SecurityError");
+      },
+    };
+    const document = { documentElement: { dataset: {} as DOMStringMap } };
+    expect(() => new Function("localStorage", "document", script)(blocked, document)).not.toThrow();
+    expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 });
