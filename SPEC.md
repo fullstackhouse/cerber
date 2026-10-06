@@ -202,6 +202,7 @@ absent on read and materialize with the stated value.
 | `handoff` | HandoffInfo \| null | default `null`; set when the user gave the review away (§14.6). Mutually exclusive with `filed` |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
 | `notified` | `{ at, drafted }` \| null | OPTIONAL, **no default** — the announcement ledger (§9.8): `null` = the poll owes this row a tap, a record = already announced and *what* was said, absent = never meant to be announced |
+| `viewed` | record path → string | OPTIONAL — files the user marked as viewed, each with `fileFingerprint` (`src/core/diff.ts`) of its patch at the time; a mark whose fingerprint no longer matches the current diff reads as not viewed, so a push that changes the file unticks it. Only changed/context lines are hashed, so a rebase that just moves hunks keeps the mark |
 | `refresh` | RefreshInfo \| null | default `null` |
 | `raisedCheck` | RaisedCheck \| null | default `null`; the last comparison of the draft with what others already said on the PR (§14.7) — null: never checked |
 | `calibration` | Calibration \| null | default `null` |
@@ -685,7 +686,7 @@ with the status, so a settle keeps both halves of itself and a forced
 re-review clears both), a `handoff` (§14.6 — by then GitHub has already been
 told somebody else is reviewing this; a *forced* re-review drops it along with
 `filed` and `settledAt`, because forcing one is asking for the row back), the
-`filed` record, the `calibration`,
+`filed` record, the `calibration`, the `viewed` marks,
 and the chat transcript. A chat turn's fold (§12.5) carries the same `handoff`
 for the same reason, and the handoff route refuses to start while one is in
 flight so the rest of that fold never has to.
@@ -1266,7 +1267,7 @@ folded onto the *current* artifact, three-way (`before` = at turn start,
 - `status` is always `current`'s — a "mark reviewed" clicked mid-turn stands.
 - The verdict is the turn's only if the turn actually revised it; otherwise
   `current`'s. `bodyOverride` is always `current`'s — a turn never writes one, so writing or
-  clearing one mid-turn is the user's decision and stands.
+  clearing one mid-turn is the user's decision and stands. So is `viewed`.
 
 ### 12.6 Snapshot and Reset
 
@@ -1682,6 +1683,7 @@ static assets included. No CORS: same-origin only.
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
 | `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
 | `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
+| `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
 | `POST …/chat` · `DELETE …/chat/pending` · `POST …/chat/reset` | §12 | **202**; 409 sent/in-flight; dismiss clears only *failed* turns |

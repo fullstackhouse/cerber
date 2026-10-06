@@ -5,7 +5,7 @@ import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, SCHEMA_VERSION, PrInfo } from "../core/artifact.js";
 import { fetchPrInfo } from "../core/gh.js";
 import { beginReview, endReview } from "../runner/inflight.js";
-import { saveArtifact, updateArtifactByKey } from "../core/state.js";
+import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { reviewPr } from "../runner/review.js";
 import { isPureStub, stubArtifact } from "./daemon.js";
 import { buildApp } from "./index.js";
@@ -165,6 +165,24 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
     expect(body.status).toBe("running");
     expect(isPureStub(body)).toBe(false);
     expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("keeps what you marked as viewed on the stub it replaces", async () => {
+    const stub = stubArtifact({
+      owner: "acme",
+      repo: "widgets",
+      number: 42,
+      title: "Add a thing",
+      url: URL,
+      updatedAt: "2026-08-20T00:00:00Z",
+      isDraft: false,
+      author: "someone",
+    });
+    await saveArtifact({ ...stub, viewed: { "a.ts": "0badf00d" } });
+
+    const res = await post({ input: URL });
+    expect(res.status).toBe(202);
+    expect((await loadArtifact("acme/widgets#42"))!.viewed).toEqual({ "a.ts": "0badf00d" });
   });
 
   it("refuses to start a second run while one is already in flight", async () => {
