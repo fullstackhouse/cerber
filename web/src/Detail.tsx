@@ -67,6 +67,7 @@ import {
   verdictBasis,
   verdictMismatch,
 } from "./review";
+import { isSend, useSendKey } from "./sendkey";
 import {
   Artifact,
   Chapter,
@@ -1505,6 +1506,7 @@ function ChatPanel({
   const [draft, setDraft] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sendKey] = useSendKey();
   const chat = artifact.chat ?? [];
   const pending = artifact.pendingChat ?? null;
   // A turn runs detached, so "busy" outlives the request that started it: it
@@ -1626,15 +1628,27 @@ function ChatPanel({
               value={draft}
               // Only the send is blocked while a turn runs — composing the next
               // message during the minutes it takes is exactly what you want to do.
-              disabled={starting}
+              // Read-only rather than disabled for the moment the send is on the
+              // wire: a disabled box drops focus, and the next message would
+              // start with a click back into it.
+              readOnly={starting}
               placeholder={
                 chat.length === 0
                   ? "the summary restates the author's claims — say what you actually verified"
                   : "say more…"
               }
               onChange={(e) => setDraft(e.target.value)}
+              title={
+                sendKey === "enter"
+                  ? "Enter sends · Shift+Enter for a new line"
+                  : "⌘↵ sends · Enter for a new line"
+              }
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+                if (!isSend(sendKey, { ...e, isComposing: e.nativeEvent.isComposing })) return;
+                // Swallowed even while a turn runs, when the send is a no-op:
+                // a newline appearing instead would read as the send failing.
+                e.preventDefault();
+                send();
               }}
             />
             <MarkdownPreview className="chat-turn-body" text={draft} />
@@ -1642,7 +1656,7 @@ function ChatPanel({
               <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
                 <Icon name="send" />
                 {inFlight ? "waiting for the answer…" : starting ? "sending…" : "send message"}
-                <Key>⌘↵</Key>
+                <Key>{sendKey === "enter" ? "↵" : "⌘↵"}</Key>
               </button>
               <span className="grow" />
               {artifact.preChat && (
