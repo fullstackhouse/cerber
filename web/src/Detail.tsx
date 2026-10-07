@@ -1531,6 +1531,9 @@ function ChatPanel({
     start(draft.trim(), refs, () => {
       setDraft("");
       onClearRefs();
+      // A click on the button took focus with it; the next message starts
+      // in the box either way, not with a click back into it.
+      inputRef.current?.focus();
     });
 
   return (

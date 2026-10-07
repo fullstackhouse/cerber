@@ -37,24 +37,46 @@ export function isSend(choice: SendKey, e: SendKeyEvent): boolean {
   return choice === "enter" && !e.shiftKey;
 }
 
-function stored(): SendKey {
+// The choice this tab made when storage refused to keep it (private mode, a
+// locked-down profile). Settings and the chat box each read the choice when
+// they mount, so without this the chat would read the default straight back
+// and the switch would only ever have moved its own radio.
+let unsaved: SendKey | null = null;
+
+type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** The choice in force: this tab's unsaved one if storage refused it, else the stored one. */
+export function loadSendKey(storage?: Store): SendKey {
+  if (unsaved) return unsaved;
   try {
-    return parseSendKey(localStorage.getItem(SEND_KEY));
+    // Inside the try: with site data blocked, merely reading
+    // `window.localStorage` throws.
+    return parseSendKey((storage ?? localStorage).getItem(SEND_KEY));
   } catch {
     return "mod-enter";
   }
 }
 
+/**
+ * Store a choice. The default clears the key rather than storing a value, so
+ * an absent key and the default are one state. Storage that refuses is not an
+ * error: the choice holds for this tab, and a reload sends on ⌘↵ again.
+ */
+export function saveSendKey(choice: SendKey, storage?: Store): void {
+  try {
+    const store = storage ?? localStorage;
+    if (choice === "mod-enter") store.removeItem(SEND_KEY);
+    else store.setItem(SEND_KEY, choice);
+    unsaved = null;
+  } catch {
+    unsaved = choice;
+  }
+}
+
 export function useSendKey(): [SendKey, (choice: SendKey) => void] {
-  const [choice, setChoice] = useState<SendKey>(stored);
+  const [choice, setChoice] = useState<SendKey>(() => loadSendKey());
   const set = (next: SendKey) => {
-    try {
-      if (next === "mod-enter") localStorage.removeItem(SEND_KEY);
-      else localStorage.setItem(SEND_KEY, next);
-    } catch {
-      // Storage refused (private mode, a locked-down profile). The switch still
-      // applies to this tab; a reload just sends on ⌘↵ again.
-    }
+    saveSendKey(next);
     setChoice(next);
   };
   return [choice, set];

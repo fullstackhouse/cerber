@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSend, parseSendKey, SendKeyEvent } from "./sendkey";
+import { isSend, loadSendKey, parseSendKey, saveSendKey, SEND_KEY, SendKeyEvent } from "./sendkey";
 
 const key = (over: Partial<SendKeyEvent> = {}): SendKeyEvent => ({
   key: "Enter",
@@ -49,5 +49,49 @@ describe("isSend", () => {
   it("ignores every other key", () => {
     expect(isSend("enter", key({ key: "a" }))).toBe(false);
     expect(isSend("enter", key({ key: "Escape", metaKey: true }))).toBe(false);
+  });
+});
+
+describe("saveSendKey / loadSendKey", () => {
+  const memory = () => {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+      removeItem: (k: string) => void data.delete(k),
+    };
+  };
+  const refusing = () => ({
+    getItem: () => null,
+    setItem: () => {
+      throw new Error("QuotaExceededError");
+    },
+    removeItem: () => {
+      throw new Error("QuotaExceededError");
+    },
+  });
+
+  it("stores the alternative and clears the key for the default", () => {
+    const store = memory();
+    saveSendKey("enter", store);
+    expect(store.data.get(SEND_KEY)).toBe("enter");
+    expect(loadSendKey(store)).toBe("enter");
+    saveSendKey("mod-enter", store);
+    expect(store.data.has(SEND_KEY)).toBe(false);
+    expect(loadSendKey(store)).toBe("mod-enter");
+  });
+
+  it("keeps a choice storage refused for the rest of this tab", () => {
+    saveSendKey("enter", refusing());
+    // What the chat box reads when it mounts after Settings has unmounted.
+    expect(loadSendKey(refusing())).toBe("enter");
+  });
+
+  it("lets a stored choice take over once storage accepts one again", () => {
+    saveSendKey("enter", refusing());
+    const store = memory();
+    saveSendKey("mod-enter", store);
+    expect(loadSendKey(store)).toBe("mod-enter");
   });
 });
