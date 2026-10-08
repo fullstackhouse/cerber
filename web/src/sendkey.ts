@@ -22,6 +22,8 @@ export interface SendKeyEvent {
   metaKey: boolean;
   ctrlKey: boolean;
   isComposing: boolean;
+  /** 229 marks a key the input method handled. */
+  keyCode: number;
 }
 
 /**
@@ -29,10 +31,12 @@ export interface SendKeyEvent {
  * choice, so the default never stops working once Enter is switched on; plain
  * Enter sends only under "enter", where Shift+Enter is the new line. Never
  * mid-composition, where Enter picks the IME's candidate rather than finishing
- * the message.
+ * the message. Safari delivers that Enter after `compositionend`, with
+ * `isComposing` already false, so it is caught by the keyCode the input method
+ * leaves on it instead.
  */
 export function isSend(choice: SendKey, e: SendKeyEvent): boolean {
-  if (e.key !== "Enter" || e.isComposing) return false;
+  if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return false;
   if (e.metaKey || e.ctrlKey) return true;
   return choice === "enter" && !e.shiftKey;
 }

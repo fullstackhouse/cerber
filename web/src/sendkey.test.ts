@@ -7,6 +7,7 @@ const key = (over: Partial<SendKeyEvent> = {}): SendKeyEvent => ({
   metaKey: false,
   ctrlKey: false,
   isComposing: false,
+  keyCode: 13,
   ...over,
 });
 
@@ -44,6 +45,12 @@ describe("isSend", () => {
   it("never sends mid-composition", () => {
     expect(isSend("enter", key({ isComposing: true }))).toBe(false);
     expect(isSend("mod-enter", key({ metaKey: true, isComposing: true }))).toBe(false);
+  });
+
+  it("never sends on the Enter that confirms a candidate in Safari", () => {
+    // Arrives after compositionend: isComposing is already false.
+    expect(isSend("enter", key({ keyCode: 229 }))).toBe(false);
+    expect(isSend("mod-enter", key({ metaKey: true, keyCode: 229 }))).toBe(false);
   });
 
   it("ignores every other key", () => {
