@@ -1473,7 +1473,7 @@ backdrop, cancel) MUST be refused while the writes are in flight — closing the
 would hide a GitHub write that is still happening.
 
 **Suggestions.** The name field is a combobox over two sources, merged into one
-list: the logins the user has handed to before (local, §17.9) first, then the
+list: the logins the user has handed to before (local, §17.10) first, then the
 repo's assignable users (`GET /repos/{o}/{r}/assignees`, read access only —
 `collaborators` answers nearly the same question but needs push, which a
 reviewer on somebody else's repo does not have). Bots are dropped, as are the
@@ -1925,15 +1925,27 @@ Colours are CSS `light-dark()` pairs, so the cockpit needs a browser that has
 it: Chrome/Edge 123, Safari 17.5, Firefox 120 or newer. An older one draws the
 page without its colours.
 
-### 17.9 Browser-Held State
+### 17.9 The Chat's Send Key
 
-Three things live in localStorage rather than `config.json`, on the same rule:
+The message box of a conversation (§12) MUST send on ⌘↵ (Ctrl+↵ off a Mac) by
+default, with Enter inserting a new line, as every other text box in the
+cockpit does. A browser MAY switch it from Settings to send on Enter, with
+Shift+Enter as the new line; the choice is browser state (`cerber.sendKey`,
+`enter`; anything else, or nothing, sends on ⌘↵). ⌘↵ MUST send under either
+choice, and Enter MUST NOT send while an input method is composing. The
+cockpit's other text boxes are unaffected and send on ⌘↵ alone. The box MUST
+keep focus through a send, so the next message needs no click back into it.
+
+### 17.10 Browser-Held State
+
+Five things live in localStorage rather than `config.json`, on the same rule:
 they are about this screen, not about reviews, and losing them costs a
-convenience rather than a decision. The theme pin (§17.8); the arrival bell's
-switch and announced-keys, which sit beside the browser's own notification
-permission; and the logins the user has handed reviews to
-(`cerber.handoff.recent`, most recent first, capped, de-duplicated
-case-insensitively — GitHub logins are). All three MUST be read defensively: a
+convenience rather than a decision. The theme pin (§17.8); the chapter pin
+(§17.5); the chat's send key (§17.9); the arrival bell's switch and
+announced-keys, which sit beside the browser's own notification permission;
+and the logins the user has handed reviews to (`cerber.handoff.recent`, most
+recent first, capped, de-duplicated case-insensitively — GitHub logins are).
+All five MUST be read defensively: a
 hand-edited or malformed value leaves the feature at its default rather than
 putting nonsense in front of a GitHub write.
 

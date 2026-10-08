@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
+import { SendKey, useSendKey } from "./sendkey";
 import { useStickyChapters } from "./sticky-chapters";
 import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
@@ -30,10 +31,16 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
   { choice: "dark", label: "dark" },
 ];
 
+const SEND_KEYS: { choice: SendKey; label: string }[] = [
+  { choice: "mod-enter", label: "⌘↵ sends a chat message, Enter starts a new line" },
+  { choice: "enter", label: "Enter sends a chat message, Shift+Enter starts a new line" },
+];
+
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
   const [theme, setTheme] = useTheme();
   const [stickyChapters, setStickyChapters] = useStickyChapters();
+  const [sendKey, setSendKey] = useSendKey();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +191,22 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         Ten files into a chapter you still see which one you're in, and the pinned title can open
         the chapter's explanation. Deep in a long file its name and Viewed box stay in reach.
         Per-browser, like the theme.
+      </p>
+      {SEND_KEYS.map(({ choice, label }) => (
+        <label key={choice} className="inbox-toggle">
+          <input
+            type="radio"
+            name="send-key"
+            checked={sendKey === choice}
+            onChange={() => setSendKey(choice)}
+          />{" "}
+          {label}
+        </label>
+      ))}
+      <p className="muted">
+        In the conversation with the reviewer. ⌘↵ sends under either choice, and the other boxes —
+        comments, the review body, a handoff note — always take ⌘↵, since what goes in them runs to
+        several lines. Per-browser, like the theme.
       </p>
 
       <h1>Trusted PRs</h1>
