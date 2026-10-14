@@ -7,6 +7,7 @@ import {
   pickMatch,
   raisedChanged,
   raisedFrom,
+  rewriteFinding,
   sendTreatment,
   startRaisedCheck,
   whatToCompare,
@@ -133,6 +134,55 @@ describe("sendTreatment", () => {
 
   it("holds a reply decision that has no thread to reply in, rather than posting it", () => {
     expect(sendTreatment(comment({ alreadyRaised: raised(review(), { decision: "reply" }) }))).toBe("hold");
+  });
+});
+
+describe("rewriteFinding", () => {
+  it("decides an undecided match: what posts is the words the user asked for", () => {
+    const c = rewriteFinding(comment({ alreadyRaised: raised(thread()) }), "It also breaks on the second run.");
+    expect(c.body).toBe("It also breaks on the second run.");
+    expect(c.alreadyRaised?.decision).toBe("send");
+    expect(sendTreatment(c)).toBe("post");
+    // The match itself stays — who raised it, where, and why.
+    expect(c.alreadyRaised?.remarkId).toBe(raised(thread()).remarkId);
+    expect(c.alreadyRaised?.reason).toBe("same defect");
+  });
+
+  it("decides an undecided match on a review body, which is held just the same", () => {
+    const c = rewriteFinding(comment({ alreadyRaised: raised(review()) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBe("send");
+  });
+
+  it("leaves a decision the user already made alone", () => {
+    const replying = rewriteFinding(comment({ alreadyRaised: raised(thread(), { decision: "reply" }) }), "reworded");
+    expect(replying.alreadyRaised?.decision).toBe("reply");
+    expect(sendTreatment(replying)).toBe("reply");
+    // Held, and still not the rewrite's to re-decide: a reply with no thread to
+    // reply in posts nothing, and the user said to answer in theirs.
+    const stuck = rewriteFinding(comment({ alreadyRaised: raised(review(), { decision: "reply" }) }), "reworded");
+    expect(stuck.alreadyRaised?.decision).toBe("reply");
+  });
+
+  it("decides nothing about a dropped comment — drop already decided it", () => {
+    const c = rewriteFinding(comment({ status: "dropped", alreadyRaised: raised(thread()) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBeNull();
+  });
+
+  it("decides nothing on a resolved thread, where the default already posts", () => {
+    // Writing it down would trade a state that follows the thread for one that
+    // doesn't: reopen that thread and the finding would keep posting.
+    const c = rewriteFinding(comment({ alreadyRaised: raised(thread({ state: "resolved" })) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBeNull();
+    expect(sendTreatment(c)).toBe("post");
+  });
+
+  it("decides nothing when the body did not change", () => {
+    const c = comment({ alreadyRaised: raised(thread()) });
+    expect(rewriteFinding(c, c.body)).toBe(c);
+  });
+
+  it("is an ordinary edit on a comment nobody else raised", () => {
+    expect(rewriteFinding(comment(), "new words")).toMatchObject({ body: "new words", alreadyRaised: null });
   });
 });
 

@@ -182,7 +182,10 @@ left unwritten. Code and tests win when they disagree.
   nothing new it is one GitHub read and no model call. `sendTreatment` is the
   one rule Send and the cockpit share: undecided is left out, except on a
   resolved thread, which posts; the user can drop it, send it anyway, or reply
-  in their thread. Nothing is ever dropped without the user
+  in their thread. Nothing is ever dropped without the user — and rewriting a
+  finding is the user (`rewriteFinding`): undecided means nobody looked at the
+  duplicate, so an edit by hand or through the chat decides it to post, since
+  what would go up is their words and not the ones the check compared
 - `src/cli/` — commander CLI (`review`, `list`, `serve`)
 - `web/` — Vite + React cockpit; imports shared diff utils from `../src/core/diff`.
   `notify.ts` is the arrival bell: it polls the queue from every screen and

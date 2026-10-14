@@ -1575,8 +1575,8 @@ which the cockpit shows with its reason.
   compared. New remarks are compared with every finding and new findings with
   every remark; with nothing new, no model call is made. A finding is compared
   once: editing its body (by hand or by a chat turn) keeps its match rather
-  than re-judging it, because the user who edited it is the one deciding
-  about it anyway. Every check still
+  than re-judging it, because that edit is itself the decision about it (see
+  the rewrite rule below). Every check still
   refreshes the state of existing matches (a thread resolved since), and a
   remark gone from the PR clears its match.
 - **One match shown per comment.** Several matches resolve to the liveliest
@@ -1602,8 +1602,36 @@ cockpit's counts):
 Drop is the comment's ordinary `status`. While a check is running the cockpit
 MUST NOT let Send go: what posts is what the check says.
 
+**A rewrite is a decision** (`rewriteFinding`). Changing a finding's body — by
+hand in the cockpit, or by asking a chat turn for it — MUST set an undecided
+match to `send`, so it posts. "None" means nobody has looked at the duplicate
+yet, and rewriting the finding is looking at it: what would post is the words
+the user asked for, not the ones the check compared, and cerber does not hold
+back what the user wrote. A decision already made is left as it is, `reply`
+included, and so is any match nothing is holding back: a resolved thread, where
+writing a decision would keep the finding posting if somebody reopened that
+thread, and a dropped comment, which drop has already decided and whose card
+offers no toggle to take it back with. The resolved-thread case is the one
+place the rule's promise has a limit: nothing is written down, so if that
+thread is reopened the rewritten finding is held again, where the same rewrite
+against an open thread would have posted. The match itself is untouched — who raised it, where, why
+— so the cockpit still shows all of it and "send anyway" toggles straight back
+off. This holds on a chat turn's fold too (§12.5), where the match comes from
+disk and the rewrite from the turn.
+
+The decision this writes is a decision like any other, and belongs to the
+remark it was made about: a later check that moves the comment to a livelier
+remark resets it to none, per the one-match rule above, and the rewritten
+finding is held again until the user decides about the new remark. Nor can
+`none` tell "nobody has looked" from "looked, and put it back to the default" —
+the cockpit's own toggle writes `none` when you switch "send anyway" off — so a
+rewrite after that re-decides it; the card says so, before any Send. A review
+sent is exempt from the whole rule — `sent` is a record of what was posted, so
+nothing on one is re-decided, on any of the three paths.
+
 **Merges.** `alreadyRaised` and `raisedCheck` belong to the check: a chat
-turn's fold (§12.5) takes both from the artifact on disk, and a re-review
+turn's fold (§12.5) takes both from the artifact on disk — the rewrite rule
+above excepted, which the fold applies to the match it just took — and a re-review
 starts with `raisedCheck: null` and new comment ids, so its own check compares
 everything afresh. Re-anchoring (§13) carries `alreadyRaised` with the
 comment.
@@ -1681,7 +1709,7 @@ static assets included. No CORS: same-origin only.
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
-| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
+| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else; a `body` change also decides an undecided match (§14.7), unless the review is sent |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |

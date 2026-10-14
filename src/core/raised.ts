@@ -6,8 +6,9 @@ import type { AlreadyRaised, Artifact, Comment, RaisedCheck, RaisedPlace } from 
  * The review is written blind to what is already said on the PR, and compared
  * against it afterwards (`src/runner/raised.ts` does the reading and the model
  * call). This file holds the rules that need neither: what Send does with a
- * match, which of several matches a comment keeps, and how a finished check
- * folds onto an artifact that may have moved while it ran.
+ * match, what rewriting a finding does to a match, which of several matches a
+ * comment keeps, and how a finished check folds onto an artifact that may have
+ * moved while it ran.
  *
  * No runtime imports: the cockpit imports `sendTreatment` from here so the
  * count it shows before Send is the same rule Send follows.
@@ -34,7 +35,8 @@ export type SendTreatment = "post" | "reply" | "hold";
  * Undecided is not "post": a duplicate the user never looked at is exactly what
  * this exists to keep off the PR. The one place undecided still posts is a
  * resolved thread — somebody marked that problem settled, and a review that
- * found it again in the current code is saying it isn't.
+ * found it again in the current code is saying it isn't. A finding the user
+ * has rewritten is not undecided at all: `rewriteFinding` decides it.
  */
 export function sendTreatment(comment: {
   alreadyRaised?: Pick<AlreadyRaised, "decision" | "where"> | null;
@@ -46,6 +48,46 @@ export function sendTreatment(comment: {
   // the cockpit or the API will write, and holding is the side that posts less.
   if (raised.decision === "reply") return raised.where.kind === "thread" ? "reply" : "hold";
   return raised.where.kind === "thread" && raised.where.state === "resolved" ? "post" : "hold";
+}
+
+/**
+ * Rewrite a finding's body — and, where somebody else had raised it, let the
+ * rewrite be the decision.
+ *
+ * An undecided match is Send leaving the duplicate out, and that default is
+ * about one thing: nobody has looked at it yet. Rewriting the finding is
+ * looking at it. The words that would post are no longer the ones the check
+ * compared — they are what the user asked for, by hand or through the chat —
+ * and cerber does not hold back what the user wrote. A finding is compared
+ * once for the same reason (`whatToCompare`): the user who rewrote it is the
+ * one deciding about it.
+ *
+ * The match itself stays, with who raised it, where, and why the two are the
+ * same defect: the cockpit still shows all of it, and "send anyway" toggles
+ * straight back off. A decision already made is left alone — including
+ * `reply`, which keeps answering in their thread, in the new words.
+ *
+ * Only a match that would otherwise be held is decided. On a resolved thread
+ * the default already posts, and writing the decision down there would trade a
+ * state that follows the thread for one that doesn't: the cockpit would stop
+ * saying *why* it posts, and the finding would keep posting if somebody
+ * reopened that thread. Nothing is held, so there is nothing to decide — which
+ * goes for a dropped comment too, where drop decides it and the cockpit shows
+ * no toggle to take it back with.
+ */
+export function rewriteFinding<C extends Pick<Comment, "body" | "status" | "alreadyRaised">>(
+  comment: C,
+  body: string,
+): C {
+  if (body === comment.body) return comment;
+  const raised = comment.alreadyRaised;
+  const held =
+    comment.status !== "dropped" &&
+    raised != null &&
+    raised.decision === null &&
+    sendTreatment({ alreadyRaised: raised }) === "hold";
+  if (!held) return { ...comment, body };
+  return { ...comment, body, alreadyRaised: { ...raised, decision: "send" } };
 }
 
 /**
