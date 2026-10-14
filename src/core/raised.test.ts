@@ -148,10 +148,24 @@ describe("rewriteFinding", () => {
     expect(c.alreadyRaised?.reason).toBe("same defect");
   });
 
+  it("decides an undecided match on a review body, which is held just the same", () => {
+    const c = rewriteFinding(comment({ alreadyRaised: raised(review()) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBe("send");
+  });
+
   it("leaves a decision the user already made alone", () => {
     const replying = rewriteFinding(comment({ alreadyRaised: raised(thread(), { decision: "reply" }) }), "reworded");
     expect(replying.alreadyRaised?.decision).toBe("reply");
     expect(sendTreatment(replying)).toBe("reply");
+    // Held, and still not the rewrite's to re-decide: a reply with no thread to
+    // reply in posts nothing, and the user said to answer in theirs.
+    const stuck = rewriteFinding(comment({ alreadyRaised: raised(review(), { decision: "reply" }) }), "reworded");
+    expect(stuck.alreadyRaised?.decision).toBe("reply");
+  });
+
+  it("decides nothing about a dropped comment — drop already decided it", () => {
+    const c = rewriteFinding(comment({ status: "dropped", alreadyRaised: raised(thread()) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBeNull();
   });
 
   it("decides nothing on a resolved thread, where the default already posts", () => {

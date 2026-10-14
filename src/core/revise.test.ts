@@ -311,6 +311,32 @@ describe("mergeConcurrentEdits", () => {
     expect(sendTreatment(merged.comments[0]!)).toBe("post");
   });
 
+  it("re-decides nothing when a send landed while the turn ran", () => {
+    // A sent review is a record of what was posted; the rewrite rule is off
+    // there, as it is on the PATCH route and in the check's own fold.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const undecided = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null, others: [],
+    };
+    const current = artifact({
+      status: "sent",
+      sent: { at: "2026-08-21T11:00:00.000Z", event: "COMMENT", url: null, auto: false },
+      comments: [comment({ id: "c1", alreadyRaised: undecided })],
+    });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.alreadyRaised?.decision).toBeNull();
+  });
+
   it("keeps a match the check found, and your decision on it, under the turn's rewrite", () => {
     // The check folds onto the disk on its own; the turn's copy of the comment
     // predates it, and taking the turn's body must not take its stale match.

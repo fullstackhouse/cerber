@@ -6,8 +6,9 @@ import type { AlreadyRaised, Artifact, Comment, RaisedCheck, RaisedPlace } from 
  * The review is written blind to what is already said on the PR, and compared
  * against it afterwards (`src/runner/raised.ts` does the reading and the model
  * call). This file holds the rules that need neither: what Send does with a
- * match, which of several matches a comment keeps, and how a finished check
- * folds onto an artifact that may have moved while it ran.
+ * match, what rewriting a finding does to a match, which of several matches a
+ * comment keeps, and how a finished check folds onto an artifact that may have
+ * moved while it ran.
  *
  * No runtime imports: the cockpit imports `sendTreatment` from here so the
  * count it shows before Send is the same rule Send follows.
@@ -70,15 +71,21 @@ export function sendTreatment(comment: {
  * the default already posts, and writing the decision down there would trade a
  * state that follows the thread for one that doesn't: the cockpit would stop
  * saying *why* it posts, and the finding would keep posting if somebody
- * reopened that thread. Nothing is held, so there is nothing to decide.
+ * reopened that thread. Nothing is held, so there is nothing to decide — which
+ * goes for a dropped comment too, where drop decides it and the cockpit shows
+ * no toggle to take it back with.
  */
-export function rewriteFinding<C extends Pick<Comment, "body" | "alreadyRaised">>(
+export function rewriteFinding<C extends Pick<Comment, "body" | "status" | "alreadyRaised">>(
   comment: C,
   body: string,
 ): C {
   if (body === comment.body) return comment;
   const raised = comment.alreadyRaised;
-  const held = raised != null && raised.decision === null && sendTreatment({ alreadyRaised: raised }) === "hold";
+  const held =
+    comment.status !== "dropped" &&
+    raised != null &&
+    raised.decision === null &&
+    sendTreatment({ alreadyRaised: raised }) === "hold";
   if (!held) return { ...comment, body };
   return { ...comment, body, alreadyRaised: { ...raised, decision: "send" } };
 }

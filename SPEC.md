@@ -1608,9 +1608,10 @@ match to `send`, so it posts. "None" means nobody has looked at the duplicate
 yet, and rewriting the finding is looking at it: what would post is the words
 the user asked for, not the ones the check compared, and cerber does not hold
 back what the user wrote. A decision already made is left as it is, `reply`
-included, and so is an undecided match that already posts — a resolved thread
-needs no decision, and writing one there would keep it posting if somebody
-reopened the thread. The match itself is untouched — who raised it, where, why
+included, and so is any match nothing is holding back: a resolved thread, where
+writing a decision would keep the finding posting if somebody reopened that
+thread, and a dropped comment, which drop has already decided and whose card
+offers no toggle to take it back with. The match itself is untouched — who raised it, where, why
 — so the cockpit still shows all of it and "send anyway" toggles straight back
 off. This holds on a chat turn's fold too (§12.5), where the match comes from
 disk and the rewrite from the turn.
@@ -1618,12 +1619,16 @@ disk and the rewrite from the turn.
 The decision this writes is a decision like any other, and belongs to the
 remark it was made about: a later check that moves the comment to a livelier
 remark resets it to none, per the one-match rule above, and the rewritten
-finding is held again until the user decides about the new remark. A review
+finding is held again until the user decides about the new remark. Nor can
+`none` tell "nobody has looked" from "looked, and put it back to the default" —
+the cockpit's own toggle writes `none` when you switch "send anyway" off — so a
+rewrite after that re-decides it; the card says so, before any Send. A review
 sent is exempt from the whole rule — `sent` is a record of what was posted, so
-editing a comment on one changes no decision.
+nothing on one is re-decided, on any of the three paths.
 
 **Merges.** `alreadyRaised` and `raisedCheck` belong to the check: a chat
-turn's fold (§12.5) takes both from the artifact on disk, and a re-review
+turn's fold (§12.5) takes both from the artifact on disk — the rewrite rule
+above excepted, which the fold applies to the match it just took — and a re-review
 starts with `raisedCheck: null` and new comment ids, so its own check compares
 everything afresh. Re-anchoring (§13) carries `alreadyRaised` with the
 comment.

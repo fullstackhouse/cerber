@@ -76,11 +76,13 @@ export function mergeConcurrentEdits(
     if (chosen === now) return now;
     // Who else raised a comment is the check's to say, not the turn's: a check
     // that landed while the turn ran — and a decision made about it — is only
-    // on disk, and the turn's copy predates both. The rewrite the turn made
-    // still decides an undecided match, as any rewrite does: it is measured
-    // against what is on disk now, so a turn that changed nothing decides
-    // nothing.
-    return rewriteFinding({ ...chosen, body: now.body, alreadyRaised: now.alreadyRaised }, chosen.body);
+    // on disk, and the turn's copy predates both.
+    const onDisk = { ...chosen, body: now.body, alreadyRaised: now.alreadyRaised };
+    // The rewrite the turn made still decides an undecided match, as any
+    // rewrite does — measured against the body on disk, so a turn that changed
+    // nothing decides nothing. Never on a sent review: that is a record of what
+    // was posted, and nothing on it is re-decided, here or anywhere else.
+    return current.sent ? { ...onDisk, body: chosen.body } : rewriteFinding(onDisk, chosen.body);
   });
   // Comments the turn itself added are not in `current` yet. Only those: a
   // comment present in both `before` and `after` but missing from `current` is
