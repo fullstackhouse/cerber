@@ -559,8 +559,14 @@ export async function buildApp(
           ? {
               // Rewriting a finding somebody else raised decides it: the words
               // that post are the user's, not the ones the check compared. An
-              // explicit decision in the same request still wins, below.
-              ...(body.body !== undefined ? rewriteFinding(cm, String(body.body)) : cm),
+              // explicit decision in the same request still wins, below. On a
+              // sent review nothing is re-decided — it is a record of what was
+              // posted, and `foldRaised` holds the same line.
+              ...(body.body === undefined
+                ? cm
+                : a.sent
+                  ? { ...cm, body: String(body.body) }
+                  : rewriteFinding(cm, String(body.body))),
               ...(decision.success && body.raisedDecision !== undefined && cm.alreadyRaised
                 ? { alreadyRaised: { ...cm.alreadyRaised, decision: decision.data } }
                 : {}),

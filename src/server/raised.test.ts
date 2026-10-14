@@ -159,6 +159,20 @@ describe("deciding about a finding somebody else raised", () => {
     expect(after?.editedByUser).toBe(true);
   });
 
+  it("re-decides nothing on a sent review — it is a record of what was posted", async () => {
+    await saveArtifact(
+      artifact({
+        status: "sent",
+        sent: { at: "2026-10-02T00:00:00Z", event: "COMMENT", url: "https://gh/review/1", auto: false },
+        comments: [finding("c1", raised())],
+      }),
+    );
+    await call("PATCH", `/api/reviews/${KEY}/comments/c1`, { body: "Reworded after the fact." });
+    const after = (await loadArtifact(ID))?.comments[0];
+    expect(after?.body).toBe("Reworded after the fact.");
+    expect(after?.alreadyRaised?.decision).toBeNull();
+  });
+
   it("still takes an explicit decision made in the same breath as the rewrite", async () => {
     await saveArtifact(artifact({ comments: [finding("c1", raised())] }));
     await call("PATCH", `/api/reviews/${KEY}/comments/c1`, { body: "Reworded.", raisedDecision: "reply" });

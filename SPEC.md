@@ -1608,10 +1608,19 @@ match to `send`, so it posts. "None" means nobody has looked at the duplicate
 yet, and rewriting the finding is looking at it: what would post is the words
 the user asked for, not the ones the check compared, and cerber does not hold
 back what the user wrote. A decision already made is left as it is, `reply`
-included. The match itself is untouched — who raised it, where, why — so the
-cockpit still shows all of it and "send anyway" toggles straight back off.
-This holds on a chat turn's fold too (§12.5), where the match comes from disk
-and the rewrite from the turn.
+included, and so is an undecided match that already posts — a resolved thread
+needs no decision, and writing one there would keep it posting if somebody
+reopened the thread. The match itself is untouched — who raised it, where, why
+— so the cockpit still shows all of it and "send anyway" toggles straight back
+off. This holds on a chat turn's fold too (§12.5), where the match comes from
+disk and the rewrite from the turn.
+
+The decision this writes is a decision like any other, and belongs to the
+remark it was made about: a later check that moves the comment to a livelier
+remark resets it to none, per the one-match rule above, and the rewritten
+finding is held again until the user decides about the new remark. A review
+sent is exempt from the whole rule — `sent` is a record of what was posted, so
+editing a comment on one changes no decision.
 
 **Merges.** `alreadyRaised` and `raisedCheck` belong to the check: a chat
 turn's fold (§12.5) takes both from the artifact on disk, and a re-review
@@ -1692,7 +1701,7 @@ static assets included. No CORS: same-origin only.
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |
-| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else |
+| `POST/PATCH/DELETE …/comments[/:id]` | comment CRUD | delete is user-origin only in the UI; PATCH takes `raisedDecision` (`send`/`reply`/`null`) — 409 on a comment nobody else raised, 409 for `reply` to a review body, 400 on anything else; a `body` change also decides an undecided match (§14.7), unless the review is sent |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |
 | `POST …/raised` | §14.7 check | 200 when no model call is needed (written only if something changed); **202** with `raisedCheck.checkingSince` set when one is; 409 sent; 409 while a run or a chat turn is in flight (it checks when it lands) |
 | `PUT …/viewed` | mark/unmark a file viewed | `{path, fingerprint}`; `fingerprint: null` unmarks; **400** on other types; accepted on a sent artifact too — reading progress, not an edit of the review |

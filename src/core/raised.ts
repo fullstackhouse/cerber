@@ -65,6 +65,12 @@ export function sendTreatment(comment: {
  * same defect: the cockpit still shows all of it, and "send anyway" toggles
  * straight back off. A decision already made is left alone — including
  * `reply`, which keeps answering in their thread, in the new words.
+ *
+ * Only a match that would otherwise be held is decided. On a resolved thread
+ * the default already posts, and writing the decision down there would trade a
+ * state that follows the thread for one that doesn't: the cockpit would stop
+ * saying *why* it posts, and the finding would keep posting if somebody
+ * reopened that thread. Nothing is held, so there is nothing to decide.
  */
 export function rewriteFinding<C extends Pick<Comment, "body" | "alreadyRaised">>(
   comment: C,
@@ -72,11 +78,9 @@ export function rewriteFinding<C extends Pick<Comment, "body" | "alreadyRaised">
 ): C {
   if (body === comment.body) return comment;
   const raised = comment.alreadyRaised;
-  return {
-    ...comment,
-    body,
-    alreadyRaised: raised && raised.decision === null ? { ...raised, decision: "send" } : raised,
-  };
+  const held = raised != null && raised.decision === null && sendTreatment({ alreadyRaised: raised }) === "hold";
+  if (!held) return { ...comment, body };
+  return { ...comment, body, alreadyRaised: { ...raised, decision: "send" } };
 }
 
 /**

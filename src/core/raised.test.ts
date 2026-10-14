@@ -154,6 +154,14 @@ describe("rewriteFinding", () => {
     expect(sendTreatment(replying)).toBe("reply");
   });
 
+  it("decides nothing on a resolved thread, where the default already posts", () => {
+    // Writing it down would trade a state that follows the thread for one that
+    // doesn't: reopen that thread and the finding would keep posting.
+    const c = rewriteFinding(comment({ alreadyRaised: raised(thread({ state: "resolved" })) }), "reworded");
+    expect(c.alreadyRaised?.decision).toBeNull();
+    expect(sendTreatment(c)).toBe("post");
+  });
+
   it("decides nothing when the body did not change", () => {
     const c = comment({ alreadyRaised: raised(thread()) });
     expect(rewriteFinding(c, c.body)).toBe(c);
