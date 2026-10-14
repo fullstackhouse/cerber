@@ -335,6 +335,8 @@ describe("mergeConcurrentEdits", () => {
     });
     const merged = mergeConcurrentEdits(b, after, current);
     expect(merged.comments[0]!.alreadyRaised?.decision).toBeNull();
+    // The turn's words still land — it is the decision that is off, not the edit.
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
   });
 
   it("keeps a match the check found, and your decision on it, under the turn's rewrite", () => {

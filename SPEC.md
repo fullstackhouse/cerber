@@ -1611,7 +1611,10 @@ back what the user wrote. A decision already made is left as it is, `reply`
 included, and so is any match nothing is holding back: a resolved thread, where
 writing a decision would keep the finding posting if somebody reopened that
 thread, and a dropped comment, which drop has already decided and whose card
-offers no toggle to take it back with. The match itself is untouched — who raised it, where, why
+offers no toggle to take it back with. The resolved-thread case is the one
+place the rule's promise has a limit: nothing is written down, so if that
+thread is reopened the rewritten finding is held again, where the same rewrite
+against an open thread would have posted. The match itself is untouched — who raised it, where, why
 — so the cockpit still shows all of it and "send anyway" toggles straight back
 off. This holds on a chat turn's fold too (§12.5), where the match comes from
 disk and the rewrite from the turn.
