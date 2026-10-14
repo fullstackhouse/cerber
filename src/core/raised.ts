@@ -34,7 +34,8 @@ export type SendTreatment = "post" | "reply" | "hold";
  * Undecided is not "post": a duplicate the user never looked at is exactly what
  * this exists to keep off the PR. The one place undecided still posts is a
  * resolved thread — somebody marked that problem settled, and a review that
- * found it again in the current code is saying it isn't.
+ * found it again in the current code is saying it isn't. A finding the user
+ * has rewritten is not undecided at all: `rewriteFinding` decides it.
  */
 export function sendTreatment(comment: {
   alreadyRaised?: Pick<AlreadyRaised, "decision" | "where"> | null;
@@ -46,6 +47,36 @@ export function sendTreatment(comment: {
   // the cockpit or the API will write, and holding is the side that posts less.
   if (raised.decision === "reply") return raised.where.kind === "thread" ? "reply" : "hold";
   return raised.where.kind === "thread" && raised.where.state === "resolved" ? "post" : "hold";
+}
+
+/**
+ * Rewrite a finding's body — and, where somebody else had raised it, let the
+ * rewrite be the decision.
+ *
+ * An undecided match is Send leaving the duplicate out, and that default is
+ * about one thing: nobody has looked at it yet. Rewriting the finding is
+ * looking at it. The words that would post are no longer the ones the check
+ * compared — they are what the user asked for, by hand or through the chat —
+ * and cerber does not hold back what the user wrote. A finding is compared
+ * once for the same reason (`whatToCompare`): the user who rewrote it is the
+ * one deciding about it.
+ *
+ * The match itself stays, with who raised it, where, and why the two are the
+ * same defect: the cockpit still shows all of it, and "send anyway" toggles
+ * straight back off. A decision already made is left alone — including
+ * `reply`, which keeps answering in their thread, in the new words.
+ */
+export function rewriteFinding<C extends Pick<Comment, "body" | "alreadyRaised">>(
+  comment: C,
+  body: string,
+): C {
+  if (body === comment.body) return comment;
+  const raised = comment.alreadyRaised;
+  return {
+    ...comment,
+    body,
+    alreadyRaised: raised && raised.decision === null ? { ...raised, decision: "send" } : raised,
+  };
 }
 
 /**

@@ -40,7 +40,7 @@ import {
   describeReplyFailures,
   recordReplies,
 } from "../core/send.js";
-import { raisedChanged, startRaisedCheck } from "../core/raised.js";
+import { raisedChanged, rewriteFinding, startRaisedCheck } from "../core/raised.js";
 import {
   checkAlreadyRaised,
   claimRaisedCheck,
@@ -557,11 +557,13 @@ export async function buildApp(
       comments: a.comments.map((cm) =>
         cm.id === id
           ? {
-              ...cm,
+              // Rewriting a finding somebody else raised decides it: the words
+              // that post are the user's, not the ones the check compared. An
+              // explicit decision in the same request still wins, below.
+              ...(body.body !== undefined ? rewriteFinding(cm, String(body.body)) : cm),
               ...(decision.success && body.raisedDecision !== undefined && cm.alreadyRaised
                 ? { alreadyRaised: { ...cm.alreadyRaised, decision: decision.data } }
                 : {}),
-              ...(body.body !== undefined ? { body: String(body.body) } : {}),
               ...(body.severity !== undefined
                 ? { severity: SeveritySchema.nullable().parse(body.severity) }
                 : {}),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Artifact, Comment, SCHEMA_VERSION } from "./artifact.js";
+import { sendTreatment } from "./raised.js";
 import { applyRevisions, mergeConcurrentEdits, restoreReview, snapshotReview } from "./revise.js";
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -159,6 +160,39 @@ describe("applyRevisions", () => {
     });
   });
 
+  describe("a finding somebody else already raised", () => {
+    const match = (over: Partial<NonNullable<Comment["alreadyRaised"]>> = {}) => ({
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null,
+      others: [],
+      ...over,
+    });
+
+    it("posts after a rewrite the user asked for, instead of being left out as a duplicate", () => {
+      const a = artifact({ comments: [comment({ alreadyRaised: match() })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "Reworded, and it breaks on the second run." },
+      ]);
+      expect(r.artifact.comments[0]!.alreadyRaised?.decision).toBe("send");
+      expect(sendTreatment(r.artifact.comments[0]!)).toBe("post");
+    });
+
+    it("leaves the decision alone when the turn only re-grades", () => {
+      const a = artifact({ comments: [comment({ alreadyRaised: match(), severity: "nit" })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "AI wrote this.", severity: "blocker" },
+      ]);
+      expect(r.artifact.comments[0]!.severity).toBe("blocker");
+      expect(r.artifact.comments[0]!.alreadyRaised?.decision).toBeNull();
+    });
+  });
+
   it("applies several revisions in one turn, in order", () => {
     const r = applyRevisions(
       artifact(),
@@ -251,6 +285,30 @@ describe("mergeConcurrentEdits", () => {
     const current = artifact({ comments: [comment({ id: "c1", body: "The user's own rewrite.", editedByUser: true })] });
     const merged = mergeConcurrentEdits(b, after, current);
     expect(merged.comments[0]!.body).toBe("The user's own rewrite.");
+  });
+
+  it("lets the turn's rewrite decide a match that is still undecided on disk", () => {
+    // The match is the check's and comes from disk; the rewrite is still the
+    // user asking for these words, so the duplicate stops holding them back.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const undecided = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null, others: [],
+    };
+    const current = artifact({ comments: [comment({ id: "c1", alreadyRaised: undecided })] });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+    expect(merged.comments[0]!.alreadyRaised).toMatchObject({ remarkId: "T_1", decision: "send" });
+    expect(sendTreatment(merged.comments[0]!)).toBe("post");
   });
 
   it("keeps a match the check found, and your decision on it, under the turn's rewrite", () => {

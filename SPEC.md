@@ -1575,8 +1575,8 @@ which the cockpit shows with its reason.
   compared. New remarks are compared with every finding and new findings with
   every remark; with nothing new, no model call is made. A finding is compared
   once: editing its body (by hand or by a chat turn) keeps its match rather
-  than re-judging it, because the user who edited it is the one deciding
-  about it anyway. Every check still
+  than re-judging it, because that edit is itself the decision about it (see
+  the rewrite rule below). Every check still
   refreshes the state of existing matches (a thread resolved since), and a
   remark gone from the PR clears its match.
 - **One match shown per comment.** Several matches resolve to the liveliest
@@ -1601,6 +1601,17 @@ cockpit's counts):
 
 Drop is the comment's ordinary `status`. While a check is running the cockpit
 MUST NOT let Send go: what posts is what the check says.
+
+**A rewrite is a decision** (`rewriteFinding`). Changing a finding's body — by
+hand in the cockpit, or by asking a chat turn for it — MUST set an undecided
+match to `send`, so it posts. "None" means nobody has looked at the duplicate
+yet, and rewriting the finding is looking at it: what would post is the words
+the user asked for, not the ones the check compared, and cerber does not hold
+back what the user wrote. A decision already made is left as it is, `reply`
+included. The match itself is untouched — who raised it, where, why — so the
+cockpit still shows all of it and "send anyway" toggles straight back off.
+This holds on a chat turn's fold too (§12.5), where the match comes from disk
+and the rewrite from the turn.
 
 **Merges.** `alreadyRaised` and `raisedCheck` belong to the check: a chat
 turn's fold (§12.5) takes both from the artifact on disk, and a re-review

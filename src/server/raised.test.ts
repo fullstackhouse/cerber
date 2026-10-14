@@ -150,6 +150,21 @@ describe("deciding about a finding somebody else raised", () => {
     expect((await loadArtifact(ID))?.comments[0]?.alreadyRaised?.decision).toBeNull();
   });
 
+  it("takes a rewrite as the decision — what posts is what you wrote", async () => {
+    await saveArtifact(artifact({ comments: [finding("c1", raised())] }));
+    const res = await call("PATCH", `/api/reviews/${KEY}/comments/c1`, { body: "Reworded, and sharper." });
+    expect(res.status).toBe(200);
+    const after = (await loadArtifact(ID))?.comments[0];
+    expect(after?.alreadyRaised).toMatchObject({ remarkId: "T_1", decision: "send" });
+    expect(after?.editedByUser).toBe(true);
+  });
+
+  it("still takes an explicit decision made in the same breath as the rewrite", async () => {
+    await saveArtifact(artifact({ comments: [finding("c1", raised())] }));
+    await call("PATCH", `/api/reviews/${KEY}/comments/c1`, { body: "Reworded.", raisedDecision: "reply" });
+    expect((await loadArtifact(ID))?.comments[0]?.alreadyRaised?.decision).toBe("reply");
+  });
+
   it("refuses a decision about a comment nobody else raised", async () => {
     await saveArtifact(artifact({ comments: [finding("c1", null)] }));
     expect((await call("PATCH", `/api/reviews/${KEY}/comments/c1`, { raisedDecision: "send" })).status).toBe(409);
