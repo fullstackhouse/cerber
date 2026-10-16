@@ -197,7 +197,8 @@ absent on read and materialize with the stated value.
 | `verdict` | Verdict \| null | default `null` |
 | `bodyOverride` | string \| null | default `null`; the review body to post, written by hand — null means composed at send time (§14.4) |
 | `run` | RunInfo \| null | default `null` |
-| `sent` | SentInfo \| null | default `null` |
+| `sent` | SentInfo \| null | default `null`; set only while the draft on the row is the one that was posted — a re-review moves it to `priorSends` (§8.3) |
+| `priorSends` | SentInfo[] | default `[]`; reviews posted from this row that a later re-review replaced, oldest first (§8.3) |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
 | `handoff` | HandoffInfo \| null | default `null`; set when the user gave the review away (§14.6). Mutually exclusive with `filed` |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
@@ -604,7 +605,7 @@ Entering `running` (every review run passes through it):
 awaiting         ── the poll, when auto-review is on         ──▶ running
 ready | sent     ── the poll, once the head has moved        ──▶ running
 failed           ── the poll, next time round                ──▶ running
-any but sent     ── the cockpit's re-review button (forces)  ──▶ running
+anything         ── the cockpit's re-review button (forces)  ──▶ running
 anything         ── `cerber review --force`                  ──▶ running
 ```
 
@@ -639,11 +640,60 @@ row.
 A chat turn is an AI run but **never changes the status**; it lives on
 `pendingChat` (§12.1).
 
-### 8.3 A Sent Artifact Is Immutable History
+### 8.3 A Sent Draft Is Immutable History — And Re-Reviewable
 
-Refresh no-ops on it, re-review refuses (`409`), chat refuses, chat reset
-refuses, filing skips it, a second send refuses. The only thing that can
-happen to a sent artifact is archiving when the PR closes.
+`sent` means exactly one thing: *the draft on this row is the one that went to
+GitHub*. While it is set the draft is treated as a record — refresh no-ops,
+chat refuses, chat reset refuses, filing skips it, a second send refuses, and
+the cockpit renders the review read-only. (The write API is narrower than that
+rendering: a comment's body may still be edited on a sent row, deliberately,
+without re-deciding its `alreadyRaised` — see Appendix B.4.)
+
+Re-review is the single exception, and it does not break that rule so much as
+leave it behind: it does not touch the sent draft, it **replaces** it. This
+MUST be allowed, because it is the only way back into a review whose commit
+the PR has moved past — the poll already does it when GitHub asks again
+(§8.4), and the cockpit's button MUST offer the same thing rather than
+refusing with a `409`.
+
+At the claim that starts such a run:
+
+- `sent` MUST move to the end of `priorSends`, never be dropped. The review is
+  on the PR under the user's name; forgetting it would let cerber offer a
+  second review as though it were the first.
+- `calibration` MUST be kept — it describes a review that really was sent.
+- the history MUST record the supersession, since no other entry marks a row
+  leaving `sent` without anything being un-sent.
+
+The row is then an ordinary unsent draft. Every surface from which a review
+can be sent or handed over MUST say what was already posted and when, and MUST
+say that the next send would be review *n* — on GitHub a second review sits
+beside the first; nothing cerber does ever edits or withdraws what was posted.
+In the reference implementation that is the review page: the queue's list
+projection does not carry `priorSends`, and no send can be started from there
+(Appendix B.5).
+
+**Auto-send stands down on such a row.** Its policy is "approve-only, above the
+threshold, never a re-send" (§15.2), and `sent` moving to `priorSends` would
+otherwise turn that last clause into "never twice in a row" — a PR the user has
+already reviewed is the last place to post without them. A non-empty
+`priorSends` is therefore an eligibility failure in its own right, next to the
+`sent` one.
+
+**A handoff stands down the same way.** §14.6's rule that the dialog MUST NOT
+offer to post a draft on a row that already sent one reads the whole record,
+`priorSends` included: the draft is new, but posting it would still be the
+second review on that PR under the user's name.
+
+A send that lands *while* a run is in flight is the opposite case, and the
+reference implementation handles it differently: the merge keeps `sent` and the
+status, and archives nothing (§8.5). The draft underneath is then the run's,
+not the one that was posted — the one place `sent`'s meaning above does not
+hold. It needs two processes inside the window between a run starting and its
+claim landing; Appendix B.6 records it.
+
+Apart from a re-review and archiving when the PR closes, nothing else happens
+to a sent artifact.
 
 ### 8.4 The Freshness Guard
 
@@ -680,7 +730,8 @@ half-keeping them (carrying on success, losing on failure) costs the code and
 still loses the work, so cerber does neither and says so plainly.
 
 What MUST survive any run, on both its success and failure paths, is every
-*decision*: a send that landed mid-run, a `reviewed`/`skipped` set while the
+*decision*: a send that landed mid-run (one from *before* the run is kept too,
+as a `priorSends` record — §8.3), a `reviewed`/`skipped` set while the
 run worked (together with the `settledAt` that dates it — the stamp travels
 with the status, so a settle keeps both halves of itself and a forced
 re-review clears both), a `handoff` (§14.6 — by then GitHub has already been
@@ -1416,7 +1467,9 @@ Payload construction (pure, previewable without side effects):
 - `commit_id` is the artifact's `pr.headSha` — so a review of a stale head
   fails with a 422 rather than landing inline comments on the wrong code.
 
-Send preconditions, all paths: not already sent; no run in flight — where
+Send preconditions, all paths: not already sent — `priorSends` does not
+block one, since those records describe drafts this one has replaced (§8.3);
+no run in flight — where
 "in flight" is the OR of the persisted `running` status (cross-process
 signal) and the in-process claim (a run that has not written yet). On
 success the artifact becomes `sent` with `SentInfo` and a **Calibration**
@@ -1499,7 +1552,10 @@ It defaults **off**, and that is the one place a handoff does not follow "on by
 default": a handoff is reachable from a row nobody ever opened, where the draft
 is whatever the poll wrote, and publishing that under the user's name is the
 thing §14.4 exists to prevent. Ticking it is the reading. An artifact that is
-already `sent` MUST NOT be offered it and MUST NOT submit twice.
+already `sent` — or that sent a review a re-review has since superseded
+(`priorSends`, §8.3) — MUST NOT be offered it and MUST NOT submit twice. A
+refusal here MUST be reported to the caller: the dialog has just said the
+review will be on the PR, so declining in silence tells the user it posted.
 
 A handoff that posts nothing leaves the draft local, openable and still
 sendable, and the dialog says so.
@@ -1652,7 +1708,8 @@ Evaluated **per fresh run** — only where the poll's auto-review actually
 produced a review, so a draft the freshness guard skipped is not re-judged or
 re-logged. All of, in order, first failure terminal:
 
-1. never sent before (no re-sends);
+1. never sent before — neither `sent` nor a `priorSends` record a re-review
+   superseded (§8.3); no re-sends, on this draft or on this PR;
 2. status `ready`;
 3. a verdict exists;
 4. recommendation is `approve` — `comment` and `request_changes` always wait
@@ -2281,10 +2338,11 @@ Found while writing this specification; the spec text above follows the code
 and tests.
 
 1. **Re-review comment carryover** — README ("When the PR moves under you")
-   and the cockpit's re-review tooltip say user comments survive a
-   re-review; the code, its tests and `docs/lifecycle.md` implement and
-   document wholesale replacement (§8.5), which CLAUDE.md records as a
-   deliberate decision. The prose should be corrected to match.
+   says user comments survive a re-review; the code, its tests and
+   `docs/lifecycle.md` implement and document wholesale replacement (§8.5),
+   which CLAUDE.md records as a deliberate decision. The prose should be
+   corrected to match. (The cockpit's re-review tooltip said the same and now
+   says "comments and all".)
 2. **Severity vocabulary** — the artifact model has three grades
    (`blocker/minor/nit`, §7.1) while `CODE_REVIEW.md`'s process ladder for
    reviewing *cerber's own PRs* uses four (`blocker/major/minor/nit`). These
@@ -2293,3 +2351,57 @@ and tests.
    application) but no cockpit control sets it; today it is reachable only by
    direct API call or by the model choosing to honor an in-conversation
    grant.
+4. **Editing a sent review through the API** — §8.3 says a sent draft is a
+   record, and the cockpit renders it read-only, but `PATCH /api/reviews/:key`
+   and `PATCH …/comments/:id` do not refuse on `sent`: a direct call (or a tab
+   left open from before the send) can still rewrite a verdict or a comment
+   body that is already on GitHub. The comment route handles the `sent` case
+   explicitly rather than by accident, so this is a gap in the guard, not in
+   the intent.
+5. **The queue says nothing about a superseded send** — `ReviewListItem`
+   carries `sent` but not `priorSends`, so a re-reviewed row leaves the *sent*
+   tab and reads like a PR nobody has reviewed until it is opened. No send can
+   be started from the queue, so §8.3's requirement is met where it bites; the
+   row is still less informative than it could be.
+6. **A send that lands mid-run** — the merge keeps `sent` while the draft
+   underneath becomes the run's (§8.5), so that row is the one case where
+   `sent` does not describe what is on the page. Now that `priorSends` exists,
+   superseding there too would make the invariant hold everywhere; it is left
+   alone because the behaviour predates this record and the race needs two
+   processes inside the pre-claim window. The two windows also disagree with
+   each other: a send landing *before* the claim on a row the run is reopening
+   (a forced re-review of a settled row) is superseded into `priorSends`, and
+   the row reads as an unsent draft — the coherent end state; one landing after
+   the claim keeps `sent` as above.
+7. **A re-review cannot see what you already told the PR** — the already-raised
+   check (§14.7) deliberately skips your own comments and reviews, which was
+   exact while a sent row was terminal. A second draft can now re-raise, as new
+   inline comments, findings your first review already posted.
+8. **A re-review drops a `handoff` that predates it** — the claim writes the
+   row's decisions back from disk (`priorSends`, `calibration`, the ledger) but
+   not `handoff`, which §8.5 lists among what MUST survive a run. A handoff
+   that lands *while* the run works does survive (`mergeRunResult`); one made
+   before it starts does not.
+9. **A chat turn that lands after a send reverts it** — `mergeConcurrentEdits`
+   (§12.5) names the fields it takes from disk rather than from the turn's own
+   snapshot, and `sent`, `priorSends`, `calibration` and `settledAt` are not
+   among them. A turn is allowed to be in flight while Send runs (unlike a
+   handoff, which refuses), so a send during a turn is undone by the fold:
+   the row keeps `status: "sent"` with `sent: null`, which §8.2 forbids and
+   which lets the "already sent" guard pass a second submission of the same
+   review. Independent of §8.3 and present before `priorSends` existed; the
+   fix is to list those four fields beside `handoff`.
+10. **A re-review that fails before the claim is invisible from the queue** —
+    the reason is written to the history (§8.3), the review page reads it back
+    (§13), and `ReviewListItem` carries neither, so a re-review started from
+    the queue on a sent row that dies early returns the row to *sent* with
+    nothing said there.
+11. **One calibration per row, not per send** — `calibration` survives the
+    claim (§8.3) but is overwritten by the next send, so a PR reviewed and
+    sent twice contributes one sample to `cerber stats`, the second.
+12. **A superseded send can be the evidence that files its own replacement** —
+    `filedByYourAct` (§9.5) reads "a review of yours exists on GitHub" without
+    asking whether it is one `priorSends` records. The poll only re-reviews
+    rows GitHub is still asking about, and those are never filed, so this
+    needs the request to be withdrawn afterwards; the draft is then filed with
+    a reason whose copy says the review was submitted outside cerber.

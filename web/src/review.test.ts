@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { buildReviewPayload } from "../../src/core/send";
 import { Artifact as CoreArtifact } from "../../src/core/artifact";
 import {
+  everSent,
   eventForVerdict,
+  sentAtOldHead,
   payloadSummary,
+  sendCount,
   raisedFate,
   rowLine,
   severitySummary,
@@ -271,5 +274,76 @@ describe("findings somebody else already raised", () => {
     expect(raisedFate({ ...answer!, alreadyRaised: raised({ decision: "reply", replied: { at: "t", url: null } }) }, true)).toBe(
       "replied in their thread",
     );
+  });
+});
+
+// The two predicates every surface that can *post* asks, and the reason they
+// are not `artifact.sent`: a re-review moves that record to `priorSends`, and
+// a guard reading the raw field would offer the second review as the first.
+describe("everSent / sendCount — has this row's name reached GitHub already", () => {
+  const SENT = { at: "2026-08-21T10:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+  const row = (over: Partial<Artifact>): Artifact => ({ ...artifact([]), ...over });
+
+  it("is false on a draft nobody has posted", () => {
+    expect(everSent(row({ sent: null }))).toBe(false);
+    expect(sendCount(row({ sent: null }))).toBe(0);
+  });
+
+  it("is true while the sent draft is the one on the page", () => {
+    expect(everSent(row({ sent: SENT }))).toBe(true);
+    expect(sendCount(row({ sent: SENT }))).toBe(1);
+  });
+
+  it("stays true once a re-review supersedes the send", () => {
+    // The whole point: `sent` is null here, and the handoff's draft box and
+    // the send note both have to keep seeing the review that is on the PR.
+    const reReviewed = row({ sent: null, priorSends: [SENT] });
+    expect(everSent(reReviewed)).toBe(true);
+    expect(sendCount(reReviewed)).toBe(1);
+  });
+
+  it("counts them all, so the next send can name its own number", () => {
+    const twice = row({ sent: null, priorSends: [SENT, { ...SENT, at: "2026-08-22T09:00:00.000Z" }] });
+    expect(sendCount(twice)).toBe(2);
+    expect(sendCount(row({ sent: SENT, priorSends: [SENT] }))).toBe(2);
+  });
+
+  it("reads an artifact from before the field existed", () => {
+    // Distinct from the cases above on purpose: there the field is present
+    // and empty, here it is absent, which is every artifact already on disk.
+    const legacy = row({ sent: null, priorSends: [] });
+    delete (legacy as { priorSends?: unknown }).priorSends;
+    expect("priorSends" in legacy).toBe(false);
+    expect(everSent(legacy)).toBe(false);
+    expect(sendCount(legacy)).toBe(0);
+  });
+});
+
+// The banner that tells a user their posted review is out of date. It is
+// asked of the two heads rather than of the refresh's `stale` flag, which
+// stays true for the life of the page once a draft has been pulled forward.
+describe("sentAtOldHead — has the PR moved past the review that went out", () => {
+  const SENT = { at: "2026-08-21T10:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+  const row = (over: Partial<Artifact>): Artifact => ({ ...artifact([]), ...over });
+
+  it("is false on a row that never sent anything", () => {
+    expect(sentAtOldHead(row({ sent: null }), { headSha: "def4567" })).toBe(false);
+  });
+
+  it("is true when GitHub's head is past the commit the review was posted against", () => {
+    expect(sentAtOldHead(row({ sent: SENT }), { headSha: "def4567" })).toBe(true);
+  });
+
+  it("is false the moment you send, on a draft that was pulled forward first", () => {
+    // The regression this exists for: the refresh answered `stale: true`
+    // before writing the new head, the page kept that answer, and sending
+    // then produced "the PR moved on — now at X, sent at X" over a PR that
+    // had not moved, beside a button offering to replace what just posted.
+    expect(sentAtOldHead(row({ sent: SENT }), { headSha: "abc1234" })).toBe(false);
+  });
+
+  it("says nothing when the check could not reach GitHub", () => {
+    expect(sentAtOldHead(row({ sent: SENT }), null)).toBe(false);
+    expect(sentAtOldHead(row({ sent: SENT }), {})).toBe(false);
   });
 });

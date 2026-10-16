@@ -53,6 +53,7 @@ import {
   listArtifacts,
   loadArtifact,
   loadArtifactByKey,
+  noteHistory,
   saveArtifact,
   updateArtifactByKey,
 } from "../core/state.js";
@@ -419,6 +420,7 @@ export async function buildApp(
       },
       sent: null,
       refresh: null,
+      priorSends: [],
       filed: null,
       handoff: null,
       raisedCheck: null,
@@ -660,8 +662,14 @@ export async function buildApp(
     const stale = artifact.pr.headSha !== "" && artifact.pr.headSha !== pr.headSha;
     // A sent review is a record of what was posted — never rewrite it. A running
     // one is mid-run and would be overwritten from under the runner.
+    //
+    // `headSha` rides on the answer either way, and it is the only thing a
+    // declined refresh can tell the cockpit: on a sent row nothing is written,
+    // so the artifact handed back still names the commit that was reviewed,
+    // and the page would have nothing to say about a PR that has moved past a
+    // review the user cannot edit but can replace.
     if (!stale || artifact.sent || artifact.status === "running") {
-      return c.json({ stale, changed: false, prState: pr.state, artifact });
+      return c.json({ stale, changed: false, prState: pr.state, headSha: pr.headSha, artifact });
     }
 
     try {
@@ -692,6 +700,7 @@ export async function buildApp(
         stale: true,
         changed: applied && result.changed,
         prState: pr.state,
+        headSha: pr.headSha,
         moved: applied ? result.moved : 0,
         drifted: applied ? result.drifted : 0,
         artifact: saved,
@@ -707,7 +716,13 @@ export async function buildApp(
     const key = c.req.param("key");
     const artifact = await loadArtifactByKey(key);
     if (!artifact) return c.json({ error: "not found" }, 404);
-    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    // A sent row may be re-reviewed, and this is the only way back into one.
+    // The author pushed again, somebody asked for another look, the review
+    // went out at a commit that no longer exists — none of that is answered by
+    // the review already on the PR, and refusing here left the cockpit with no
+    // move at all while `cerber review --force` did it from a terminal. What
+    // was sent is kept (`supersede`), the new draft is sendable in its own
+    // right, and the send panel says it would be a second review.
     if (isReviewRunning(artifact.id)) {
       return c.json({ error: busy(artifact, "a review of this PR is already running") }, 409);
     }
@@ -719,21 +734,29 @@ export async function buildApp(
     const withSource = sourceParam == null ? opts.withSource : sourceParam !== "0";
     // Mark it running before responding, so the cockpit's next poll can't catch
     // the old "ready" status and conclude the run already finished.
+    //
+    // The run block is left alone while the row still carries its send: that
+    // block describes the review on GitHub — its model, its cost, the commit
+    // it read — and a stub written here would erase all of it minutes before
+    // the runner's claim writes a real one, with nothing able to bring it back
+    // if the run never gets that far. The claim replaces it either way.
     const running = await updateArtifactByKey(key, (a) => ({
       ...a,
       status: "running" as const,
-      run: {
-        model: null,
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-        costUsd: null,
-        error: null,
-        withSource: withSource !== false,
-        trusted: false,
-        sessionId: null,
-        trigger: "user",
-        reviewedSha: null,
-      },
+      run: a.sent
+        ? a.run
+        : {
+            model: null,
+            startedAt: new Date().toISOString(),
+            finishedAt: null,
+            costUsd: null,
+            error: null,
+            withSource: withSource !== false,
+            trusted: false,
+            sessionId: null,
+            trigger: "user",
+            reviewedSha: null,
+          },
     }));
 
     // Minutes-long: run it detached and let the cockpit poll the artifact.
@@ -749,11 +772,22 @@ export async function buildApp(
         // The runner marks the artifact failed once it owns it; a failure before
         // that (fetching the PR, or a run already in flight) would otherwise
         // leave it stuck at "running" with nothing to clear it.
-        await updateArtifactByKey(key, (a) =>
+        //
+        // A row that still carries its send never got as far as the claim, so
+        // the draft on it is the one that went to GitHub and nothing about it
+        // has changed: it goes back to `sent`, untouched. The failure is the
+        // re-review's, not that review's, so it goes in the history rather
+        // than onto a run block that describes something else entirely.
+        const back = await updateArtifactByKey(key, (a) =>
           a.status === "running"
-            ? { ...a, status: "failed" as const, run: a.run ? { ...a.run, error: message } : null }
+            ? a.sent
+              ? { ...a, status: "sent" as const }
+              : { ...a, status: "failed" as const, run: a.run ? { ...a.run, error: message } : null }
             : a,
-        ).catch(() => {});
+        ).catch(() => null);
+        if (back?.sent) {
+          await noteHistory(back.id, `re-review did not start: ${message}`).catch(() => {});
+        }
       });
 
     return c.json(running, 202);
@@ -1129,13 +1163,36 @@ export async function buildApp(
     let sendError: string | null = null;
     let sent: Artifact["sent"] = null;
     let payload: ReturnType<typeof buildReviewPayload> | null = null;
-    const alreadySent = postReview ? ((await loadArtifactByKey(key))?.sent ?? artifact.sent) : null;
+    //
+    // A send a re-review has since superseded counts here too. It is not on
+    // this draft, but it is on the PR under the user's name, and this guard
+    // exists to stop a handoff being the second review — which it would be.
+    const onDisk = postReview ? await loadArtifactByKey(key) : null;
+    const alreadySent = postReview
+      ? (onDisk?.sent ??
+        artifact.sent ??
+        (onDisk ?? artifact).priorSends.at(-1) ??
+        null)
+      : null;
     // And there has to be a review to post. The dialog only offers the box on a
     // row that has one, but the dialog is not the guard: a stale tab or a direct
     // call would otherwise submit a body that is nothing but cerber's footer,
     // under the user's name, on a PR nobody has drafted a word about.
     const somethingToSay =
       artifact.summary !== "" || artifact.comments.some((cm) => cm.status !== "dropped");
+    // A decline here has to say so. The dialog's own line promises "this row
+    // goes under sent, with the review on the PR"; letting the guard refuse in
+    // silence walks the user to the next review believing it posted.
+    if (postReview && alreadySent) {
+      // Phrased to read after the cockpit's own "the review did not post:",
+      // which is what wraps every `sendError` on the way to the user.
+      sendError =
+        `a review was already sent on this PR on ${alreadySent.at.slice(0, 10)}` +
+        `${alreadySent.url ? ` (${alreadySent.url})` : ""}, and a second one is yours to send.` +
+        ` The draft is untouched.`;
+    } else if (postReview && !somethingToSay) {
+      sendError = "there is no draft on this row — only cerber's footer would have gone up.";
+    }
     if (postReview && !alreadySent && somethingToSay) {
       payload = buildReviewPayload(artifact, "COMMENT");
       try {

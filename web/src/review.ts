@@ -86,6 +86,45 @@ export function splitComments(artifact: Artifact): {
 }
 
 /**
+ * Has a review from this row ever reached GitHub?
+ *
+ * `sent` alone cannot answer it: a re-review moves that record to
+ * `priorSends` and leaves the field null, so a guard reading `sent` would
+ * treat the second draft as the first. Every surface that could *post* —
+ * Send's own note, the handoff's "carry the draft" box — asks this one,
+ * because what matters to a reader is whether their name is already on a
+ * review of this PR, not which field happens to hold it.
+ */
+export function everSent(artifact: Artifact): boolean {
+  return artifact.sent != null || (artifact.priorSends ?? []).length > 0;
+}
+
+/** How many reviews this row has posted — the next Send would be this + 1. */
+export function sendCount(artifact: Artifact): number {
+  return (artifact.priorSends ?? []).length + (artifact.sent ? 1 : 0);
+}
+
+/**
+ * Has the PR moved past the review that was sent from this row?
+ *
+ * Asked of the two heads, never of the refresh's `stale` flag: that flag is
+ * computed against the artifact as it stood *before* the refresh wrote the
+ * new head, so it stays true for the rest of the page's life on a row that
+ * was pulled forward and then sent. Reading it would put "the PR moved on
+ * since you sent this review — now at X, sent at X" on screen seconds after
+ * the send, over a PR that has not moved at all, next to a button offering to
+ * replace the review just posted.
+ */
+export function sentAtOldHead(
+  artifact: Artifact,
+  freshness: { headSha?: string } | null,
+): boolean {
+  if (artifact.sent == null) return false;
+  const now = freshness?.headSha;
+  return now != null && artifact.pr.headSha !== "" && now !== artifact.pr.headSha;
+}
+
+/**
  * What a comment somebody else already raised will do at Send, in the words
  * the card uses. Null for a comment nobody else raised.
  */

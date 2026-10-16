@@ -6,6 +6,7 @@ import { Artifact, ArtifactStatus, PrInfo, SCHEMA_VERSION } from "../core/artifa
 import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { beginReview, endReview } from "../runner/inflight.js";
+import { reviewPr } from "../runner/review.js";
 import { buildApp } from "./index.js";
 
 // The only GitHub write that speaks as a review. Stubbed so a test can assert it was
@@ -65,6 +66,7 @@ function artifact(status: ArtifactStatus): Artifact {
     bodyOverride: null,
     run: null,
     sent: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -141,6 +143,25 @@ describe("POST /api/reviews/:key/send — not while a run is rewriting the draft
     expect(res.status).toBe(200);
     expect(submit).toHaveBeenCalledOnce();
     expect((await loadArtifact(ID))!.status).toBe("sent");
+  });
+
+  it("sends a draft that replaced one already on the PR", async () => {
+    // The other half of the stand-down rules: auto-send and a handoff both
+    // refuse a row with a prior send, and Send deliberately does not. Without
+    // this, making the send guard read the whole record — the obvious
+    // symmetry with its two siblings — would silently make a re-reviewed
+    // review unsendable, which is the entire point of the feature.
+    await saveArtifact({
+      ...artifact("ready"),
+      priorSends: [{ at: "2026-08-20T09:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false }],
+    });
+
+    const res = await send();
+    expect(res.status).toBe(200);
+    expect(submit).toHaveBeenCalledOnce();
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("sent");
+    expect(after.priorSends).toHaveLength(1);
   });
 
   it("refuses a second submission of one already sent", async () => {
@@ -279,8 +300,28 @@ describe("POST /api/reviews/:key/refresh — not over a row that moved underneat
 
     const res = await refresh();
     expect(res.status).toBe(200);
-    expect((await res.json()).stale).toBe(true);
+    const body = await res.json();
+    expect(body.stale).toBe(true);
+    expect(body.headSha).toBe("def");
     expect((await loadArtifact(ID))!.pr.headSha).toBe("def");
+  });
+
+  it("declines a sent row but still reports where the PR is", async () => {
+    // A posted review is never re-anchored, so nothing is written — and then
+    // `headSha` is the only thing the answer carries. The cockpit's "the PR
+    // moved on since you sent this" banner is built from it and from `stale`,
+    // and without them a sent review goes stale with nothing saying so.
+    await saveArtifact({
+      ...artifact("sent"),
+      sent: { at: "2026-08-21T10:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false },
+    });
+
+    const res = await refresh();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ stale: true, changed: false, headSha: "def" });
+    // Untouched: the draft on disk is still the one that was posted.
+    expect((await loadArtifact(ID))!.pr.headSha).toBe("abc");
   });
 });
 
@@ -319,6 +360,104 @@ describe("PUT /api/reviews/:key/viewed — reading progress", () => {
         body,
       });
       expect(res.status).toBe(400);
+    }
+  });
+});
+
+describe("POST /api/reviews/:key/rerun — the only way back into a sent review", () => {
+  const rerun = async () => {
+    const app = await buildApp({});
+    return app.request(`/api/reviews/${KEY}/rerun`, { method: "POST" });
+  };
+
+  /** A row whose draft is on GitHub, with the run that produced it recorded. */
+  const SENT_RUN = {
+    model: "claude-opus",
+    startedAt: "2026-08-21T09:00:00.000Z",
+    finishedAt: "2026-08-21T09:05:00.000Z",
+    costUsd: 0.42,
+    error: null,
+    withSource: true,
+    trusted: false,
+    sessionId: null,
+    trigger: "user" as const,
+    reviewedSha: "abc1234",
+  };
+
+  const sentRow = () => ({
+    ...artifact("sent"),
+    sent: { at: "2026-08-21T10:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false },
+    run: SENT_RUN,
+  });
+
+  beforeEach(() => {
+    prInfo.mockResolvedValue(pr());
+    prDiff.mockResolvedValue("--- a\n+++ b\n");
+    (reviewPr as Mock).mockResolvedValue({ artifact: artifact("ready"), skipped: false });
+  });
+
+  it("starts a run on a review that was already sent", async () => {
+    // It used to refuse with a 409, which left the cockpit no move at all on a
+    // PR whose author had pushed since: the review on GitHub answers a commit
+    // that is gone, and only a new draft answers the new one.
+    await saveArtifact(sentRow());
+
+    const res = await rerun();
+    expect(res.status).toBe(202);
+    expect(reviewPr).toHaveBeenCalledWith(expect.objectContaining({ number: 42 }), expect.objectContaining({ force: true }));
+  });
+
+  it("holds on to the send, and its run, until the claim replaces the draft", async () => {
+    // The runner archives the send (`supersede`) at the moment it replaces the
+    // draft; until then the draft on the row is still the one that was sent,
+    // and so is the run block describing what produced it. A stub written here
+    // would erase that review's model, cost and commit minutes before the
+    // claim writes a real one — and for good, if the run never gets there.
+    await saveArtifact(sentRow());
+
+    expect((await rerun()).status).toBe(202);
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("running");
+    expect(after.sent).not.toBeNull();
+    expect(after.run).toEqual(SENT_RUN);
+  });
+
+  it("puts a sent row back under sent when the run dies before claiming it", async () => {
+    // "failed" would hide a review that really is on GitHub behind a re-review
+    // that never produced anything. The failure is the re-review's, so it goes
+    // in the history — writing it onto `run.error` would pin it on the run
+    // that produced the review actually sitting on the PR.
+    await saveArtifact(sentRow());
+    (reviewPr as Mock).mockRejectedValue(new Error("gh is down"));
+
+    expect((await rerun()).status).toBe(202);
+    await vi.waitFor(async () => {
+      const after = (await loadArtifact(ID))!;
+      expect(after.status).toBe("sent");
+      expect(after.sent).not.toBeNull();
+      expect(after.run).toEqual(SENT_RUN);
+      expect(after.history?.at(-1)?.what).toBe("re-review did not start: gh is down");
+    });
+  });
+
+  it("still fails an unsent row that cannot start", async () => {
+    await saveArtifact(artifact("ready"));
+    (reviewPr as Mock).mockRejectedValue(new Error("gh is down"));
+
+    expect((await rerun()).status).toBe(202);
+    await vi.waitFor(async () => {
+      expect((await loadArtifact(ID))!.status).toBe("failed");
+    });
+  });
+
+  it("refuses while a run is already in flight", async () => {
+    await saveArtifact(sentRow());
+    beginReview(ID);
+    try {
+      expect((await rerun()).status).toBe(409);
+      expect(reviewPr).not.toHaveBeenCalled();
+    } finally {
+      endReview(ID);
     }
   });
 });

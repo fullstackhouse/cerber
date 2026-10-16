@@ -90,6 +90,7 @@ function ready(comments: Comment[], headSha = "old-sha"): Artifact {
     bodyOverride: null,
     run: null,
     sent: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -263,6 +264,99 @@ describe("what a re-review does to the previous draft", () => {
     const after = (await loadArtifact(ID))!;
     expect(after.status).toBe("failed");
     expect(after.comments).toEqual([]);
+  });
+});
+
+describe("what a re-review does to a review you already sent", () => {
+  // The only way back into a sent review is a new draft, so the claim at the
+  // top of a run takes the send out of the field that means "this is what went
+  // to GitHub". It must not take it out of the artifact: that review is on the
+  // PR under the user's name, and a cockpit that forgot it would offer the
+  // next one as if it were the first.
+  const SENT = {
+    at: "2026-08-21T10:02:00.000Z",
+    event: "COMMENT" as const,
+    url: "https://github.com/acme/widgets/pull/7#r1",
+    auto: false,
+  };
+  const CALIBRATION = {
+    aiRecommendation: "comment" as const,
+    aiConfidence: 70,
+    sentEvent: "COMMENT" as const,
+    aiCommentsTotal: 1,
+    aiCommentsDropped: 0,
+    aiCommentsEdited: 0,
+    userCommentsAdded: 0,
+  };
+
+  /** A row whose draft went to GitHub at a commit the PR has since left. */
+  function alreadySent(): Artifact {
+    return {
+      ...ready([]),
+      status: "sent",
+      sent: SENT,
+      calibration: CALIBRATION,
+    };
+  }
+
+  it("files it under priorSends and hands the row back", async () => {
+    await saveArtifact(alreadySent());
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.status).toBe("ready");
+    expect(artifact.sent).toBeNull();
+    expect(artifact.priorSends).toEqual([SENT]);
+    expect(artifact.summary).toBe("the new draft");
+  });
+
+  it("keeps the calibration of the review that really was sent", async () => {
+    // `cerber stats` is the only reader, and it counts one row per send.
+    // Resetting the field here deleted a data point every time a sent PR was
+    // looked at again.
+    await saveArtifact(alreadySent());
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.calibration).toEqual(CALIBRATION);
+  });
+
+  it("stacks them, so the third draft knows about the first two", async () => {
+    await saveArtifact(alreadySent());
+    claudeThat(async () => {});
+    await reviewPr(REF, { withSource: false });
+
+    const second = { ...SENT, at: "2026-08-22T09:00:00.000Z" };
+    await updateArtifactByKey(KEY, (a) => ({ ...a, status: "sent" as const, sent: second }));
+    const { artifact } = await reviewPr(REF, { withSource: false, force: true });
+
+    expect(artifact.sent).toBeNull();
+    expect(artifact.priorSends).toEqual([SENT, second]);
+  });
+
+  it("does not archive a send that landed while it ran", async () => {
+    // The other direction entirely: that send describes the draft this run is
+    // handing over, which `mergeRunResult` leaves standing. Archiving it would
+    // reopen a row the user had just closed, and wave a second submission
+    // through the "already sent" guard.
+    await saveArtifact(ready([]));
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({ ...a, status: "sent" as const, sent: SENT }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.sent).toEqual(SENT);
+    expect(artifact.priorSends).toEqual([]);
+  });
+
+  it("leaves the record behind even when the run fails", async () => {
+    await saveArtifact(alreadySent());
+    claudeThat(async () => {}, new Error("model unavailable"));
+
+    await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("failed");
+    expect(after.priorSends).toEqual([SENT]);
   });
 });
 

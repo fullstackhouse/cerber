@@ -44,6 +44,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -83,6 +84,39 @@ describe("reconcileRunning", () => {
     const after = await loadArtifact("acme/widgets#42");
     expect(after?.status).toBe("failed");
     expect(after?.run?.error).toMatch(/interrupted/);
+  });
+
+  it("puts a sent review back under sent, not failed, and leaves its run alone", async () => {
+    // A row that still carries its send was interrupted before the re-review
+    // claimed it, so the draft on it is untouched — and it is the one on
+    // GitHub. Calling that "failed" hides a review that really was sent, and
+    // stamping the error on the run block would put a re-review's failure on
+    // the record of the run that produced what was posted. The history says it
+    // instead.
+    const run = {
+      model: "claude-opus",
+      startedAt: "t",
+      finishedAt: "t2",
+      costUsd: 0.42,
+      error: null,
+      withSource: true,
+      trusted: false,
+      sessionId: null,
+      trigger: "user" as const,
+      reviewedSha: "abc1234",
+    };
+    await saveArtifact(
+      artifact({
+        status: "running",
+        sent: { at: "2026-08-20T09:00:00Z", event: "COMMENT", url: "u", auto: false },
+        run,
+      }),
+    );
+    expect(await reconcileRunning()).toBe(1);
+    const after = await loadArtifact("acme/widgets#42");
+    expect(after?.status).toBe("sent");
+    expect(after?.run).toEqual(run);
+    expect(after?.history?.at(-1)?.what).toMatch(/re-review interrupted/);
   });
 
   it("marks a chat turn that died with the process, rather than leaving it pending forever", async () => {

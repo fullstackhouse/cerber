@@ -78,6 +78,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     bodyOverride: null,
     run: null,
     sent: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -446,6 +447,9 @@ describe("handing the draft over with it", () => {
     const saved = await loadArtifact(ID);
     expect(saved?.status).toBe("skipped");
     expect(saved?.handoff?.to).toBe("maks");
+    // Said, not swallowed: the box was ticked, so the caller is owed the
+    // reason nothing went up.
+    expect((await res.json()).sendError).toMatch(/no draft on this row/);
   });
 
   it("never submits a second review on a row that already sent one", async () => {
@@ -460,6 +464,28 @@ describe("handing the draft over with it", () => {
     const saved = await loadArtifact(ID);
     expect(saved?.sent?.event).toBe("APPROVE");
     expect(saved?.handoff?.to).toBe("maks");
+  });
+
+  it("nor on one whose send a re-review has since superseded", async () => {
+    // The draft is new — a re-review wrote it — but the user's name is already
+    // on a review of this PR, so carrying this one over would be the second.
+    // `sent` cannot answer that question any more; `priorSends` can.
+    await saveArtifact(
+      withComment({
+        status: "ready",
+        sent: null,
+        priorSends: [{ at: "2026-08-21T11:00:00.000Z", event: "COMMENT", url: "u", auto: false }],
+      }),
+    );
+    const res = await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(submit).not.toHaveBeenCalled();
+    const saved = await loadArtifact(ID);
+    expect(saved?.sent).toBeNull();
+    expect(saved?.handoff?.to).toBe("maks");
+    // And it says so. A guard that declines in silence leaves the cockpit
+    // free to walk the user on to the next review, having just promised them
+    // "this row goes under sent, with the review on the PR".
+    expect((await res.json()).sendError).toMatch(/already sent on this PR/);
   });
 });
 

@@ -177,6 +177,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,

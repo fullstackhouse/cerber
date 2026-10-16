@@ -429,8 +429,31 @@ cockpit (or `cerber review <pr> --force`).
 > starts and they do not come back, on success or on failure. This is a
 > decision, not a bug ([`docs/lifecycle.md`](docs/lifecycle.md)): the run owns
 > the draft. If you have written comments you want to keep, send the review or
-> copy them out first. Your *decisions* do survive — a send, a `reviewed` or
-> `skipped` you set, and the chat transcript are all kept.
+> copy them out first. Your *decisions* do survive — a `reviewed` or `skipped`
+> you set and the chat transcript are kept, and a send is kept as a record of
+> what went to GitHub (see the next section).
+
+### Re-reviewing one you already sent
+
+Sending freezes the draft — it is the record of what GitHub has, so nothing
+can edit it afterwards. What you can do is replace it. The same **Re-review at
+head** button works on a sent review, and on a PR whose author has pushed
+since it is the only thing that does: the review you sent answers a commit
+that is gone, and cerber will not rewrite a review that is already public.
+
+The run drafts against the current head and hands you an ordinary unsent
+review again — editable, arguable, sendable. What you sent is kept beside it:
+a note above the draft says what you posted and when, with a link, and the
+line over the Send button says the next click would be review 2. **Nothing on
+GitHub changes** — a second review sits beside the first; cerber never edits
+or withdraws what it posted.
+
+The poll does this on its own, too, for a sent review whose PR moved on and
+whose author has asked you for another look. The two things that can reach
+GitHub without you both stand down on a row like that: auto-send will not
+approve a PR you have already reviewed yourself, and a handoff stops offering
+to carry the draft — it is a new draft, but sending it would still be your
+second review on that PR.
 
 ## Arguing with the review before you send it
 
@@ -488,7 +511,8 @@ the exchange went anywhere near GitHub.
 Nothing in the conversation reaches GitHub. Send still builds its payload from
 the summary, comments and verdict alone, and is still one deliberate click. A
 review that has already been sent can't be argued with: that artifact is the
-record of what GitHub has.
+record of what GitHub has — re-review it first, and the new draft is open to
+the conversation like any other.
 
 ## Every row remembers what happened to it
 

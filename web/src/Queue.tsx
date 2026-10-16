@@ -345,7 +345,16 @@ export function Queue() {
         move(-1);
       } else if (e.key === "Enter" && selected) {
         openReview(selected.key);
-      } else if (e.key === "r" && selected && selected.status !== "sent" && selected.status !== "running") {
+        // Not on a sent row: `r` is one keystroke with no label and no undo,
+        // and there it would replace the local copy of a review that is
+        // already public. The button two lines below says what it does and
+        // stays available — see the re-review discussion in docs/lifecycle.md.
+      } else if (
+        e.key === "r" &&
+        selected &&
+        selected.status !== "running" &&
+        selected.status !== "sent"
+      ) {
         startReview(selected.key);
       }
     };
@@ -513,10 +522,13 @@ export function Queue() {
                   </button>
                   <button
                     className="btn"
-                    disabled={busy || selected.status === "running" || selected.status === "sent"}
+                    disabled={busy || selected.status === "running"}
+                    // Offered on a sent row too: what was sent stays on GitHub
+                    // and is kept here as a record, and a new draft is the only
+                    // answer to commits that landed after it.
                     title={
                       selected.status === "sent"
-                        ? "This review was sent — it is a record now."
+                        ? "Draft a review of the PR's current head. What you sent stays on GitHub."
                         : "Draft a review of the PR's current head."
                     }
                     onClick={() => startReview(selected.key)}
