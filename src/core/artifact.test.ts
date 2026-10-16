@@ -89,6 +89,14 @@ describe("ArtifactSchema handoff", () => {
     expect(ArtifactSchema.parse(minimal).handoff).toBeNull();
   });
 
+  it("gives the same artifact an empty list of prior sends", () => {
+    // Same shape of promise, same stakes: `priorSends` is read unguarded
+    // (`history.ts` compares its length on every save), and every fixture in
+    // this suite writes it, so this is the only place the artifacts already
+    // on disk are exercised at all.
+    expect(ArtifactSchema.parse(minimal).priorSends).toEqual([]);
+  });
+
   it("fills in the halves a hand-edited record leaves out", () => {
     // The file is user-editable, so the two fields that carry *meaning* about
     // GitHub's state need defaults that read as the common case: you were taken

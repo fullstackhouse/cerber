@@ -19,6 +19,14 @@ export interface AutoSendDecision {
  */
 export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSendDecision {
   if (artifact.sent) return { eligible: false, reason: "already sent" };
+  // The same rule, for a send a re-review has since superseded. `sent` only
+  // ever describes the draft on the row, so once one moves to `priorSends`
+  // that guard stops seeing it — and "never a re-send" would quietly come to
+  // mean "never twice in a row". A PR this user has already reviewed is the
+  // last place to post unattended: the second review is theirs to send.
+  if (artifact.priorSends.length > 0) {
+    return { eligible: false, reason: "a review was already sent on this PR — the next one is yours to send" };
+  }
   if (artifact.status !== "ready") return { eligible: false, reason: `status is ${artifact.status}` };
   if (!artifact.verdict) return { eligible: false, reason: "no verdict" };
   if (artifact.verdict.recommendation !== "approve") {

@@ -462,6 +462,24 @@ describe("handing the draft over with it", () => {
     expect(saved?.sent?.event).toBe("APPROVE");
     expect(saved?.handoff?.to).toBe("maks");
   });
+
+  it("nor on one whose send a re-review has since superseded", async () => {
+    // The draft is new — a re-review wrote it — but the user's name is already
+    // on a review of this PR, so carrying this one over would be the second.
+    // `sent` cannot answer that question any more; `priorSends` can.
+    await saveArtifact(
+      withComment({
+        status: "ready",
+        sent: null,
+        priorSends: [{ at: "2026-08-21T11:00:00.000Z", event: "COMMENT", url: "u", auto: false }],
+      }),
+    );
+    await handoff({ to: "maks", postReview: true, confirm: true });
+    expect(submit).not.toHaveBeenCalled();
+    const saved = await loadArtifact(ID);
+    expect(saved?.sent).toBeNull();
+    expect(saved?.handoff?.to).toBe("maks");
+  });
 });
 
 describe("GET /api/reviews/:key/reviewers — who it could be handed to", () => {

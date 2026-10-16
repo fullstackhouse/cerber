@@ -281,8 +281,28 @@ describe("POST /api/reviews/:key/refresh — not over a row that moved underneat
 
     const res = await refresh();
     expect(res.status).toBe(200);
-    expect((await res.json()).stale).toBe(true);
+    const body = await res.json();
+    expect(body.stale).toBe(true);
+    expect(body.headSha).toBe("def");
     expect((await loadArtifact(ID))!.pr.headSha).toBe("def");
+  });
+
+  it("declines a sent row but still reports where the PR is", async () => {
+    // A posted review is never re-anchored, so nothing is written — and then
+    // `headSha` is the only thing the answer carries. The cockpit's "the PR
+    // moved on since you sent this" banner is built from it and from `stale`,
+    // and without them a sent review goes stale with nothing saying so.
+    await saveArtifact({
+      ...artifact("sent"),
+      sent: { at: "2026-08-21T10:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false },
+    });
+
+    const res = await refresh();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ stale: true, changed: false, headSha: "def" });
+    // Untouched: the draft on disk is still the one that was posted.
+    expect((await loadArtifact(ID))!.pr.headSha).toBe("abc");
   });
 });
 
@@ -331,9 +351,24 @@ describe("POST /api/reviews/:key/rerun — the only way back into a sent review"
     return app.request(`/api/reviews/${KEY}/rerun`, { method: "POST" });
   };
 
+  /** A row whose draft is on GitHub, with the run that produced it recorded. */
+  const SENT_RUN = {
+    model: "claude-opus",
+    startedAt: "2026-08-21T09:00:00.000Z",
+    finishedAt: "2026-08-21T09:05:00.000Z",
+    costUsd: 0.42,
+    error: null,
+    withSource: true,
+    trusted: false,
+    sessionId: null,
+    trigger: "user" as const,
+    reviewedSha: "abc1234",
+  };
+
   const sentRow = () => ({
     ...artifact("sent"),
     sent: { at: "2026-08-21T10:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false },
+    run: SENT_RUN,
   });
 
   beforeEach(() => {
@@ -353,20 +388,26 @@ describe("POST /api/reviews/:key/rerun — the only way back into a sent review"
     expect(reviewPr).toHaveBeenCalledWith(expect.objectContaining({ number: 42 }), expect.objectContaining({ force: true }));
   });
 
-  it("holds on to the send until the run claims the row", async () => {
-    // The runner archives it (`supersede`) at the moment it replaces the
-    // draft. Until then the draft on the row is still the one that was sent.
+  it("holds on to the send, and its run, until the claim replaces the draft", async () => {
+    // The runner archives the send (`supersede`) at the moment it replaces the
+    // draft; until then the draft on the row is still the one that was sent,
+    // and so is the run block describing what produced it. A stub written here
+    // would erase that review's model, cost and commit minutes before the
+    // claim writes a real one — and for good, if the run never gets there.
     await saveArtifact(sentRow());
 
     expect((await rerun()).status).toBe(202);
     const after = (await loadArtifact(ID))!;
     expect(after.status).toBe("running");
     expect(after.sent).not.toBeNull();
+    expect(after.run).toEqual(SENT_RUN);
   });
 
   it("puts a sent row back under sent when the run dies before claiming it", async () => {
     // "failed" would hide a review that really is on GitHub behind a re-review
-    // that never produced anything. The error still lands on the run.
+    // that never produced anything. The failure is the re-review's, so it goes
+    // in the history — writing it onto `run.error` would pin it on the run
+    // that produced the review actually sitting on the PR.
     await saveArtifact(sentRow());
     (reviewPr as Mock).mockRejectedValue(new Error("gh is down"));
 
@@ -375,7 +416,8 @@ describe("POST /api/reviews/:key/rerun — the only way back into a sent review"
       const after = (await loadArtifact(ID))!;
       expect(after.status).toBe("sent");
       expect(after.sent).not.toBeNull();
-      expect(after.run?.error).toBe("gh is down");
+      expect(after.run).toEqual(SENT_RUN);
+      expect(after.history?.at(-1)?.what).toBe("re-review did not start: gh is down");
     });
   });
 

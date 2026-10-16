@@ -448,7 +448,11 @@ GitHub changes** — a second review sits beside the first; cerber never edits
 or withdraws what it posted.
 
 The poll does this on its own, too, for a sent review whose PR moved on and
-whose author has asked you for another look.
+whose author has asked you for another look. The two things that can reach
+GitHub without you both stand down on a row like that: auto-send will not
+approve a PR you have already reviewed yourself, and a handoff stops offering
+to carry the draft — it is a new draft, but sending it would still be your
+second review on that PR.
 
 ## Arguing with the review before you send it
 

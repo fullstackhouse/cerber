@@ -53,6 +53,7 @@ import {
   listArtifacts,
   loadArtifact,
   loadArtifactByKey,
+  noteHistory,
   saveArtifact,
   updateArtifactByKey,
 } from "../core/state.js";
@@ -733,21 +734,29 @@ export async function buildApp(
     const withSource = sourceParam == null ? opts.withSource : sourceParam !== "0";
     // Mark it running before responding, so the cockpit's next poll can't catch
     // the old "ready" status and conclude the run already finished.
+    //
+    // The run block is left alone while the row still carries its send: that
+    // block describes the review on GitHub — its model, its cost, the commit
+    // it read — and a stub written here would erase all of it minutes before
+    // the runner's claim writes a real one, with nothing able to bring it back
+    // if the run never gets that far. The claim replaces it either way.
     const running = await updateArtifactByKey(key, (a) => ({
       ...a,
       status: "running" as const,
-      run: {
-        model: null,
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-        costUsd: null,
-        error: null,
-        withSource: withSource !== false,
-        trusted: false,
-        sessionId: null,
-        trigger: "user",
-        reviewedSha: null,
-      },
+      run: a.sent
+        ? a.run
+        : {
+            model: null,
+            startedAt: new Date().toISOString(),
+            finishedAt: null,
+            costUsd: null,
+            error: null,
+            withSource: withSource !== false,
+            trusted: false,
+            sessionId: null,
+            trigger: "user",
+            reviewedSha: null,
+          },
     }));
 
     // Minutes-long: run it detached and let the cockpit poll the artifact.
@@ -766,17 +775,19 @@ export async function buildApp(
         //
         // A row that still carries its send never got as far as the claim, so
         // the draft on it is the one that went to GitHub and nothing about it
-        // has changed: it goes back to `sent` rather than to `failed`, with the
-        // error on the run where a failed re-review belongs.
-        await updateArtifactByKey(key, (a) =>
+        // has changed: it goes back to `sent`, untouched. The failure is the
+        // re-review's, not that review's, so it goes in the history rather
+        // than onto a run block that describes something else entirely.
+        const back = await updateArtifactByKey(key, (a) =>
           a.status === "running"
-            ? {
-                ...a,
-                status: a.sent ? ("sent" as const) : ("failed" as const),
-                run: a.run ? { ...a.run, error: message } : null,
-              }
+            ? a.sent
+              ? { ...a, status: "sent" as const }
+              : { ...a, status: "failed" as const, run: a.run ? { ...a.run, error: message } : null }
             : a,
-        ).catch(() => {});
+        ).catch(() => null);
+        if (back?.sent) {
+          await noteHistory(back.id, `re-review did not start: ${message}`).catch(() => {});
+        }
       });
 
     return c.json(running, 202);
@@ -1152,7 +1163,17 @@ export async function buildApp(
     let sendError: string | null = null;
     let sent: Artifact["sent"] = null;
     let payload: ReturnType<typeof buildReviewPayload> | null = null;
-    const alreadySent = postReview ? ((await loadArtifactByKey(key))?.sent ?? artifact.sent) : null;
+    //
+    // A send a re-review has since superseded counts here too. It is not on
+    // this draft, but it is on the PR under the user's name, and this guard
+    // exists to stop a handoff being the second review — which it would be.
+    const onDisk = postReview ? await loadArtifactByKey(key) : null;
+    const alreadySent = postReview
+      ? (onDisk?.sent ??
+        artifact.sent ??
+        (onDisk ?? artifact).priorSends.at(-1) ??
+        null)
+      : null;
     // And there has to be a review to post. The dialog only offers the box on a
     // row that has one, but the dialog is not the guard: a stale tab or a direct
     // call would otherwise submit a body that is nothing but cerber's footer,

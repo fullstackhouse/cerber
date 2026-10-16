@@ -55,6 +55,20 @@ describe("evaluateAutoSend", () => {
     expect(evaluateAutoSend(makeArtifact(), 90).eligible).toBe(true);
   });
 
+  it("rejects a PR you already sent a review on, however good the draft", () => {
+    // The policy is "never a re-send", and `sent` stops being able to say so
+    // the moment a re-review supersedes one: the record moves to `priorSends`
+    // and this is the only guard left that can see it. A second review posted
+    // unattended, on a PR the user reviewed by hand, is the exact thing
+    // auto-send's narrowness exists to rule out.
+    const a = makeArtifact({
+      priorSends: [{ at: "2026-08-20T09:00:00Z", event: "COMMENT", url: "u", auto: false }],
+    });
+    const d = evaluateAutoSend(a, 90);
+    expect(d.eligible).toBe(false);
+    expect(d.reason).toContain("already sent");
+  });
+
   it("rejects below the threshold", () => {
     const a = makeArtifact({ verdict: { recommendation: "approve", confidence: 89, reasoning: "" } });
     const d = evaluateAutoSend(a, 90);

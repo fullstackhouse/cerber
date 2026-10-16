@@ -345,7 +345,16 @@ export function Queue() {
         move(-1);
       } else if (e.key === "Enter" && selected) {
         openReview(selected.key);
-      } else if (e.key === "r" && selected && selected.status !== "running") {
+        // Not on a sent row: `r` is one keystroke with no label and no undo,
+        // and there it would replace the local copy of a review that is
+        // already public. The button two lines below says what it does and
+        // stays available — see the re-review discussion in docs/lifecycle.md.
+      } else if (
+        e.key === "r" &&
+        selected &&
+        selected.status !== "running" &&
+        selected.status !== "sent"
+      ) {
         startReview(selected.key);
       }
     };

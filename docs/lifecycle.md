@@ -279,6 +279,12 @@ once it is sent again, the count on the sent strip. **GitHub is never touched
 by any of this** — a second Send posts a second review beside the first, and
 nothing ever edits or withdraws the first.
 
+The two paths that could post without you both stand down on such a row, and
+read `priorSends` to do it: **auto-send** refuses it outright (a PR you have
+reviewed yourself is the last place to post unattended), and a **handoff** no
+longer offers to carry the draft — the draft is new, but posting it would be
+the second review on that PR under your name.
+
 A send that lands *while* a run is in flight is the opposite case and is left
 exactly alone (`mergeRunResult`): it describes the draft being handed over, the
 status stays `sent`, and nothing is archived.
@@ -677,7 +683,10 @@ one.
 **Auto-send** is deliberately narrow (`src/core/autosend.ts`): only `ready`,
 only an `approve` verdict, only with **zero** standing blocker findings, only
 at or above `--auto-send-threshold` (default 90, clamped to 50–100), never a
-re-send. Without `--auto-send` the daemon still evaluates in **shadow mode**
+re-send — including a PR you have already sent a review on and re-reviewed
+since, where the record lives in `priorSends` rather than `sent` (§4, "the
+draft that was sent") and the second review is yours to send.
+Without `--auto-send` the daemon still evaluates in **shadow mode**
 and logs what it *would* have sent; the flag is what makes it actually send.
 Either way the decision — including the declines and why — appends to
 `autosend.ndjson`. It is evaluated per *run*, not per draft: `handleAutoSend`

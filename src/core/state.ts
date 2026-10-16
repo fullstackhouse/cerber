@@ -212,15 +212,19 @@ export async function reconcileRunning(
       artifact.pendingChat && artifact.pendingChat.error == null ? artifact.pendingChat : null;
     const stuckCheck = artifact.raisedCheck?.checkingSince != null;
     if (!stuckRun && !stuckChat && !stuckCheck) continue;
+    // A row still carrying its send was interrupted before the run claimed it,
+    // so the draft on it is untouched — and it is the one that went to GitHub.
+    // "failed" would hide a sent review behind a broken re-review, and the
+    // interruption belongs to the re-review rather than to the run block,
+    // which still describes the review that was posted. It goes to the history
+    // instead, which is where a thing that happened *to* a row belongs.
+    const interruptedSend = stuckRun && artifact.sent != null;
     await saveArtifact({
       ...artifact,
-      // A row still carrying its send was interrupted before the run claimed
-      // it, so the draft on it is untouched — and it is the one that went to
-      // GitHub. "failed" would hide a sent review behind a broken re-review.
       status: stuckRun ? (artifact.sent ? "sent" : "failed") : artifact.status,
       updatedAt: new Date().toISOString(),
       run:
-        stuckRun && artifact.run
+        stuckRun && artifact.run && !interruptedSend
           ? { ...artifact.run, error: "interrupted — cerber restarted while this review was running" }
           : artifact.run,
       pendingChat: stuckChat
@@ -230,6 +234,9 @@ export async function reconcileRunning(
       // report, and the next open starts another.
       raisedCheck: artifact.raisedCheck && { ...artifact.raisedCheck, checkingSince: null },
     });
+    if (interruptedSend) {
+      await noteHistory(artifact.id, "re-review interrupted — cerber restarted; the sent review is untouched");
+    }
     cleared++;
   }
   return cleared;

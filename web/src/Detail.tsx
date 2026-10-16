@@ -1863,8 +1863,12 @@ function HandoffDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const login = asLogin(to);
   const ready = isLogin(login);
-  // Something worth passing on, that nobody has passed on yet.
-  const draftToOffer = !artifact.sent && (artifact.summary !== "" || artifact.comments.length > 0);
+  // Something worth passing on, that nobody has passed on yet — and a send a
+  // re-review superseded still counts as having passed it on. That review is
+  // on the PR under your name, so a handoff carrying this draft would be the
+  // second one, which is the thing this test exists to prevent.
+  const everSent = artifact.sent != null || (artifact.priorSends ?? []).length > 0;
+  const draftToOffer = !everSent && (artifact.summary !== "" || artifact.comments.length > 0);
 
   // What the draft would post. Fetched when it is asked for and not before —
   // the common handoff posts nothing, and composing a body for it would be work
@@ -2474,25 +2478,28 @@ function SendPanel({
  */
 function PriorSendsNote({ sends }: { sends: SentInfo[] }) {
   const last = sends[sends.length - 1]!;
+  const one = sends.length === 1;
   const on = (at: string) => new Date(at).toLocaleDateString();
   const label = EVENT_LABEL[last.event];
 
   return (
     <div>
       <strong>
-        You already sent {sends.length === 1 ? "a review" : `${sends.length} reviews`} on this PR
-        {sends.length === 1 ? "" : ", the last"} on {on(last.at)}
-        {sends.length === 1 ? ` — ${label}` : ` as ${label}`}.
+        You already sent {one ? "a review" : `${sends.length} reviews`} on this PR
+        {one ? "" : ", the last"} on {on(last.at)}
+        {one ? ` — ${label}` : ` as ${label}`}.
       </strong>{" "}
       {last.url ? (
         <a href={last.url} target="_blank" rel="noreferrer">
-          It is still on GitHub
+          {one ? "It is still on GitHub" : "The last is still on GitHub"}
         </a>
-      ) : (
+      ) : one ? (
         "It is still on GitHub"
+      ) : (
+        "The last is still on GitHub"
       )}
       , untouched by the draft below — a re-review replaces what cerber holds, never what was
-      posted. Sending this one adds a second review.
+      posted. Sending this one would be review {sends.length + 1}.
     </div>
   );
 }
@@ -2770,10 +2777,14 @@ function FreshnessBanner({
       {sentAtOldHead && (
         <div>
           <strong>The PR moved on since you sent this review.</strong>{" "}
-          {freshness?.headSha && (
+          {freshness?.headSha && artifact.pr.headSha && (
             <>
               Now at <code>{freshness.headSha.slice(0, 7)}</code>, sent at{" "}
-              <code>{(artifact.run?.reviewedSha ?? artifact.pr.headSha).slice(0, 7)}</code>.{" "}
+              {/* `pr.headSha`, not `run.reviewedSha`: a review posts with the
+                  former as its commit id, and refresh declines a sent row, so
+                  this is frozen at exactly what GitHub attached it to. The two
+                  differ whenever the draft was pulled forward before sending. */}
+              <code>{artifact.pr.headSha.slice(0, 7)}</code>.{" "}
             </>
           )}
           What you sent stays exactly as it was posted — cerber never re-anchors a review that
