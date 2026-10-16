@@ -429,8 +429,9 @@ cockpit (or `cerber review <pr> --force`).
 > starts and they do not come back, on success or on failure. This is a
 > decision, not a bug ([`docs/lifecycle.md`](docs/lifecycle.md)): the run owns
 > the draft. If you have written comments you want to keep, send the review or
-> copy them out first. Your *decisions* do survive — a send, a `reviewed` or
-> `skipped` you set, and the chat transcript are all kept.
+> copy them out first. Your *decisions* do survive — a `reviewed` or `skipped`
+> you set and the chat transcript are kept, and a send is kept as a record of
+> what went to GitHub (see the next section).
 
 ### Re-reviewing one you already sent
 

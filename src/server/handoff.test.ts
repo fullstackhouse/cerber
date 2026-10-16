@@ -447,6 +447,9 @@ describe("handing the draft over with it", () => {
     const saved = await loadArtifact(ID);
     expect(saved?.status).toBe("skipped");
     expect(saved?.handoff?.to).toBe("maks");
+    // Said, not swallowed: the box was ticked, so the caller is owed the
+    // reason nothing went up.
+    expect((await res.json()).sendError).toMatch(/no draft on this row/);
   });
 
   it("never submits a second review on a row that already sent one", async () => {

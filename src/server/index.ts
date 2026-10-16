@@ -1184,11 +1184,14 @@ export async function buildApp(
     // goes under sent, with the review on the PR"; letting the guard refuse in
     // silence walks the user to the next review believing it posted.
     if (postReview && alreadySent) {
+      // Phrased to read after the cockpit's own "the review did not post:",
+      // which is what wraps every `sendError` on the way to the user.
       sendError =
-        `not posted — a review was already sent on this PR at ${alreadySent.at}` +
-        `${alreadySent.url ? ` (${alreadySent.url})` : ""}. The draft is untouched and still yours to send.`;
+        `a review was already sent on this PR on ${alreadySent.at.slice(0, 10)}` +
+        `${alreadySent.url ? ` (${alreadySent.url})` : ""}, and a second one is yours to send.` +
+        ` The draft is untouched.`;
     } else if (postReview && !somethingToSay) {
-      sendError = "not posted — there is no draft on this row, only cerber's footer would have gone up.";
+      sendError = "there is no draft on this row — only cerber's footer would have gone up.";
     }
     if (postReview && !alreadySent && somethingToSay) {
       payload = buildReviewPayload(artifact, "COMMENT");

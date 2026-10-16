@@ -4,6 +4,7 @@ import { Artifact as CoreArtifact } from "../../src/core/artifact";
 import {
   everSent,
   eventForVerdict,
+  sentAtOldHead,
   payloadSummary,
   sendCount,
   raisedFate,
@@ -308,9 +309,41 @@ describe("everSent / sendCount — has this row's name reached GitHub already", 
   });
 
   it("reads an artifact from before the field existed", () => {
-    const legacy = { ...artifact([]), sent: null } as Artifact;
+    // Distinct from the cases above on purpose: there the field is present
+    // and empty, here it is absent, which is every artifact already on disk.
+    const legacy = row({ sent: null, priorSends: [] });
     delete (legacy as { priorSends?: unknown }).priorSends;
+    expect("priorSends" in legacy).toBe(false);
     expect(everSent(legacy)).toBe(false);
     expect(sendCount(legacy)).toBe(0);
+  });
+});
+
+// The banner that tells a user their posted review is out of date. It is
+// asked of the two heads rather than of the refresh's `stale` flag, which
+// stays true for the life of the page once a draft has been pulled forward.
+describe("sentAtOldHead — has the PR moved past the review that went out", () => {
+  const SENT = { at: "2026-08-21T10:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+  const row = (over: Partial<Artifact>): Artifact => ({ ...artifact([]), ...over });
+
+  it("is false on a row that never sent anything", () => {
+    expect(sentAtOldHead(row({ sent: null }), { headSha: "def4567" })).toBe(false);
+  });
+
+  it("is true when GitHub's head is past the commit the review was posted against", () => {
+    expect(sentAtOldHead(row({ sent: SENT }), { headSha: "def4567" })).toBe(true);
+  });
+
+  it("is false the moment you send, on a draft that was pulled forward first", () => {
+    // The regression this exists for: the refresh answered `stale: true`
+    // before writing the new head, the page kept that answer, and sending
+    // then produced "the PR moved on — now at X, sent at X" over a PR that
+    // had not moved, beside a button offering to replace what just posted.
+    expect(sentAtOldHead(row({ sent: SENT }), { headSha: "abc1234" })).toBe(false);
+  });
+
+  it("says nothing when the check could not reach GitHub", () => {
+    expect(sentAtOldHead(row({ sent: SENT }), null)).toBe(false);
+    expect(sentAtOldHead(row({ sent: SENT }), {})).toBe(false);
   });
 });

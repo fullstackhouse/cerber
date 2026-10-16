@@ -105,6 +105,26 @@ export function sendCount(artifact: Artifact): number {
 }
 
 /**
+ * Has the PR moved past the review that was sent from this row?
+ *
+ * Asked of the two heads, never of the refresh's `stale` flag: that flag is
+ * computed against the artifact as it stood *before* the refresh wrote the
+ * new head, so it stays true for the rest of the page's life on a row that
+ * was pulled forward and then sent. Reading it would put "the PR moved on
+ * since you sent this review — now at X, sent at X" on screen seconds after
+ * the send, over a PR that has not moved at all, next to a button offering to
+ * replace the review just posted.
+ */
+export function sentAtOldHead(
+  artifact: Artifact,
+  freshness: { headSha?: string } | null,
+): boolean {
+  if (artifact.sent == null) return false;
+  const now = freshness?.headSha;
+  return now != null && artifact.pr.headSha !== "" && now !== artifact.pr.headSha;
+}
+
+/**
  * What a comment somebody else already raised will do at Send, in the words
  * the card uses. Null for a comment nobody else raised.
  */

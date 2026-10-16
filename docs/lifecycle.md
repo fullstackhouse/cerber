@@ -269,7 +269,7 @@ The claim at the top of a run moves it instead (`supersede`, `src/core/refresh.t
   chattable and sendable.
 - the record → `priorSends`, oldest first, URL included.
 - `calibration` is kept: it describes a review that really was sent, and
-  `cerber calibration` is its only reader.
+  `cerber stats` is its only reader.
 - the history gets a line of its own, since no other one records a row leaving
   `sent` without anything being un-sent.
 
@@ -603,7 +603,7 @@ Written by other paths:
   `ChatTurn`. `preChat` is the one snapshot taken before the first turn.
 - Send writes `sent` and `calibration` (what the AI proposed vs what you sent).
   A later re-review moves `sent` to `priorSends` and keeps `calibration`, which
-  describes a review that really was sent and is what `cerber calibration`
+  describes a review that really was sent and is what `cerber stats`
   counts.
 - Refresh writes `refresh` (`fromSha`, `toSha`, `moved`, `drifted`).
 

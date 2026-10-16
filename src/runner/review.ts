@@ -268,7 +268,7 @@ async function performReview(
     handoff: null,
     settledAt: null,
     // Carried at the claim, not reset: it describes a review that really was
-    // sent, and `cerber calibration` is the only reader. Dropping it here
+    // sent, and `cerber stats` is the only reader. Dropping it here
     // would quietly delete one data point every time a sent PR is re-reviewed.
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the

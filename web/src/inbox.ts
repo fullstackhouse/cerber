@@ -473,7 +473,8 @@ export function strip(
       reasoning:
         `Sent to GitHub as ${EVENT_LABEL[r.sent.event] ?? r.sent.event} on ${new Date(
           r.sent.at,
-        ).toLocaleDateString()}. Kept here as a record; the conversation can't continue.` +
+        ).toLocaleDateString()}. Kept here as a record; the conversation can't continue, ` +
+        `though a re-review can draft against the current head.` +
         // Where the PR went outranks how it was answered — the row's tag says
         // so too. Without this the one row that did both reads like an
         // ordinary send, and nothing in the strip mentions the handoff.

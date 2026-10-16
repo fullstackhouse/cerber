@@ -2382,3 +2382,26 @@ and tests.
    not `handoff`, which §8.5 lists among what MUST survive a run. A handoff
    that lands *while* the run works does survive (`mergeRunResult`); one made
    before it starts does not.
+9. **A chat turn that lands after a send reverts it** — `mergeConcurrentEdits`
+   (§12.5) names the fields it takes from disk rather than from the turn's own
+   snapshot, and `sent`, `priorSends`, `calibration` and `settledAt` are not
+   among them. A turn is allowed to be in flight while Send runs (unlike a
+   handoff, which refuses), so a send during a turn is undone by the fold:
+   the row keeps `status: "sent"` with `sent: null`, which §8.2 forbids and
+   which lets the "already sent" guard pass a second submission of the same
+   review. Independent of §8.3 and present before `priorSends` existed; the
+   fix is to list those four fields beside `handoff`.
+10. **A re-review that fails before the claim is invisible from the queue** —
+    the reason is written to the history (§8.3), the review page reads it back
+    (§13), and `ReviewListItem` carries neither, so a re-review started from
+    the queue on a sent row that dies early returns the row to *sent* with
+    nothing said there.
+11. **One calibration per row, not per send** — `calibration` survives the
+    claim (§8.3) but is overwritten by the next send, so a PR reviewed and
+    sent twice contributes one sample to `cerber stats`, the second.
+12. **A superseded send can be the evidence that files its own replacement** —
+    `filedByYourAct` (§9.5) reads "a review of yours exists on GitHub" without
+    asking whether it is one `priorSends` records. The poll only re-reviews
+    rows GitHub is still asking about, and those are never filed, so this
+    needs the request to be withdrawn afterwards; the draft is then filed with
+    a reason whose copy says the review was submitted outside cerber.

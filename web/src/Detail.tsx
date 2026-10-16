@@ -63,6 +63,8 @@ import {
   raisedFate,
   raisedWhere,
   rowLine,
+  sendCount,
+  sentAtOldHead,
   severitySummary,
   splitComments,
   verdictBasis,
@@ -2146,15 +2148,15 @@ function HandoffDialog({
           )}
         </div>
 
+        {draftWithheld && (
+          <p className="faint handoff-says">
+            You already reviewed this PR, so this draft can't ride along — a handoff that carried
+            it would be your second review. Send it yourself if that is what you mean.
+          </p>
+        )}
         {/* Offered only where there is a draft nobody has posted yet: a row
             already sent has its review on GitHub, and one with nothing drafted
             has nothing to offer. */}
-        {draftWithheld && (
-          <p className="faint handoff-says">
-            You already reviewed this PR, so the draft below can't ride along — a handoff that
-            carried it would be your second review. Send it yourself if that is what you mean.
-          </p>
-        )}
         {draftToOffer && (
           <div className="handoff-with-review">
             <label>
@@ -2348,7 +2350,7 @@ function SendPanel({
             {artifact.sent.auto ? " · auto-sent by the daemon" : ""}
             {/* The count, not a list: the earlier ones are in the history
                 card, and what matters here is that this was not the first. */}
-            {priorSends.length > 0 ? ` · review ${priorSends.length + 1} on this PR` : ""}
+            {priorSends.length > 0 ? ` · review ${sendCount(artifact)} on this PR` : ""}
           </span>
           <span className="grow" />
           {artifact.sent.url && (
@@ -2392,7 +2394,7 @@ function SendPanel({
           about the click, and the click is already the deliberate act. */}
       {priorSends.length > 0 && (
         <p className="send-note">
-          This posts review {priorSends.length + 1} on this PR. What you sent before stays on
+          This posts review {sendCount(artifact) + 1} on this PR. What you sent before stays on
           GitHub — a new one sits beside it rather than replacing it.
         </p>
       )}
@@ -2729,13 +2731,21 @@ function FreshnessBanner({
   // staleness has to come from the check's own answer. It is worth saying
   // loudly: a review written for a commit the PR has left is the whole reason
   // the re-review button is offered here.
-  const sentAtOldHead = artifact.sent && freshness?.stale && !closed ? artifact.sent : null;
+  const sentStale = !closed && sentAtOldHead(artifact, freshness) ? artifact.sent : null;
 
   if (running) {
     return (
-      <div className="freshness freshness-running">
-        <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates itself
-        when the run lands — it takes a few minutes.
+      <div className="freshness">
+        {/* Kept visible through the run: "you already reviewed this PR" is the
+            one thing on this page a reader cannot work out for themselves,
+            and a re-review takes minutes. */}
+        {(artifact.sent ? [] : (artifact.priorSends ?? [])).length > 0 && (
+          <PriorSendsNote sends={artifact.priorSends ?? []} />
+        )}
+        <div className="freshness-running">
+          <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates
+          itself when the run lands — it takes a few minutes.
+        </div>
       </div>
     );
   }
@@ -2744,7 +2754,7 @@ function FreshnessBanner({
   // Only while the send it describes is the *previous* draft's: once this one
   // has been sent too, the strip at the foot says so and the count with it.
   const priorSends = artifact.sent ? [] : (artifact.priorSends ?? []);
-  if (!closed && !movedHere && !sentAtOldHead && !filed && !handoff && priorSends.length === 0) {
+  if (!closed && !movedHere && !sentStale && !filed && !handoff && priorSends.length === 0) {
     return null;
   }
 
@@ -2780,12 +2790,17 @@ function FreshnessBanner({
             </>
           )}
           The summary and verdict still describe the commit that was reviewed.
-          <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
-            {rerunning ? "starting…" : "re-review at the new head"}
-          </button>
+          {/* A sent row has its own block below, with its own button: this one
+              is about comments that were re-anchored, which never happens to a
+              review already on GitHub. */}
+          {!artifact.sent && (
+            <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
+              {rerunning ? "starting…" : "re-review at the new head"}
+            </button>
+          )}
         </div>
       )}
-      {sentAtOldHead && (
+      {sentStale && (
         <div>
           <strong>The PR moved on since you sent this review.</strong>{" "}
           {freshness?.headSha && artifact.pr.headSha && (

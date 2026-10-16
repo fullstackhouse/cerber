@@ -311,7 +311,7 @@ describe("what a re-review does to a review you already sent", () => {
   });
 
   it("keeps the calibration of the review that really was sent", async () => {
-    // `cerber calibration` is the only reader, and it counts one row per send.
+    // `cerber stats` is the only reader, and it counts one row per send.
     // Resetting the field here deleted a data point every time a sent PR was
     // looked at again.
     await saveArtifact(alreadySent());
