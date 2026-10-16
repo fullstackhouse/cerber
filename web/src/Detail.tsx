@@ -56,6 +56,7 @@ import {
   EVENT_LABEL,
   EVENT_TONE,
   ReviewEvent,
+  everSent,
   eventForVerdict,
   inlineComments,
   payloadSummary,
@@ -1867,8 +1868,12 @@ function HandoffDialog({
   // re-review superseded still counts as having passed it on. That review is
   // on the PR under your name, so a handoff carrying this draft would be the
   // second one, which is the thing this test exists to prevent.
-  const everSent = artifact.sent != null || (artifact.priorSends ?? []).length > 0;
-  const draftToOffer = !everSent && (artifact.summary !== "" || artifact.comments.length > 0);
+  const hasDraft = artifact.summary !== "" || artifact.comments.length > 0;
+  const draftToOffer = !everSent(artifact) && hasDraft;
+  // A box that silently is not there reads as a draft not worth offering. On a
+  // row whose send was superseded the draft is real and the reason is not
+  // obvious, so it is said rather than left to be inferred.
+  const draftWithheld = everSent(artifact) && artifact.sent == null && hasDraft;
 
   // What the draft would post. Fetched when it is asked for and not before —
   // the common handoff posts nothing, and composing a body for it would be work
@@ -2144,6 +2149,12 @@ function HandoffDialog({
         {/* Offered only where there is a draft nobody has posted yet: a row
             already sent has its review on GitHub, and one with nothing drafted
             has nothing to offer. */}
+        {draftWithheld && (
+          <p className="faint handoff-says">
+            You already reviewed this PR, so the draft below can't ride along — a handoff that
+            carried it would be your second review. Send it yourself if that is what you mean.
+          </p>
+        )}
         {draftToOffer && (
           <div className="handoff-with-review">
             <label>
@@ -2718,7 +2729,7 @@ function FreshnessBanner({
   // staleness has to come from the check's own answer. It is worth saying
   // loudly: a review written for a commit the PR has left is the whole reason
   // the re-review button is offered here.
-  const sentAtOldHead = artifact.sent && freshness?.stale ? artifact.sent : null;
+  const sentAtOldHead = artifact.sent && freshness?.stale && !closed ? artifact.sent : null;
 
   if (running) {
     return (
@@ -2950,6 +2961,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // findings others already raised — follow it until it lands. All of them run
   // detached, so the artifact is the only thing that knows.
   const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
+  /** The sent row's `run.startedAt` when a re-review was asked for — see `onRerun`. */
+  const startedFrom = useRef<string | null>(null);
   const raisedChecking = artifact?.raisedCheck?.checkingSince != null || raisedReading;
   useEffect(() => {
     if (artifact?.status !== "running" && !chatInFlight && !raisedChecking) return;
@@ -2957,7 +2970,20 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       fetchReview(reviewKey)
         .then((a) => {
           setArtifact(a);
-          if (a.status !== "running") setRerunning(false);
+          if (a.status !== "running") {
+            setRerunning(false);
+            // Back where it started, with the same run still on it: the
+            // re-review died before it owned the row. The reason is in the
+            // history, which is collapsed, so say that much here.
+            const from = startedFrom.current;
+            if (from != null && a.sent && (a.run?.startedAt ?? "none") === from) {
+              setError(
+                "The re-review didn't start, so nothing here changed — the review you sent is " +
+                  "untouched. The history below says why.",
+              );
+            }
+            startedFrom.current = null;
+          }
         })
         .catch(() => {
           // Transient — the next tick tries again.
@@ -3211,6 +3237,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const onRerun = (withSource?: boolean) => {
     setRerunning(true);
     setError(null);
+    // What the row looked like before the run claimed it. On a sent row the
+    // claim is the only thing that replaces the run block, so a status that
+    // comes back to `sent` with this one still in place means the run never
+    // got that far — a failure the page would otherwise show nothing for,
+    // because its error deliberately does not go on the sent review's run.
+    startedFrom.current = artifact.sent ? (artifact.run?.startedAt ?? "none") : null;
     rerunReview(reviewKey, withSource)
       .then(setArtifact)
       .catch((e) => {

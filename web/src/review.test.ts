@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { buildReviewPayload } from "../../src/core/send";
 import { Artifact as CoreArtifact } from "../../src/core/artifact";
 import {
+  everSent,
   eventForVerdict,
   payloadSummary,
+  sendCount,
   raisedFate,
   rowLine,
   severitySummary,
@@ -271,5 +273,44 @@ describe("findings somebody else already raised", () => {
     expect(raisedFate({ ...answer!, alreadyRaised: raised({ decision: "reply", replied: { at: "t", url: null } }) }, true)).toBe(
       "replied in their thread",
     );
+  });
+});
+
+// The two predicates every surface that can *post* asks, and the reason they
+// are not `artifact.sent`: a re-review moves that record to `priorSends`, and
+// a guard reading the raw field would offer the second review as the first.
+describe("everSent / sendCount — has this row's name reached GitHub already", () => {
+  const SENT = { at: "2026-08-21T10:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+  const row = (over: Partial<Artifact>): Artifact => ({ ...artifact([]), ...over });
+
+  it("is false on a draft nobody has posted", () => {
+    expect(everSent(row({ sent: null }))).toBe(false);
+    expect(sendCount(row({ sent: null }))).toBe(0);
+  });
+
+  it("is true while the sent draft is the one on the page", () => {
+    expect(everSent(row({ sent: SENT }))).toBe(true);
+    expect(sendCount(row({ sent: SENT }))).toBe(1);
+  });
+
+  it("stays true once a re-review supersedes the send", () => {
+    // The whole point: `sent` is null here, and the handoff's draft box and
+    // the send note both have to keep seeing the review that is on the PR.
+    const reReviewed = row({ sent: null, priorSends: [SENT] });
+    expect(everSent(reReviewed)).toBe(true);
+    expect(sendCount(reReviewed)).toBe(1);
+  });
+
+  it("counts them all, so the next send can name its own number", () => {
+    const twice = row({ sent: null, priorSends: [SENT, { ...SENT, at: "2026-08-22T09:00:00.000Z" }] });
+    expect(sendCount(twice)).toBe(2);
+    expect(sendCount(row({ sent: SENT, priorSends: [SENT] }))).toBe(2);
+  });
+
+  it("reads an artifact from before the field existed", () => {
+    const legacy = { ...artifact([]), sent: null } as Artifact;
+    delete (legacy as { priorSends?: unknown }).priorSends;
+    expect(everSent(legacy)).toBe(false);
+    expect(sendCount(legacy)).toBe(0);
   });
 });

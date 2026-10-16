@@ -2010,9 +2010,9 @@ button {
   flex-wrap: wrap;
 }
 
-/* One fact about the click, directly above the button that does it — in the
-   body colour, not the faint one: it is the thing on this panel a reader most
-   needs and the only one they cannot get from anywhere else. */
+/* One fact about the click, directly above the button that does it. Not in
+   the faint colour the rest of the panel's asides use: it is the thing here a
+   reader most needs, and the only one they cannot get from anywhere else. */
 .send-note {
   margin: 0 0 10px;
   font-size: 12px;

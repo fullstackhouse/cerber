@@ -228,8 +228,6 @@ export interface Artifact {
     error: string | null;
     withSource?: boolean;
     trusted?: boolean;
-    /** The head this run actually read — what "reviewed at" means on the page. */
-    reviewedSha?: string | null;
   } | null;
   sent: SentInfo | null;
   /**

@@ -1180,6 +1180,16 @@ export async function buildApp(
     // under the user's name, on a PR nobody has drafted a word about.
     const somethingToSay =
       artifact.summary !== "" || artifact.comments.some((cm) => cm.status !== "dropped");
+    // A decline here has to say so. The dialog's own line promises "this row
+    // goes under sent, with the review on the PR"; letting the guard refuse in
+    // silence walks the user to the next review believing it posted.
+    if (postReview && alreadySent) {
+      sendError =
+        `not posted — a review was already sent on this PR at ${alreadySent.at}` +
+        `${alreadySent.url ? ` (${alreadySent.url})` : ""}. The draft is untouched and still yours to send.`;
+    } else if (postReview && !somethingToSay) {
+      sendError = "not posted — there is no draft on this row, only cerber's footer would have gone up.";
+    }
     if (postReview && !alreadySent && somethingToSay) {
       payload = buildReviewPayload(artifact, "COMMENT");
       try {

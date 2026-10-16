@@ -145,6 +145,25 @@ describe("POST /api/reviews/:key/send — not while a run is rewriting the draft
     expect((await loadArtifact(ID))!.status).toBe("sent");
   });
 
+  it("sends a draft that replaced one already on the PR", async () => {
+    // The other half of the stand-down rules: auto-send and a handoff both
+    // refuse a row with a prior send, and Send deliberately does not. Without
+    // this, making the send guard read the whole record — the obvious
+    // symmetry with its two siblings — would silently make a re-reviewed
+    // review unsendable, which is the entire point of the feature.
+    await saveArtifact({
+      ...artifact("ready"),
+      priorSends: [{ at: "2026-08-20T09:00:00.000Z", url: "u", event: "COMMENT" as const, auto: false }],
+    });
+
+    const res = await send();
+    expect(res.status).toBe(200);
+    expect(submit).toHaveBeenCalledOnce();
+    const after = (await loadArtifact(ID))!;
+    expect(after.status).toBe("sent");
+    expect(after.priorSends).toHaveLength(1);
+  });
+
   it("refuses a second submission of one already sent", async () => {
     await saveArtifact(artifact("ready"));
     expect((await send()).status).toBe(200);

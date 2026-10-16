@@ -295,6 +295,18 @@ program
 
     const payload = buildReviewPayload(artifact, event);
     console.log(`About to send to ${artifact.pr.url}:`);
+    // Said before anything else about the payload: on a PR you have already
+    // reviewed, "what is in this review" is the second question. The cockpit's
+    // send panel says the same thing in the same place (SPEC §8.3).
+    if (artifact.priorSends.length > 0) {
+      const last = artifact.priorSends[artifact.priorSends.length - 1]!;
+      console.log(
+        `  ⚠ you already sent ${artifact.priorSends.length} review(s) on this PR` +
+          ` — the last on ${last.at.slice(0, 10)} as ${last.event.toLowerCase().replace("_", " ")}` +
+          `${last.url ? ` (${last.url})` : ""}.` +
+          ` This would be review ${artifact.priorSends.length + 1}; it sits beside them, replacing nothing.`,
+      );
+    }
     console.log(`  event: ${event}`);
     console.log(`  inline comments: ${payload.comments.length}`);
     if (payload.folded.length > 0) {

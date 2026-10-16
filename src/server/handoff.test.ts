@@ -474,11 +474,15 @@ describe("handing the draft over with it", () => {
         priorSends: [{ at: "2026-08-21T11:00:00.000Z", event: "COMMENT", url: "u", auto: false }],
       }),
     );
-    await handoff({ to: "maks", postReview: true, confirm: true });
+    const res = await handoff({ to: "maks", postReview: true, confirm: true });
     expect(submit).not.toHaveBeenCalled();
     const saved = await loadArtifact(ID);
     expect(saved?.sent).toBeNull();
     expect(saved?.handoff?.to).toBe("maks");
+    // And it says so. A guard that declines in silence leaves the cockpit
+    // free to walk the user on to the next review, having just promised them
+    // "this row goes under sent, with the review on the PR".
+    expect((await res.json()).sendError).toMatch(/already sent on this PR/);
   });
 });
 

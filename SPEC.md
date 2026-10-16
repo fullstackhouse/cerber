@@ -1552,7 +1552,10 @@ It defaults **off**, and that is the one place a handoff does not follow "on by
 default": a handoff is reachable from a row nobody ever opened, where the draft
 is whatever the poll wrote, and publishing that under the user's name is the
 thing §14.4 exists to prevent. Ticking it is the reading. An artifact that is
-already `sent` MUST NOT be offered it and MUST NOT submit twice.
+already `sent` — or that sent a review a re-review has since superseded
+(`priorSends`, §8.3) — MUST NOT be offered it and MUST NOT submit twice. A
+refusal here MUST be reported to the caller: the dialog has just said the
+review will be on the PR, so declining in silence tells the user it posted.
 
 A handoff that posts nothing leaves the draft local, openable and still
 sendable, and the dialog says so.
@@ -2365,7 +2368,11 @@ and tests.
    `sent` does not describe what is on the page. Now that `priorSends` exists,
    superseding there too would make the invariant hold everywhere; it is left
    alone because the behaviour predates this record and the race needs two
-   processes inside the pre-claim window.
+   processes inside the pre-claim window. The two windows also disagree with
+   each other: a send landing *before* the claim on a row the run is reopening
+   (a forced re-review of a settled row) is superseded into `priorSends`, and
+   the row reads as an unsent draft — the coherent end state; one landing after
+   the claim keeps `sent` as above.
 7. **A re-review cannot see what you already told the PR** — the already-raised
    check (§14.7) deliberately skips your own comments and reviews, which was
    exact while a sent row was terminal. A second draft can now re-raise, as new

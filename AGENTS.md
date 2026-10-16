@@ -86,7 +86,9 @@ left unwritten. Code and tests win when they disagree.
   the handoff's suggestions, and uses `assignees` rather than `collaborators`
   because only the first works without push access), diff utils,
   re-anchoring (`anchor.ts`/`refresh.ts` — pulls a review onto a newer head by
-  matching each comment's line *text*, never a fuzzy guess), review revision
+  matching each comment's line *text*, never a fuzzy guess; `supersede` there
+  is the other half: the sends a re-review has replaced, kept as a record
+  rather than dropped), review revision
   (`revise.ts` — applies a chat turn's edits, refuses the user's own comments,
   and folds a finished turn onto whatever the artifact says now), source checkouts
   (`checkout.ts` — shallow `refs/pull/N/head` clone per PR under `~/.cerber/src`;
@@ -262,7 +264,13 @@ left unwritten. Code and tests win when they disagree.
   instead. Don't add carry-over back without changing that page too.
 - Don't let a re-review discard a *decision*, on any path it can take. Its
   result is folded onto whatever the artifact says now (`mergeRunResult`)
-  rather than written over it, so a send stands and the chat is kept.
+  rather than written over it, so a send stands and the chat is kept. The one
+  decision a re-review may take *over* is the send it is replacing — because
+  replacing the draft is the only way back into a sent review — and even that
+  is kept rather than dropped: the claim files it under `priorSends`
+  (`supersede`), so `sent` goes on meaning "this draft is the one on GitHub"
+  and the surfaces that could post a second review (Send's note, auto-send,
+  a handoff's draft box) can all still see the first.
   `reviewed` and `skipped` survive a new push
   (`SETTLED_BY_YOU` in `review.ts`), because a row dragged back into the inbox
   every time the author pushes is cerber overruling you, and a settle or a send
