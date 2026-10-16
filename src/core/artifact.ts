@@ -449,6 +449,22 @@ export const ArtifactSchema = z.object({
   run: RunInfoSchema.nullable().default(null),
   /** Set once the review was sent to GitHub (explicitly, or via opt-in auto-send). */
   sent: SentInfoSchema.nullable().default(null),
+  /**
+   * Reviews posted from this row that a later re-review has since replaced,
+   * oldest first.
+   *
+   * `sent` means "the draft on this page is the one that went to GitHub", and
+   * every guard in cerber reads it that way — the send path's "already sent"
+   * refusal most of all. So when a re-review replaces that draft the send
+   * cannot stay in the field (the new draft was never sent) and must not simply
+   * go (it is on the PR, under the user's name, for good). It moves here.
+   *
+   * What it buys is a cockpit that can say "you reviewed this on the 14th" over
+   * a draft of the 16th, and a send panel that says the next click posts a
+   * second review rather than a first. The GitHub URL rides along, because the
+   * record is only useful if the thing it names can be opened.
+   */
+  priorSends: z.array(SentInfoSchema).default([]),
   /** Set when cerber filed this draft away itself, and why. Never on a sent one. */
   filed: FiledInfoSchema.nullable().default(null),
   /** Set when you gave this review to somebody else. Mutually exclusive with `filed`. */

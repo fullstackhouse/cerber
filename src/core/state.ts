@@ -214,7 +214,10 @@ export async function reconcileRunning(
     if (!stuckRun && !stuckChat && !stuckCheck) continue;
     await saveArtifact({
       ...artifact,
-      status: stuckRun ? "failed" : artifact.status,
+      // A row still carrying its send was interrupted before the run claimed
+      // it, so the draft on it is untouched — and it is the one that went to
+      // GitHub. "failed" would hide a sent review behind a broken re-review.
+      status: stuckRun ? (artifact.sent ? "sent" : "failed") : artifact.status,
       updatedAt: new Date().toISOString(),
       run:
         stuckRun && artifact.run

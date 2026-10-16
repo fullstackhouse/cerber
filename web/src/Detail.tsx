@@ -79,6 +79,7 @@ import {
   ReviewComment,
   ReviewListItem,
   SendPreview,
+  SentInfo,
   Verdict,
 } from "./types";
 
@@ -2256,6 +2257,8 @@ function SendPanel({
   const [showBody, setShowBody] = useState(artifact.bodyOverride != null);
   const [editingBody, setEditingBody] = useState(false);
   const ownBody = artifact.bodyOverride != null;
+  /** Reviews already on this PR from here: what makes the next one a second. */
+  const priorSends = artifact.priorSends ?? [];
 
   // A body the user wrote opens shown — including one that arrived after this
   // panel was drawn, from another tab or a poll tick. Only ever in that
@@ -2328,6 +2331,9 @@ function SendPanel({
           <span className="faint">
             {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
             {artifact.sent.auto ? " · auto-sent by the daemon" : ""}
+            {/* The count, not a list: the earlier ones are in the history
+                card, and what matters here is that this was not the first. */}
+            {priorSends.length > 0 ? ` · review ${priorSends.length + 1} on this PR` : ""}
           </span>
           <span className="grow" />
           {artifact.sent.url && (
@@ -2366,6 +2372,15 @@ function SendPanel({
           {showBody ? "hide what gets posted" : "see what gets posted"}
         </button>
       </div>
+
+      {/* On the button rather than in a dialog: what changes is one fact
+          about the click, and the click is already the deliberate act. */}
+      {priorSends.length > 0 && (
+        <p className="send-note">
+          This posts review {priorSends.length + 1} on this PR. What you sent before stays on
+          GitHub — a new one sits beside it rather than replacing it.
+        </p>
+      )}
 
       <div className="send-action">
         <button
@@ -2444,6 +2459,40 @@ function SendPanel({
       )}
 
       <div className="send-footer">{footer}</div>
+    </div>
+  );
+}
+
+/**
+ * A review you already posted on this PR, under a draft that has replaced it.
+ *
+ * The one thing a reader of a re-reviewed row cannot work out for themselves:
+ * the draft in front of them is new, but their name is already on a review
+ * over on GitHub, and the next Send adds to it rather than being the first
+ * word. Leads with what was posted and when, and links it — a record nobody
+ * can open is barely a record.
+ */
+function PriorSendsNote({ sends }: { sends: SentInfo[] }) {
+  const last = sends[sends.length - 1]!;
+  const on = (at: string) => new Date(at).toLocaleDateString();
+  const label = EVENT_LABEL[last.event];
+
+  return (
+    <div>
+      <strong>
+        You already sent {sends.length === 1 ? "a review" : `${sends.length} reviews`} on this PR
+        {sends.length === 1 ? "" : ", the last"} on {on(last.at)}
+        {sends.length === 1 ? ` — ${label}` : ` as ${label}`}.
+      </strong>{" "}
+      {last.url ? (
+        <a href={last.url} target="_blank" rel="noreferrer">
+          It is still on GitHub
+        </a>
+      ) : (
+        "It is still on GitHub"
+      )}
+      , untouched by the draft below — a re-review replaces what cerber holds, never what was
+      posted. Sending this one adds a second review.
     </div>
   );
 }
@@ -2656,6 +2705,13 @@ function FreshnessBanner({
   const closed = state === "CLOSED" || state === "MERGED";
   const refresh = artifact.refresh;
   const movedHere = freshness?.changed ? refresh : null;
+  // A sent review is never pulled forward — refresh declines it, because its
+  // comments are already posted and re-anchoring them would change the page
+  // and nothing on GitHub. So `refresh` has nothing to say about one, and the
+  // staleness has to come from the check's own answer. It is worth saying
+  // loudly: a review written for a commit the PR has left is the whole reason
+  // the re-review button is offered here.
+  const sentAtOldHead = artifact.sent && freshness?.stale ? artifact.sent : null;
 
   if (running) {
     return (
@@ -2667,10 +2723,16 @@ function FreshnessBanner({
   }
   const filed = artifact.filed;
   const handoff = artifact.handoff;
-  if (!closed && !movedHere && !filed && !handoff) return null;
+  // Only while the send it describes is the *previous* draft's: once this one
+  // has been sent too, the strip at the foot says so and the count with it.
+  const priorSends = artifact.sent ? [] : (artifact.priorSends ?? []);
+  if (!closed && !movedHere && !sentAtOldHead && !filed && !handoff && priorSends.length === 0) {
+    return null;
+  }
 
   return (
     <div className="freshness">
+      {priorSends.length > 0 && <PriorSendsNote sends={priorSends} />}
       {/* Yours first: a handoff is a decision you made, and it is why anything
           cerber did to this row afterwards happened at all. */}
       {handoff && (
@@ -2700,11 +2762,26 @@ function FreshnessBanner({
             </>
           )}
           The summary and verdict still describe the commit that was reviewed.
-          {!artifact.sent && (
-            <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
-              {rerunning ? "starting…" : "re-review at the new head"}
-            </button>
+          <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
+            {rerunning ? "starting…" : "re-review at the new head"}
+          </button>
+        </div>
+      )}
+      {sentAtOldHead && (
+        <div>
+          <strong>The PR moved on since you sent this review.</strong>{" "}
+          {freshness?.headSha && (
+            <>
+              Now at <code>{freshness.headSha.slice(0, 7)}</code>, sent at{" "}
+              <code>{(artifact.run?.reviewedSha ?? artifact.pr.headSha).slice(0, 7)}</code>.{" "}
+            </>
           )}
+          What you sent stays exactly as it was posted — cerber never re-anchors a review that
+          is already on GitHub. Answering the new commits means a new draft, which replaces this
+          one here and leaves what was posted alone.
+          <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
+            {rerunning ? "starting…" : "re-review at the new head"}
+          </button>
         </div>
       )}
     </div>
@@ -3323,14 +3400,19 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                     <Icon name="down" size={12} />
                   </button>
                 ))}
-              {!readOnly && artifact.status !== "running" && (
+              {/* Offered on a sent review too — it is the only way back into
+                  one, and the review already on GitHub is kept as a record
+                  rather than overwritten. */}
+              {artifact.status !== "running" && (
                 <button
                   className="btn btn-sm"
                   disabled={rerunning}
                   title={
-                    artifact.run
-                      ? "Review the current head again — this draft is replaced, your own comments are kept"
-                      : "Draft a review of this PR"
+                    readOnly
+                      ? "Draft a new review at the current head. What you sent stays on GitHub — this replaces the draft here, and sending again posts a second review"
+                      : artifact.run
+                        ? "Review the current head again — this draft is replaced, comments and all"
+                        : "Draft a review of this PR"
                   }
                   onClick={() => onRerun(true)}
                 >

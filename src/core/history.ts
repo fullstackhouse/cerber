@@ -194,6 +194,11 @@ export function describeChange(before: Artifact | null, after: Artifact): string
         `${after.sent.auto ? ", by auto-send" : ""}`,
     );
   }
+  // The one state change nothing else on this list would record: the row went
+  // from "this draft is on GitHub" back to "this draft has never been sent".
+  if (after.priorSends.length > (before?.priorSends.length ?? 0)) {
+    lines.push("a new draft took over from the review that was sent — what was sent stays on GitHub");
+  }
   if (after.filed && after.filed.at !== before?.filed?.at) {
     lines.push(`filed under settled — ${FILED_PHRASE[after.filed.reason] ?? after.filed.reason}`);
   }

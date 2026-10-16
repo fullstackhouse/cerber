@@ -1,4 +1,4 @@
-import { Artifact, PrInfo } from "./artifact.js";
+import { Artifact, PrInfo, SentInfo } from "./artifact.js";
 import { AnchorResult, reanchorComments } from "./anchor.js";
 
 export interface RefreshResult {
@@ -60,6 +60,20 @@ export function userOwnsStatus(a: Artifact): boolean {
 }
 
 /**
+ * This row's sends, with the one a starting run is about to supersede folded in.
+ *
+ * The only way back into a review that was sent is a new draft, and `sent`
+ * describes a draft that is about to stop existing — so it cannot stay where
+ * it is. It also cannot simply go: that review is on the PR under the user's
+ * name, and a cockpit that forgets it would offer a second one as if it were
+ * the first. Called by the claim at the top of a run, which is the one moment
+ * a send stops covering what is on the page.
+ */
+export function supersede(a: Artifact): SentInfo[] {
+  return a.sent ? [...a.priorSends, a.sent] : a.priorSends;
+}
+
+/**
  * Fold a finished review run onto whatever the artifact says now.
  *
  * A run takes minutes and the cockpit stays live throughout, so by the time one
@@ -91,6 +105,9 @@ export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
     // the stamp away with the status.
     settledAt: userOwnsStatus(current) ? current.settledAt : fresh.settledAt,
     sent: current.sent,
+    // Written by this run's own claim (`supersede`), or by an earlier one —
+    // either way the disk is the only copy; `fresh` was built before the claim.
+    priorSends: current.priorSends,
     // Disk wins: the ledger is the poll's, and the run knows nothing about it.
     notified: current.notified,
     calibration: current.calibration,

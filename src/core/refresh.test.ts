@@ -71,6 +71,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -161,6 +162,13 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
     expect(merged.sent).toEqual(sent);
     expect(merged.status).toBe("sent");
     expect(merged.summary).toBe("the new draft");
+  });
+
+  // Written by the claim at the top of the run, minutes after `fresh` was
+  // built — so the disk is the only copy of it.
+  it("keeps the sends an earlier draft of this row made", () => {
+    const earlier = { at: "2026-08-20T09:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+    expect(mergeRunResult(fresh, makeArtifact({ priorSends: [earlier] })).priorSends).toEqual([earlier]);
   });
 
   it("does not reopen a decision you made while the run worked", () => {

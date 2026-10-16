@@ -50,7 +50,7 @@ time.
 | `reviewed` | **you** are done with it — or the poll filed it (see §5) | you, or poll |
 | `skipped` | **you** decided not to review it | you |
 | `sent` | the review reached GitHub | the cockpit's Send, `cerber send`, or auto-send |
-| `failed` | the run errored | the runner; the cockpit's create/re-review catch handlers, for a failure before the runner owns the artifact; or restart reconciliation |
+| `failed` | the run errored | the runner; the cockpit's create/re-review catch handlers, for a failure before the runner owns the artifact — except on a row that still carries its `sent` record, which goes back to `sent`, the draft on it being untouched; or restart reconciliation |
 
 Two derived groupings drive most behaviour:
 
@@ -85,8 +85,8 @@ on `pendingChat` instead. Nothing restricts it to a finished draft either —
 
 **What starts a run** — i.e. what enters `running`. The two forcing paths
 ignore the freshness guard in §4; everything else obeys it. The re-review
-button is refused on `sent`, and on a run the *same process* is already
-running — the `409` comes from `isReviewRunning`, an in-memory claim
+button is refused only on a run the *same process* is already running — the
+`409` comes from `isReviewRunning`, an in-memory claim
 (`src/runner/inflight.ts`), not from the persisted status, so a `cerber review`
 going in another terminal is invisible to it:
 
@@ -95,9 +95,17 @@ going in another terminal is invisible to it:
 awaiting            ──the poll, when auto-review is on────► running
 ready | sent        ──the poll, once the head has moved───► running
 failed              ──the poll, next time round───────────► running
-any but `sent`      ──the cockpit's re-review button──────► running
+anything            ──the cockpit's re-review button──────► running
 anything            ──`cerber review --force`─────────────► running
 ```
+
+A `sent` row is included on purpose, and it is the only way back into one: the
+review on GitHub answers the commit it was written for, and when the author
+pushes past that there is nothing else the cockpit could offer. What was sent
+is not lost — the claim at the top of the run moves it to `priorSends`
+(`supersede`, `src/core/refresh.ts`) and the row becomes an ordinary unsent
+draft, with the cockpit saying what was posted, when, and that the next Send
+would be a second review. See "the draft that was sent" below.
 
 **What a run becomes:**
 
@@ -149,7 +157,8 @@ Notes on the edges that surprise people:
   by the poll, and only on its terms: `reviewAll` runs solely when auto-review
   is on and solely over PRs the awaiting search returned, so a failed artifact
   GitHub has stopped asking about is never picked up *on its own*. You can
-  always start one yourself — both forcing paths take any unsent status.
+  always start one yourself — both forcing paths take any status at all,
+  `sent` included.
 - **Nothing *reaches GitHub* except by a deliberate human act — the cockpit's
   Send button, `cerber send`, or a handoff — or by opt-in auto-send.** That is
   the one hard rule of the product, and Send is the only one of those that
@@ -234,11 +243,45 @@ turn is being answered, which is what spares the rest of that fold the question.
 | Costs | a PR fetch, plus a diff fetch only if the head moved | a full AI run |
 | Changes | `diff`, `pr`, comment line anchors | everything the AI writes |
 | Runs when | **you open a review** (automatic, `web/src/Detail.tsx`) | you press the button |
-| Does nothing on | a `sent` **record**, `status: running`, or an unchanged head — a `200` with `changed: false`, not an error | a `sent` **record**, or a run already in flight — these *are* errors (`409`) |
+| Does nothing on | a `sent` **record**, `status: running`, or an unchanged head — a `200` with `changed: false`, not an error | a run already in flight — that *is* an error (`409`) |
 
 The re-review endpoint passes `force: true`, so an unchanged head is no
 obstacle to it — the guard in §4 is what the *poll* and a plain `cerber review`
 obey, not the button.
+
+Refresh and re-review part company on a sent row. Refresh declines it: moving
+the anchors of comments that are already posted would change nothing on GitHub
+and everything on the page. Re-review takes it, because replacing the draft is
+the only way back into a review that went out at a commit the PR has left.
+
+### The draft that was sent
+
+`sent` means one thing throughout cerber: *the draft on this page is the one
+that went to GitHub*. Every guard reads it that way, the send path's "already
+sent" refusal most of all. So a re-review cannot leave it standing over a draft
+nobody has sent — and must not simply drop it, which is what used to happen:
+the review stayed on the PR while cerber forgot it existed, and the cockpit
+would then offer a second one as if it were the first.
+
+The claim at the top of a run moves it instead (`supersede`, `src/core/refresh.ts`):
+
+- `sent` → `null`, so the row is an ordinary unsent draft again, editable,
+  chattable and sendable.
+- the record → `priorSends`, oldest first, URL included.
+- `calibration` is kept: it describes a review that really was sent, and
+  `cerber calibration` is its only reader.
+- the history gets a line of its own, since no other one records a row leaving
+  `sent` without anything being un-sent.
+
+What the cockpit then shows: a note above the draft naming what was posted and
+when, linked; a line over the Send button saying this would be review *n*; and,
+once it is sent again, the count on the sent strip. **GitHub is never touched
+by any of this** — a second Send posts a second review beside the first, and
+nothing ever edits or withdraws the first.
+
+A send that lands *while* a run is in flight is the opposite case and is left
+exactly alone (`mergeRunResult`): it describes the draft being handed over, the
+status stays `sent`, and nothing is archived.
 
 Refresh keeps comments *postable* against current code (`anchor.ts` matches
 line **text**, not position). It forms no opinion about the new head: the
@@ -510,7 +553,10 @@ A run writes the artifact more than once on purpose — an interrupted run must
 leave something behind:
 
 1. **On start** — `running`, with a `run` block (`startedAt`, `withSource`,
-   `trusted`, `trigger`).
+   `trusted`, `trigger`). This write is also the claim: a `sent` record on the
+   row moves to `priorSends` here, because from this moment the draft it
+   describes is being replaced (`supersede`, and "the draft that was sent" in
+   §4).
 2. **`trigger`** is `daemon` or `user` on anything written since the field
    existed, and `null` on older artifacts. It is what lets filing spare a
    second opinion you deliberately asked for — and the two guards read a `null`
@@ -550,6 +596,9 @@ Written by other paths:
   whatever the artifact says now (`mergeConcurrentEdits`) and appends a
   `ChatTurn`. `preChat` is the one snapshot taken before the first turn.
 - Send writes `sent` and `calibration` (what the AI proposed vs what you sent).
+  A later re-review moves `sent` to `priorSends` and keeps `calibration`, which
+  describes a review that really was sent and is what `cerber calibration`
+  counts.
 - Refresh writes `refresh` (`fromSha`, `toSha`, `moved`, `drifted`).
 
 **No HTTP request is ever held open for an AI run.** A review and a chat turn

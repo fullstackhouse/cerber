@@ -2010,6 +2010,13 @@ button {
   flex-wrap: wrap;
 }
 
+/* One fact about the click, directly above the button that does it. */
+.send-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .send-btn {
   display: inline-flex;
   align-items: center;

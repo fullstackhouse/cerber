@@ -197,7 +197,8 @@ absent on read and materialize with the stated value.
 | `verdict` | Verdict \| null | default `null` |
 | `bodyOverride` | string \| null | default `null`; the review body to post, written by hand — null means composed at send time (§14.4) |
 | `run` | RunInfo \| null | default `null` |
-| `sent` | SentInfo \| null | default `null` |
+| `sent` | SentInfo \| null | default `null`; set only while the draft on the row is the one that was posted — a re-review moves it to `priorSends` (§8.3) |
+| `priorSends` | SentInfo[] | default `[]`; reviews posted from this row that a later re-review replaced, oldest first (§8.3) |
 | `filed` | FiledInfo \| null | default `null`; never set on a sent artifact |
 | `handoff` | HandoffInfo \| null | default `null`; set when the user gave the review away (§14.6). Mutually exclusive with `filed` |
 | `settledAt` | ISO-8601 string \| null | default `null`; when the row was settled — see below |
@@ -604,7 +605,7 @@ Entering `running` (every review run passes through it):
 awaiting         ── the poll, when auto-review is on         ──▶ running
 ready | sent     ── the poll, once the head has moved        ──▶ running
 failed           ── the poll, next time round                ──▶ running
-any but sent     ── the cockpit's re-review button (forces)  ──▶ running
+anything         ── the cockpit's re-review button (forces)  ──▶ running
 anything         ── `cerber review --force`                  ──▶ running
 ```
 
@@ -639,11 +640,42 @@ row.
 A chat turn is an AI run but **never changes the status**; it lives on
 `pendingChat` (§12.1).
 
-### 8.3 A Sent Artifact Is Immutable History
+### 8.3 A Sent Draft Is Immutable History — And Re-Reviewable
 
-Refresh no-ops on it, re-review refuses (`409`), chat refuses, chat reset
-refuses, filing skips it, a second send refuses. The only thing that can
-happen to a sent artifact is archiving when the PR closes.
+`sent` means exactly one thing: *the draft on this row is the one that went to
+GitHub*. While it is set the draft is frozen — refresh no-ops, chat refuses,
+chat reset refuses, filing skips it, a second send refuses, and nothing may
+edit a comment or a verdict that has already been posted.
+
+Re-review is the single exception, and it does not break that rule so much as
+leave it behind: it does not touch the sent draft, it **replaces** it. This
+MUST be allowed, because it is the only way back into a review whose commit
+the PR has moved past — the poll already does it when GitHub asks again
+(§8.4), and the cockpit's button MUST offer the same thing rather than
+refusing with a `409`.
+
+At the claim that starts such a run:
+
+- `sent` MUST move to the end of `priorSends`, never be dropped. The review is
+  on the PR under the user's name; forgetting it would let cerber offer a
+  second review as though it were the first.
+- `calibration` MUST be kept — it describes a review that really was sent.
+- the history MUST record the supersession, since no other entry marks a row
+  leaving `sent` without anything being un-sent.
+
+The row is then an ordinary unsent draft. Surfaces that show it MUST say what
+was already posted, when, and (where a send can be started) that the next one
+would be review *n* — on GitHub a second review sits beside the first; nothing
+cerber does ever edits or withdraws what was posted. Auto-send is unchanged
+by this: it is approve-only and threshold-gated (§15), and a re-reviewed row
+reaching it again is a row GitHub asked about again.
+
+A send that lands *while* a run is in flight is the opposite case: it covers
+the draft being handed over, so the merge leaves `sent` and the status exactly
+as they are and archives nothing (§8.5).
+
+Apart from a re-review and archiving when the PR closes, nothing else happens
+to a sent artifact.
 
 ### 8.4 The Freshness Guard
 
@@ -680,7 +712,8 @@ half-keeping them (carrying on success, losing on failure) costs the code and
 still loses the work, so cerber does neither and says so plainly.
 
 What MUST survive any run, on both its success and failure paths, is every
-*decision*: a send that landed mid-run, a `reviewed`/`skipped` set while the
+*decision*: a send that landed mid-run (one from *before* the run is kept too,
+as a `priorSends` record — §8.3), a `reviewed`/`skipped` set while the
 run worked (together with the `settledAt` that dates it — the stamp travels
 with the status, so a settle keeps both halves of itself and a forced
 re-review clears both), a `handoff` (§14.6 — by then GitHub has already been
@@ -1416,7 +1449,9 @@ Payload construction (pure, previewable without side effects):
 - `commit_id` is the artifact's `pr.headSha` — so a review of a stale head
   fails with a 422 rather than landing inline comments on the wrong code.
 
-Send preconditions, all paths: not already sent; no run in flight — where
+Send preconditions, all paths: not already sent — `priorSends` does not
+block one, since those records describe drafts this one has replaced (§8.3);
+no run in flight — where
 "in flight" is the OR of the persisted `running` status (cross-process
 signal) and the in-process claim (a run that has not written yet). On
 success the artifact becomes `sent` with `SentInfo` and a **Calibration**

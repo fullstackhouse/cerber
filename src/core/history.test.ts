@@ -35,6 +35,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
@@ -174,6 +175,19 @@ describe("describeChange", () => {
         }),
       ),
     ).toEqual(["status ready → sent", "sent to GitHub as approve, by auto-send"]);
+
+    // The claim at the top of a re-review: the row stops being "sent" without
+    // anything having been un-sent, which no other line on the list records.
+    const sent = { at: "2026-08-25T09:00:00Z", event: "COMMENT" as const, url: null, auto: false };
+    expect(
+      describeChange(
+        artifact({ status: "sent", sent }),
+        artifact({ status: "running", sent: null, priorSends: [sent] }),
+      ),
+    ).toEqual([
+      "status sent → running",
+      "a new draft took over from the review that was sent — what was sent stays on GitHub",
+    ]);
 
     expect(
       describeChange(

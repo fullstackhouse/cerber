@@ -36,6 +36,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     // A finished, clean check — what every fresh run leaves behind.

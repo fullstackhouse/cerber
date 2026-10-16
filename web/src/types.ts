@@ -188,6 +188,14 @@ export interface ChatTurn {
   costUsd: number | null;
 }
 
+/** A review posted to GitHub from this row. */
+export interface SentInfo {
+  at: string;
+  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  url: string | null;
+  auto?: boolean;
+}
+
 export interface Artifact {
   schemaVersion: number;
   id: string;
@@ -220,13 +228,17 @@ export interface Artifact {
     error: string | null;
     withSource?: boolean;
     trusted?: boolean;
+    /** The head this run actually read — what "reviewed at" means on the page. */
+    reviewedSha?: string | null;
   } | null;
-  sent: {
-    at: string;
-    event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
-    url: string | null;
-    auto?: boolean;
-  } | null;
+  sent: SentInfo | null;
+  /**
+   * Reviews posted from this row that a later re-review has replaced, oldest
+   * first. `sent` only ever describes the draft on the page; a re-review moves
+   * it here rather than dropping it, so the cockpit can still say what went to
+   * GitHub and when. Absent on artifacts written before this was kept.
+   */
+  priorSends?: SentInfo[];
   /** Files marked as viewed: path → fingerprint of the patch when marked. */
   viewed?: Record<string, string>;
   refresh?: {
@@ -281,6 +293,8 @@ export interface RefreshResult {
   stale: boolean;
   changed: boolean;
   prState?: "OPEN" | "CLOSED" | "MERGED";
+  /** The PR's head right now — the one fact a declined refresh can still report. */
+  headSha?: string;
   moved?: number;
   drifted?: number;
   artifact: Artifact;

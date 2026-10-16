@@ -112,6 +112,7 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     bodyOverride: null,
     run: null,
     sent: null,
+    priorSends: [],
     filed: null,
     handoff: null,
     raisedCheck: null,
