@@ -1,0 +1,25 @@
+# Runs scripts/check-release-commits.sh: every merge method must release the same version.
+name: release-commits
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      # The title goes through env, never into the script text: it is attacker-controlled.
+      - run: scripts/check-release-commits.sh "$BASE" "$HEAD" "$TITLE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TITLE: ${{ github.event.pull_request.title }}

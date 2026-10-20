@@ -27,7 +27,8 @@ anything — run [`demo/run.sh`](./demo/README.md).
   a change to behaviour comes with one that fails without it.
 - **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`. Releases are cut by semantic-release from these, so the prefix
-  decides the version bump. Use `feat!:` for a breaking change.
+  decides the version bump. Use `feat!:` for a breaking change. The `release-commits` check
+  fails a PR whose title doesn't state the release its commits cause.
 - **Read [`SPEC.md`](./SPEC.md) before changing behaviour.** It is the design of
   record, with an appendix listing where the code has diverged from it. If your
   change moves that line, move the spec in the same PR.

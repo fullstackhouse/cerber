@@ -80,6 +80,22 @@ describe("release config", () => {
     ]);
   });
 
+  it("reads commits with the conventionalcommits preset, so `feat!:` is a major", () => {
+    // The default angular preset parses `feat!:` to no type at all: no release,
+    // no notes line, and the change ships unannounced in the next release. Both
+    // plugins parse commits, so both need it, or the version and the notes
+    // disagree about what was breaking.
+    const presetOf = (name: string): unknown => {
+      const entry = releaserc.plugins.find((p) => pluginName(p) === name);
+      return Array.isArray(entry) ? (entry[1] as { preset?: unknown } | undefined)?.preset : undefined;
+    };
+    for (const name of ["@semantic-release/commit-analyzer", "@semantic-release/release-notes-generator"]) {
+      expect(presetOf(name), `${name} without the preset drops \`feat!:\`; see .releaserc.md`).toBe(
+        "conventionalcommits",
+      );
+    }
+  });
+
   it("keeps the reasoning next to the config", () => {
     // `.releaserc.json` cannot hold a comment, so the why lives beside it —
     // and it is where the failure messages here send a reader, so it has to be
