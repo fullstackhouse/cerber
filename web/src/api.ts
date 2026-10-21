@@ -139,6 +139,17 @@ export const startChatTurn = (
     body: JSON.stringify(body),
   });
 
+/**
+ * Add to the turn being answered — "not that, look at the migration" — without
+ * waiting for it to finish. Refused (409) once the turn can no longer take it;
+ * send it as the next message then.
+ */
+export const steerChatTurn = (key: string, message: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/steer`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+
 /** Clear a turn that failed. Refused while one is still being answered. */
 export const dismissPendingChat = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/pending`, { method: "DELETE" });

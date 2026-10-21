@@ -55,6 +55,51 @@ function readStdin() {
   }
 }
 
+/**
+ * A chat turn is steerable: cerber sends the prompt as one stream-json user
+ * message, may send more while the turn runs, and closes stdin only once every
+ * message has been echoed back and a result is out. So: read the first message,
+ * echo each one that follows, and exit on EOF — reading to EOF up front would
+ * wait for a close that only comes after the answer.
+ */
+const streamed = argv.includes("--input-format") && argv[argv.indexOf("--input-format") + 1] === "stream-json";
+const steers = [];
+let inputClosed = false;
+function userText(line) {
+  try {
+    const content = JSON.parse(line)?.message?.content;
+    return typeof content === "string" ? content : "";
+  } catch {
+    return "";
+  }
+}
+function readFirstMessage() {
+  return new Promise((resolve) => {
+    let buffer = "";
+    let first = null;
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      buffer += chunk;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        emit({ type: "user", message: { role: "user", content: userText(line) } });
+        if (first === null) {
+          first = userText(line);
+          resolve(first);
+        } else steers.push(userText(line));
+      }
+    });
+    process.stdin.on("end", () => {
+      inputClosed = true;
+      if (first === null) resolve("");
+    });
+  });
+}
+const untilInputCloses = () =>
+  new Promise((resolve) => (inputClosed ? resolve() : process.stdin.on("end", resolve)));
+
 function text(body) {
   return { type: "assistant", message: { content: [{ type: "text", text: body }] } };
 }
@@ -83,7 +128,7 @@ function result(body, costUsd) {
   });
 }
 
-const prompt = readStdin();
+const prompt = streamed ? await readFirstMessage() : readStdin();
 if (!prompt.trim()) fail("no prompt arrived on stdin");
 
 // ----------------------------------------------- already raised by others
@@ -170,10 +215,15 @@ const turn =
 if (!turn) fail(`no canned chat turn matches: ${JSON.stringify(message.slice(0, 200))}`);
 
 await narrate(turn.progress ?? []);
+// A steer can't change a canned answer, so the reply says it was heard — enough
+// to show where it lands in the cockpit.
+// The steer arrives wrapped in cerber's reminder; the user's words are its second paragraph.
+const heard = steers.map((m) => (m.split("\n\n")[1] ?? m).trim());
 result(
   JSON.stringify({
-    reply: turn.reply,
+    reply: heard.length ? `${turn.reply}\n\n(Noted while I worked: ${heard.map((h) => `“${h}”`).join(", ")}.)` : turn.reply,
     revisions: (turn.revisions ?? []).map(resolve),
   }),
   turn.costUsd ?? null,
 );
+if (streamed) await untilInputCloses();

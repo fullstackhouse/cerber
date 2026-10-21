@@ -37,6 +37,7 @@ import {
   sendReview,
   setViewed,
   startChatTurn,
+  steerChatTurn,
 } from "./api";
 import {
   asLogin,
@@ -1453,7 +1454,9 @@ function describeRef(ref: ChatRef, artifact: Artifact): string {
 function ChatTurnView({ turn, artifact }: { turn: ChatTurn; artifact: Artifact }) {
   return (
     <div className={`chat-turn chat-turn-${turn.role}`}>
-      <div className="chat-turn-who">{turn.role === "user" ? "You" : "Reviewer"}</div>
+      <div className="chat-turn-who">
+        {turn.role === "user" ? (turn.steer ? "You, while it worked" : "You") : "Reviewer"}
+      </div>
       {turn.refs.length > 0 && (
         <div className="chat-refs">
           {turn.refs.map((r, i) => (
@@ -1531,14 +1534,33 @@ function ChatPanel({
       .finally(() => setStarting(false));
   };
 
-  const send = () =>
-    start(draft.trim(), refs, () => {
+  // Sending while a turn runs steers it: the message goes into the live run
+  // rather than waiting minutes for an answer to the question you've moved past.
+  const steer = (message: string) => {
+    setStarting(true);
+    setError(null);
+    steerChatTurn(reviewKey, message)
+      .then((a) => {
+        onArtifact(a);
+        setDraft("");
+        inputRef.current?.focus();
+      })
+      .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setStarting(false));
+  };
+
+  const send = () => {
+    const message = draft.trim();
+    if (!message || starting) return;
+    if (inFlight) return steer(message);
+    start(message, refs, () => {
       setDraft("");
       onClearRefs();
       // A click on the button took focus with it; the next message starts
       // in the box either way, not with a click back into it.
       inputRef.current?.focus();
     });
+  };
 
   return (
     <section className="card chat-panel" ref={anchorRef}>
@@ -1568,13 +1590,23 @@ function ChatPanel({
                   </div>
                 )}
                 <Markdown className="chat-turn-body prose" text={pending.message} />
+                {(pending.steers ?? []).map((m, i) => (
+                  <div key={i} className="chat-steer">
+                    <div className="chat-turn-who">You, while it worked</div>
+                    <Markdown className="chat-turn-body prose" text={m} />
+                  </div>
+                ))}
                 {pending.error ? (
                   <div className="chat-failed">
                     ✕ this turn didn't finish — {pending.error}
                     {!readOnly && (
                       <>
                         {" "}
-                        <button className="btn btn-sm" onClick={() => start(pending.message, pending.refs)}>
+                        <button
+                          className="btn btn-sm"
+                          // What it was steered with is part of the question.
+                          onClick={() => start([pending.message, ...(pending.steers ?? [])].join("\n\n"), pending.refs)}
+                        >
                           ask again
                         </button>{" "}
                         <button
@@ -1640,9 +1672,11 @@ function ChatPanel({
               // start with a click back into it.
               readOnly={starting}
               placeholder={
-                chat.length === 0
-                  ? "the summary restates the author's claims — say what you actually verified"
-                  : "say more…"
+                inFlight
+                  ? "steer it — it reads this before its next step"
+                  : chat.length === 0
+                    ? "the summary restates the author's claims — say what you actually verified"
+                    : "say more…"
               }
               onChange={(e) => setDraft(e.target.value)}
               title={
@@ -1652,17 +1686,22 @@ function ChatPanel({
               }
               onKeyDown={(e) => {
                 if (!isSend(sendKey, { ...e, isComposing: e.nativeEvent.isComposing })) return;
-                // Swallowed even while a turn runs, when the send is a no-op:
-                // a newline appearing instead would read as the send failing.
+                // Swallowed even when the send is a no-op (empty, or one
+                // already going): a newline instead would read as it failing.
                 e.preventDefault();
                 send();
               }}
             />
             <MarkdownPreview className="chat-turn-body" text={draft} />
             <div className="chat-actions">
-              <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
+              <button
+                className="btn btn-dark"
+                onClick={send}
+                disabled={starting || draft.trim() === ""}
+                title={inFlight ? "Add this to the turn it's working on" : undefined}
+              >
                 <Icon name="send" />
-                {inFlight ? "waiting for the answer…" : starting ? "sending…" : "send message"}
+                {starting ? "sending…" : inFlight ? "steer" : "send message"}
                 <Key>{sendKey === "enter" ? "↵" : "⌘↵"}</Key>
               </button>
               <span className="grow" />

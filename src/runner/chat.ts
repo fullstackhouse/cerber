@@ -123,6 +123,28 @@ export interface ChatTurnOptions {
   run?: typeof runClaude;
 }
 
+/** The live turns that can still take a message, by artifact id. */
+const steerable = new Map<string, (text: string) => boolean>();
+
+/**
+ * Add a message to the turn being answered for this review, mid-run.
+ *
+ * False when there is no turn to add it to — none running, it is retrying its
+ * JSON, or it has already answered — so the caller can say "send it as the next
+ * message" rather than claim it landed.
+ */
+export function steerChatTurn(artifactId: string, message: string): boolean {
+  return steerable.get(artifactId)?.(message) ?? false;
+}
+
+function steerPrompt(message: string): string {
+  return `The user adds, while you work on this turn:
+
+${message}
+
+Take it into account. Your answer is still the one JSON object described earlier, with "reply" and "revisions" — and the reply should say what you did about this.`;
+}
+
 export interface ChatTurnResult {
   artifact: Artifact;
   applied: Revision[];
@@ -211,11 +233,36 @@ async function turn(
     resumeSessionId,
   };
 
+  // Steers in the order they went in, stamped as they did: each is its own user
+  // turn in the transcript, between the question and the answer.
+  const steers: ChatTurn[] = [];
+  const onSteer = (send: ((text: string) => boolean) | null) => {
+    if (!send) {
+      steerable.delete(artifact.id);
+      return;
+    }
+    steerable.set(artifact.id, (text) => {
+      if (!send(steerPrompt(text))) return false;
+      steers.push({
+        id: newId(),
+        role: "user",
+        at: now(),
+        body: text,
+        refs: [],
+        revisions: [],
+        refused: [],
+        costUsd: null,
+        steer: true,
+      });
+      return true;
+    });
+  };
+
   let reply: { reply: string; revisions: Revision[] };
   let costUsd: number | null;
   let sessionId: string | null;
   try {
-    const first = await run(prompt, claudeOpts);
+    const first = await run(prompt, { ...claudeOpts, onSteer });
     try {
       reply = AiChatTurnSchema.parse(extractJson(first.text));
       costUsd = first.costUsd;
@@ -235,6 +282,7 @@ async function turn(
       sessionId = second.sessionId ?? first.sessionId;
     }
   } finally {
+    steerable.delete(artifact.id);
     await removeRunDir(empty);
   }
 
@@ -276,7 +324,7 @@ async function turn(
       ...revised.artifact,
       updatedAt: assistantTurn.at,
       preChat,
-      chat: [...artifact.chat, userTurn, assistantTurn],
+      chat: [...artifact.chat, userTurn, ...steers, assistantTurn],
       run: artifact.run ? { ...artifact.run, sessionId: sessionId ?? artifact.run.sessionId } : null,
     },
     applied: revised.applied,

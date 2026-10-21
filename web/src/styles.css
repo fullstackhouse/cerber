@@ -1886,6 +1886,11 @@ button {
   border-left-style: dashed;
 }
 
+/* What you added while the turn worked, under the question it steers. */
+.chat-steer {
+  margin-top: 8px;
+}
+
 .chat-turn-who {
   font-size: 10.5px;
   color: var(--faint);

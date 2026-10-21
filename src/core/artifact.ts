@@ -380,6 +380,8 @@ export const ChatTurnSchema = z.object({
   /** Edits this turn asked for but the artifact would not accept. */
   refused: z.array(RefusalSchema).default([]),
   costUsd: z.number().nullable().default(null),
+  /** A user turn sent while the previous one was still being answered. */
+  steer: z.boolean().optional(),
 });
 export type ChatTurn = z.infer<typeof ChatTurnSchema>;
 
@@ -403,6 +405,8 @@ export const PendingChatSchema = z.object({
    * only honest account of them; it is thrown away when the answer lands.
    */
   progress: z.array(z.string()).default([]),
+  /** What the user added while it worked — each one went into the live run. */
+  steers: z.array(z.string()).default([]),
   /** Why the turn failed. Null while it is still running. */
   error: z.string().nullable().default(null),
 });
