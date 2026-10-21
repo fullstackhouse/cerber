@@ -63,6 +63,12 @@ describe("buildClaudeArgs", () => {
     expect(buildClaudeArgs({ resumeSessionId: "" })).not.toContain("--resume");
     expect(buildClaudeArgs({})).not.toContain("--resume");
   });
+
+  it("reads its input as a stream only when the run can be steered", () => {
+    const args = buildClaudeArgs({ onSteer: () => {} });
+    expect(args.join(" ")).toContain("--input-format stream-json --replay-user-messages");
+    expect(buildClaudeArgs({})).not.toContain("--input-format");
+  });
 });
 
 describe("extractJson", () => {
@@ -177,6 +183,58 @@ describe("runClaude", () => {
     } finally {
       await fs.rm(bin, { force: true });
     }
+  });
+
+  /**
+   * A stand-in for a steerable run: echoes each message it reads, and answers
+   * once per message after the first `answerAfter` reads. It only exits when
+   * stdin closes, so a run that never closed its input would hang the test.
+   */
+  async function steerableClaude(script: string, run: (bin: string) => Promise<void>) {
+    const bin = path.join(os.tmpdir(), `cerber-steer-${process.pid}-${Math.random().toString(36).slice(2)}.sh`);
+    const echo = `printf '%s\\n' '{"type":"user","message":{"content":"m"}}'`;
+    const result = (text: string) => `printf '%s\\n' '{"type":"result","result":"${text}"}'`;
+    await fs.writeFile(
+      bin,
+      `#!/bin/sh\n${script.replace(/ECHO/g, echo).replace(/RESULT\((\w+)\)/g, (_, t) => result(t))}\ncat > /dev/null\n`,
+      { mode: 0o755 },
+    );
+    try {
+      await run(bin);
+    } finally {
+      await fs.rm(bin, { force: true });
+    }
+  }
+
+  it("takes a steer mid-run, then closes its input once the answer is in", async () => {
+    await steerableClaude("read a\nECHO\nread b\nECHO\nRESULT(ok)", async (bin) => {
+      const sends: Array<((t: string) => boolean) | null> = [];
+      const result = await runClaude("hi", {
+        bin,
+        onSteer: (send) => {
+          sends.push(send);
+          if (send) expect(send("look at the migration")).toBe(true);
+        },
+      });
+      expect(result.text).toBe("ok");
+      // Handed a send at the start, and told it is gone at the end.
+      expect(sends).toHaveLength(2);
+      expect(sends[1]).toBeNull();
+    });
+  });
+
+  it("keeps listening when a steer lands after the answer was already on its way", async () => {
+    // The steer is written before the first answer but read after it: closing
+    // on that answer would end the run with the steer unread.
+    await steerableClaude("read a\nECHO\nRESULT(first)\nread b\nECHO\nRESULT(second)", async (bin) => {
+      const result = await runClaude("hi", {
+        bin,
+        onSteer: (send) => {
+          send?.("one more thing");
+        },
+      });
+      expect(result.text).toBe("second");
+    });
   });
 
   it("fails loudly when a run ends without a result event", async () => {

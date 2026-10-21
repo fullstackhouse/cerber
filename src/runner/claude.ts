@@ -80,6 +80,17 @@ export interface ClaudeOptions {
    */
   /** Environment for the run. Defaults to cerber's own. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Accept more messages while the run works. Called with a `send` once the run
+   * starts and with null once it can no longer take one — after its answer, or
+   * when it dies. `send` returns false when the message did not go in.
+   *
+   * The run reads its input as stream-json for this, and the CLI folds a message
+   * that arrives mid-run into the turn at the next tool boundary rather than
+   * queueing a turn of its own — which is what lets someone say "skip the tests,
+   * look at the migration" without waiting minutes to be ignored.
+   */
+  onSteer?: (send: ((text: string) => boolean) | null) => void;
 }
 
 /**
@@ -135,6 +146,9 @@ export function buildClaudeArgs(opts: ClaudeOptions): string[] {
   // and everything before it is the run saying what it is doing. `--verbose` is
   // not optional — the CLI refuses the combination without it.
   const args = ["-p", "--output-format", "stream-json", "--verbose"];
+  // Echoing our own messages back is how a run says it took a steer — the only
+  // way to tell one that went in from one still sitting in the pipe.
+  if (opts.onSteer) args.push("--input-format", "stream-json", "--replay-user-messages");
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   if (opts.model) args.push("--model", opts.model);
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
@@ -212,16 +226,40 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
       child.stdout.destroy();
       child.stderr.destroy();
       child.stdin.destroy();
+      stopSteering();
       settle(() =>
         reject(new Error(`claude did not finish within ${Math.round(timeoutMs / 60_000)} minutes — run killed.`)),
       );
     }, timeoutMs);
+
+    // Messages written vs echoed back. stdin closes on a result only once every
+    // steer has been taken: one that lands as the answer is being written starts
+    // a second pass, and closing on the first result would end the run with the
+    // steer unread. The last result is the answer either way.
+    let written = 0;
+    let echoed = 0;
+    const steering = Boolean(opts.onSteer);
+    const userMessage = (text: string) =>
+      JSON.stringify({ type: "user", message: { role: "user", content: text } }) + "\n";
+    let open = steering;
+    const stopSteering = () => {
+      if (!open) return;
+      open = false;
+      opts.onSteer?.(null);
+    };
+    const closeInput = () => {
+      if (!open) return;
+      stopSteering();
+      child.stdin.end();
+    };
 
     const ingest = (chunk: string) => {
       const read = readEvents(unread + chunk);
       unread = read.rest;
       for (const event of read.events) {
         if (event.type === "result") result = event;
+        if (steering && event.type === "user" && isEchoedMessage(event)) echoed++;
+        if (steering && event.type === "result" && echoed >= written) closeInput();
         // A throwing listener must not take the run down with it: the answer is
         // the point, the narration is not.
         try {
@@ -238,11 +276,13 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
     });
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => {
+      stopSteering();
       settle(() =>
         reject(new Error(`Failed to start claude CLI: ${err.message}. Is Claude Code installed and on PATH?`)),
       );
     });
     child.on("close", (code) => {
+      stopSteering();
       if (settled) return;
       clearTimeout(timer);
       settled = true;
@@ -266,9 +306,30 @@ export function runClaude(prompt: string, opts: ClaudeOptions = {}): Promise<Cla
         sessionId: typeof wrapper.session_id === "string" ? wrapper.session_id : null,
       });
     });
-    child.stdin.write(prompt);
-    child.stdin.end();
+    // A run that dies early closes the pipe under a write; the close handler
+    // says why, so the EPIPE itself has nothing to add.
+    child.stdin.on("error", () => {});
+    if (!steering) {
+      child.stdin.write(prompt);
+      child.stdin.end();
+      return;
+    }
+    written++;
+    child.stdin.write(userMessage(prompt));
+    opts.onSteer!((text) => {
+      if (!open) return false;
+      written++;
+      child.stdin.write(userMessage(text));
+      return true;
+    });
   });
+}
+
+/** A user event carrying our own words back, as opposed to a tool's result. */
+function isEchoedMessage(event: ClaudeEvent): boolean {
+  const content = (event.message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") return true;
+  return Array.isArray(content) && content.length > 0 && content.every((b) => b?.type === "text");
 }
 
 /** Extract a JSON object from model output that may be wrapped in fences or prose. */

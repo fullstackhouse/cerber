@@ -123,7 +123,7 @@ describe("reconcileRunning", () => {
     // A turn runs detached, so nothing is left to answer it after a restart —
     // without this the cockpit polls a question that will never land.
     await saveArtifact(
-      artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: null } }),
+      artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: null } }),
     );
     expect(await reconcileRunning()).toBe(1);
     const after = await loadArtifact("acme/widgets#42");
@@ -163,7 +163,7 @@ describe("reconcileRunning", () => {
 
   it("leaves a turn that already failed, and everything else, alone", async () => {
     await saveArtifact(
-      artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: "boom" } }),
+      artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: "boom" } }),
     );
     expect(await reconcileRunning()).toBe(0);
     expect((await loadArtifact("acme/widgets#42"))?.pendingChat?.error).toBe("boom");

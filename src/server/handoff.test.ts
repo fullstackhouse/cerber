@@ -290,6 +290,7 @@ describe("POST /api/reviews/:key/handoff — giving a review away", () => {
           refs: [],
           startedAt: "2026-08-21T10:00:00.000Z",
           progress: [],
+          steers: [],
           error: null,
         },
       }),

@@ -7,13 +7,14 @@ import { Artifact, SCHEMA_VERSION } from "../core/artifact.js";
 // Type-only: the mock below replaces this module with `runChatTurn` alone, so
 // a value import of the type would ask for an export that isn't there.
 import type { ChatTurnResult } from "../runner/chat.js";
-import { runChatTurn } from "../runner/chat.js";
+import { runChatTurn, steerChatTurn } from "../runner/chat.js";
 import { buildApp } from "./index.js";
 
 // The turn itself shells out to `claude` for minutes — what these tests are
 // about is the handler that no longer waits for it.
-vi.mock("../runner/chat.js", () => ({ runChatTurn: vi.fn() }));
+vi.mock("../runner/chat.js", () => ({ runChatTurn: vi.fn(), steerChatTurn: vi.fn() }));
 const turn = runChatTurn as Mock;
+const steer = steerChatTurn as Mock;
 
 const home = mkdtempSync(path.join(os.tmpdir(), "cerber-chat-api-"));
 process.env.CERBER_HOME = home;
@@ -109,6 +110,7 @@ async function until(predicate: (a: Artifact) => boolean, tries = 100) {
 beforeEach(async () => {
   await fs.rm(path.join(home, "reviews"), { recursive: true, force: true });
   turn.mockReset();
+  steer.mockReset();
 });
 
 describe("POST /api/reviews/:key/chat", () => {
@@ -238,7 +240,7 @@ describe("POST /api/reviews/:key/chat", () => {
   });
 
   it("lets the user ask again once a turn has failed", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: "boom" } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: "boom" } }));
     deferred();
     const res = await post(`/api/reviews/${KEY}/chat`, { message: "why?" });
     expect(res.status).toBe(202);
@@ -246,16 +248,45 @@ describe("POST /api/reviews/:key/chat", () => {
   });
 });
 
+describe("POST /api/reviews/:key/chat/steer", () => {
+  const running = () =>
+    artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: null } });
+
+  it("puts the message into the live turn and shows it under the question", async () => {
+    await write(running());
+    steer.mockReturnValue(true);
+    const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "look at the migration" });
+    expect(res.status).toBe(200);
+    expect(steer).toHaveBeenCalledWith("acme/widgets#42", "look at the migration");
+    expect((await read()).pendingChat?.steers).toEqual(["look at the migration"]);
+  });
+
+  it("409s when no turn is being answered, without touching the run", async () => {
+    await write(artifact());
+    const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "hm" });
+    expect(res.status).toBe(409);
+    expect(steer).not.toHaveBeenCalled();
+  });
+
+  it("409s when the turn can no longer take it, rather than claim it landed", async () => {
+    await write(running());
+    steer.mockReturnValue(false);
+    const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "hm" });
+    expect(res.status).toBe(409);
+    expect((await read()).pendingChat?.steers).toEqual([]);
+  });
+});
+
 describe("DELETE /api/reviews/:key/chat/pending", () => {
   it("clears a turn that failed", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: "boom" } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: "boom" } }));
     const res = await del(`/api/reviews/${KEY}/chat/pending`);
     expect(res.status).toBe(200);
     expect((await res.json()).pendingChat).toBeNull();
   });
 
   it("refuses one still being answered — it would come back on the next write", async () => {
-    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: null } }));
+    await write(artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: null } }));
     const res = await del(`/api/reviews/${KEY}/chat/pending`);
     expect(res.status).toBe(409);
     expect((await read()).pendingChat?.message).toBe("why?");
@@ -294,7 +325,7 @@ describe("POST /api/reviews/:key/chat/reset", () => {
     await write(
       artifact({
         preChat: { at: "x", summary: "first", chapters: [], comments: [], verdict: null },
-        pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], error: null },
+        pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: null },
       }),
     );
     const res = await post(`/api/reviews/${KEY}/chat/reset`, {});

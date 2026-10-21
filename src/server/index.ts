@@ -59,7 +59,7 @@ import {
 } from "../core/state.js";
 import { isReviewRunning } from "../runner/inflight.js";
 import { reviewPr } from "../runner/review.js";
-import { runChatTurn } from "../runner/chat.js";
+import { runChatTurn, steerChatTurn } from "../runner/chat.js";
 import { mergeConcurrentEdits, restoreReview } from "../core/revise.js";
 import { progressWriter } from "./progress.js";
 import { ChatTurnSchema } from "../core/artifact.js";
@@ -834,6 +834,7 @@ export async function buildApp(
         refs: request.refs ?? [],
         startedAt: new Date().toISOString(),
         progress: [],
+        steers: [],
         error: null,
       },
     }));
@@ -887,6 +888,31 @@ export async function buildApp(
       });
 
     return c.json(pending, 202);
+  });
+
+  // Add to the turn being answered rather than waiting minutes to say "not that,
+  // this". The message goes into the live run; when the turn has already
+  // answered (or is only retrying its JSON) there is nothing to add it to, and
+  // the cockpit is told so instead of being shown a message that went nowhere.
+  const SteerRequestSchema = z.object({ message: z.string().min(1) });
+
+  app.post("/api/reviews/:key/chat/steer", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    let request;
+    try {
+      request = SteerRequestSchema.parse(await c.req.json());
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    if (!turnInFlight(artifact) || !steerChatTurn(artifact.id, request.message)) {
+      return c.json({ error: "that turn is no longer taking messages — send this as the next one" }, 409);
+    }
+    const updated = await updateArtifactByKey(key, (a) =>
+      a.pendingChat ? { ...a, pendingChat: { ...a.pendingChat, steers: [...a.pendingChat.steers, request.message] } } : a,
+    );
+    return c.json(updated);
   });
 
   // Clear a turn that failed. Only that: a turn still being answered would come

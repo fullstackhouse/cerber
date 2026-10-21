@@ -186,6 +186,8 @@ export interface ChatTurn {
   revisions: Revision[];
   refused: { revision: Revision; reason: string }[];
   costUsd: number | null;
+  /** Sent while the previous message was still being answered. */
+  steer?: boolean;
 }
 
 /** A review posted to GitHub from this row. */
@@ -283,6 +285,8 @@ export interface PendingChat {
   startedAt: string;
   /** What the turn has been doing, in its own words. Grows while you wait. */
   progress: string[];
+  /** What you added while it worked. Absent on artifacts from before steering. */
+  steers?: string[];
   /** Why the turn failed. Null while it is still being answered. */
   error: string | null;
 }

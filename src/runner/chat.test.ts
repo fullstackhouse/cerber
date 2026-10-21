@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Artifact, Comment, SCHEMA_VERSION } from "../core/artifact.js";
 import { isReviewRunning } from "./inflight.js";
 import { ClaudeOptions, ClaudeResult } from "./claude.js";
-import { ensureChatSource, runChatTurn } from "./chat.js";
+import { ensureChatSource, runChatTurn, steerChatTurn } from "./chat.js";
 import { buildChatPrompt } from "./prompt.js";
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -320,6 +320,44 @@ describe("runChatTurn", () => {
     expect(result.artifact.chat[0]).toMatchObject({ role: "user", body: "you are parroting the author" });
     expect(result.artifact.chat[1]).toMatchObject({ role: "assistant", body: "Fair — rewritten." });
     expect(result.artifact.chat[1]!.revisions).toHaveLength(1);
+  });
+
+  it("folds a steer into the live run and records it between the question and the answer", async () => {
+    const sent: string[] = [];
+    let release!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((r) => (started = r));
+    const run = async (_prompt: string, opts: ClaudeOptions = {}): Promise<ClaudeResult> => {
+      opts.onSteer?.((text) => (sent.push(text), true));
+      const answered = new Promise<void>((r) => (release = r));
+      started();
+      await answered;
+      opts.onSteer?.(null);
+      return { text: ok, costUsd: 0.5, model: "opus", sessionId: "sess-chat" };
+    };
+    const a = artifact();
+    const pending = runChatTurn(a, "you are parroting the author", { source: "/tmp/src", run, now: clock, newId: ids() });
+    await running;
+    const steered = steerChatTurn(a.id, "skip the tests, look at the migration");
+    release();
+    expect(steered).toBe(true);
+    const result = await pending;
+
+    // The run is told what the message is for; the transcript keeps the user's own words.
+    expect(sent[0]).toContain("skip the tests, look at the migration");
+    expect(sent[0]).toContain('"reply"');
+    expect(result.artifact.chat.map((t) => [t.role, t.steer ?? false])).toEqual([
+      ["user", false],
+      ["user", true],
+      ["assistant", false],
+    ]);
+    expect(result.artifact.chat[1]!.body).toBe("skip the tests, look at the migration");
+    // Once it has answered there is nothing left to steer.
+    expect(steerChatTurn(a.id, "too late")).toBe(false);
+  });
+
+  it("refuses a steer when no turn is running", () => {
+    expect(steerChatTurn(artifact().id, "hello?")).toBe(false);
   });
 
   it("resumes the review's own session when the checkout is still there", async () => {

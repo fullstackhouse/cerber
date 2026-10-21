@@ -242,7 +242,7 @@ describe("describeChange", () => {
 
   it("ignores a running turn's narration — it says nothing about where the review got to", () => {
     const before = artifact({
-      pendingChat: { message: "why?", refs: [], startedAt: "t", progress: ["reading a.ts"], error: null },
+      pendingChat: { message: "why?", refs: [], startedAt: "t", progress: ["reading a.ts"], steers: [], error: null },
     });
     const after = artifact({
       pendingChat: {
@@ -250,6 +250,7 @@ describe("describeChange", () => {
         refs: [],
         startedAt: "t",
         progress: ["reading a.ts", "searching for foo", "thinking"],
+        steers: [],
         error: null,
       },
     });
