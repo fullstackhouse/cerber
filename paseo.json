@@ -1,0 +1,14 @@
+{
+  "worktree": {
+    "setup": "pnpm install"
+  },
+  "scripts": {
+    "cockpit": {
+      "type": "service",
+      "command": "pnpm build && pnpm dev serve --port $PASEO_PORT"
+    },
+    "checks": {
+      "command": "pnpm typecheck && pnpm test"
+    }
+  }
+}
