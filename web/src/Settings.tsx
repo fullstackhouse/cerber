@@ -302,6 +302,8 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         The daemon reviews unattended, so with rules set it runs matching PRs' code with nobody
         watching — start it with <code>--no-trust</code> to prevent that.
       </p>
+
+      <p className="muted settings-version">cerber {config.version}</p>
     </div>
   );
 }

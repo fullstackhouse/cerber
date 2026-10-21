@@ -375,6 +375,8 @@ export interface DaemonConfig {
 }
 
 export interface ConfigView {
+  /** The running server's package version. */
+  version: string;
   path: string;
   trust: TrustEntry[];
   daemon: DaemonConfig;
