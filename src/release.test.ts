@@ -199,8 +199,11 @@ describe("the sentinel version", () => {
     // Comparing output to the manifest cannot catch a literal that happens to
     // equal it — `const version = "0.0.0-development"` would satisfy the line
     // above while the published CLI reported the sentinel forever. So also
-    // require the read itself.
-    expect(read("src/cli/index.ts"), "the version must be read from the manifest, not written here").toMatch(
+    // require the read itself — in the one module the CLI and the cockpit share.
+    expect(read("src/cli/index.ts"), "the CLI must take its version from core/version").toMatch(
+      /from "\.\.\/core\/version\.js"/,
+    );
+    expect(read("src/core/version.ts"), "the version must be read from the manifest, not written here").toMatch(
       /package\.json/,
     );
   });

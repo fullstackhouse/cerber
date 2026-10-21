@@ -29,7 +29,8 @@ import {
   submitReview,
 } from "../core/gh.js";
 import { z } from "zod";
-import { DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
+import { DaemonConfig, DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
+import { version } from "../core/version.js";
 import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
@@ -193,10 +194,19 @@ export async function buildApp(
       }
     });
 
+  // Full ConfigView — the cockpit replaces its config state with this
+  // wholesale, so every config route answers with all of it.
+  const configView = (trust: string[], daemon: DaemonConfig) => ({
+    version,
+    path: configPath(),
+    trust: trustView(trust),
+    daemon,
+  });
+
   app.get("/api/config", async (c) => {
     try {
       const config = await loadConfig();
-      return c.json({ path: configPath(), trust: trustView(config.trust), daemon: config.daemon });
+      return c.json(configView(config.trust, config.daemon));
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -217,7 +227,7 @@ export async function buildApp(
       const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
       await saveConfig({ ...config, daemon });
       opts.daemon?.reconfigure({ ...config, daemon });
-      return c.json({ path: configPath(), trust: trustView(config.trust), daemon });
+      return c.json(configView(config.trust, daemon));
     } catch (err: unknown) {
       if (err instanceof z.ZodError) {
         return c.json(
@@ -260,9 +270,7 @@ export async function buildApp(
       const trust = remove === true ? without : [...without, canonical];
       await saveConfig({ ...config, trust });
       opts.daemon?.reconfigure({ ...config, trust });
-      // Full ConfigView — the cockpit replaces its config state with this
-      // wholesale, so omitting daemon would crash the Settings toggles.
-      return c.json({ path: configPath(), trust: trustView(trust), daemon: config.daemon });
+      return c.json(configView(trust, config.daemon));
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }

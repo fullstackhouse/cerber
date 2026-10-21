@@ -1781,7 +1781,7 @@ static assets included. No CORS: same-origin only.
 | Method & path | Purpose | Notable answers |
 |---|---|---|
 | `GET /api/daemon` | daemon status | `{enabled: false}` when none |
-| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` | settings | full config view; 400 with the trust parser's message verbatim |
+| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` | settings | full config view, with the running package `version`; 400 with the trust parser's message verbatim |
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
