@@ -52,7 +52,7 @@ requests.*
 
 ## Quick start
 
-Requires Node 20+, an authenticated [`gh`](https://cli.github.com/), `git`, and
+Requires Node 22+, an authenticated [`gh`](https://cli.github.com/), `git`, and
 a logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no
 config, no database. The cockpit wants a browser from 2024 on (Chrome/Edge 123,
 Safari 17.5, Firefox 120).
