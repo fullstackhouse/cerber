@@ -13,12 +13,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # package.json says Node 20+, so 20 is tested and not merely claimed. 22 is
-    # what the maintainers run; the release job builds on it.
+    # package.json says Node 22+, so the 22 floor is tested and not merely
+    # claimed; the release job builds on it. 24 is the current LTS.
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
