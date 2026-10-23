@@ -458,13 +458,13 @@ export function Queue() {
             <HeadCell
               className="col-comments"
               label="comments"
-              tip="Comments in the drafted review; — until there is a draft"
+              tip="Inline comments in the draft (— before one exists)"
             />
             <HeadCell className="col-size" label="size" tip="Files changed, lines added, lines removed" />
             <HeadCell
               className="col-verdict"
               label="verdict"
-              tip="What the review recommends, and how sure it is of itself"
+              tip="Recommendation, and how sure the review is"
             />
             <HeadCell className="col-age" label="upd" tip="When this review last changed" />
           </div>
