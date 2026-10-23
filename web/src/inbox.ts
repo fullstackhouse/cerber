@@ -423,7 +423,7 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
 
 /**
  * The queue's comment column. A dash means there is no draft to count yet; a
- * draft that found nothing to say inline reads "0", never a blank cell, which
+ * draft with no comments reads "0", never a blank cell, which
  * looked like a column that failed to render.
  */
 export function commentsCell(r: ReviewListItem): string {

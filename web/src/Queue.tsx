@@ -458,7 +458,7 @@ export function Queue() {
             <HeadCell
               className="col-comments"
               label="comments"
-              tip="Inline comments in the draft (— before one exists)"
+              tip="Comments in the draft (— before one exists)"
             />
             <HeadCell className="col-size" label="size" tip="Files changed, lines added, lines removed" />
             <HeadCell

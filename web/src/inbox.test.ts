@@ -567,7 +567,7 @@ describe("commentsCell", () => {
     expect(commentsCell(row({ verdict: null, commentCount: 0 }))).toBe("—");
   });
 
-  it("shows 0 for a draft with no inline comments, not a blank cell", () => {
+  it("shows 0 for a draft with no comments, not a blank cell", () => {
     expect(commentsCell(row({ commentCount: 0 }))).toBe("0");
     expect(commentsCell(row({ commentCount: 3 }))).toBe("3");
   });
