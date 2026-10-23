@@ -812,7 +812,7 @@ button {
   text-overflow: ellipsis;
 }
 .col-comments {
-  width: 26px;
+  width: 64px;
   flex-shrink: 0;
   text-align: right;
   color: var(--muted);
@@ -835,6 +835,47 @@ button {
 .table-head .col-author {
   color: var(--faint);
   font-weight: 400;
+}
+
+/* Column labels explain themselves on hover, at once. The label cells clip for
+   ellipsis in rows; the head's labels are short, so they let the tip out. */
+.table-head .head-cell {
+  position: relative;
+  overflow: visible;
+  cursor: help;
+}
+.head-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  width: max-content;
+  max-width: 280px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  color: var(--fg-2);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* Right-aligned columns sit near the table's right edge: open leftwards. */
+.col-comments .head-tip,
+.col-size .head-tip,
+.col-verdict .head-tip,
+.col-age .head-tip {
+  left: auto;
+  right: 0;
+}
+.head-cell:hover .head-tip {
+  display: block;
 }
 
 /* The cursor row, explaining itself without leaving the list. */
