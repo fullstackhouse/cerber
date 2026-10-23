@@ -837,11 +837,14 @@ button {
   font-weight: 400;
 }
 
-/* Column labels explain themselves on hover, at once. The label cells clip for
+/* Column labels explain themselves on hover, at once — over the word, not the
+   whole column, so the tip opens beside what you pointed at. The cells clip for
    ellipsis in rows; the head's labels are short, so they let the tip out. */
-.table-head .head-cell {
-  position: relative;
+.table-head > span {
   overflow: visible;
+}
+.head-cell {
+  position: relative;
   cursor: help;
 }
 .head-tip {

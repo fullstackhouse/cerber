@@ -95,10 +95,12 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
  */
 function HeadCell({ className, label, tip }: { className: string; label: string; tip: string }) {
   return (
-    <span className={`${className} head-cell`}>
-      {label}
-      <span className="head-tip" role="tooltip">
-        {tip}
+    <span className={className}>
+      <span className="head-cell">
+        {label}
+        <span className="head-tip" role="tooltip">
+          {tip}
+        </span>
       </span>
     </span>
   );
