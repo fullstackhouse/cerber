@@ -812,7 +812,7 @@ button {
   text-overflow: ellipsis;
 }
 .col-comments {
-  width: 26px;
+  width: 64px;
   flex-shrink: 0;
   text-align: right;
   color: var(--muted);
@@ -835,6 +835,68 @@ button {
 .table-head .col-author {
   color: var(--faint);
   font-weight: 400;
+}
+
+/* Column labels explain themselves on hover, at once — over the word, not the
+   whole column, so the tip opens beside what you pointed at. The cells clip for
+   ellipsis in rows; the head's labels are short, so they let the tip out. */
+.table-head > span {
+  overflow: visible;
+}
+.head-cell {
+  position: relative;
+  cursor: help;
+}
+.head-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--fg-2);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* Centred under its word, except at the table's edges, where a centred tip
+   would spill past it: those line up with the edge they sit against. */
+.col-slug .head-tip {
+  left: -8px;
+  transform: none;
+}
+.col-verdict .head-tip,
+.col-age .head-tip {
+  left: auto;
+  right: -8px;
+  transform: none;
+}
+/* The arrow belongs to the label, not the tip, so it points at the word
+   whichever way the tip is anchored. */
+.head-cell:hover::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  z-index: 6;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: var(--bg);
+  border-left: 1px solid var(--line-2);
+  border-top: 1px solid var(--line-2);
+}
+.head-cell:hover .head-tip {
+  display: block;
 }
 
 /* The cursor row, explaining itself without leaving the list. */

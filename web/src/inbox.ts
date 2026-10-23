@@ -421,6 +421,17 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
   };
 }
 
+/**
+ * The queue's comment column. A dash means there is no draft to count yet; a
+ * draft with no comments reads "0", never a blank cell, which
+ * looked like a column that failed to render.
+ */
+export function commentsCell(r: ReviewListItem): string {
+  if (r.status === "running" || r.status === "awaiting" || r.status === "failed") return "—";
+  if (!r.verdict && !r.sent) return "—";
+  return String(r.commentCount);
+}
+
 /** What the run read, in the words the cockpit uses everywhere else. */
 export function readMode(run: { withSource?: boolean | null; trusted?: boolean | null }): string {
   if (run.trusted) return "ran the code";

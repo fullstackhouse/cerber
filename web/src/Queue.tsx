@@ -8,6 +8,7 @@ import {
   Tab,
   ageLabel,
   bucket,
+  commentsCell,
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
@@ -88,6 +89,24 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
 }
 
 /**
+ * A column label that explains itself on hover. Not a `title`: the browser's
+ * own tooltip waits a second, needs the pointer held still over an 11px label,
+ * and gave up often enough that the explanation read as missing.
+ */
+function HeadCell({ className, label, tip }: { className: string; label: string; tip: string }) {
+  return (
+    <span className={className}>
+      <span className="head-cell">
+        {label}
+        <span className="head-tip" role="tooltip">
+          {tip}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/**
  * One row shape for every tab. What you already dealt with used to render
  * through a second, thinner component in a drawer — same PR, different columns,
  * no cursor. A filed review is the same row; the tags say what became of it.
@@ -143,7 +162,7 @@ function Row({
         </span>
       )}
       {tag && <span className="tag tag-done">{tag}</span>}
-      <span className="col-comments">{r.commentCount || ""}</span>
+      <span className="col-comments">{commentsCell(r)}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
           <>
@@ -433,13 +452,21 @@ export function Queue() {
 
           <div className="table-head">
             <span className="col-caret" />
-            <span className="col-slug">repo#pr</span>
-            <span className="col-author">author</span>
-            <span className="col-title">title</span>
-            <span className="col-comments">c</span>
-            <span className="col-size">size</span>
-            <span className="col-verdict">verdict</span>
-            <span className="col-age">upd</span>
+            <HeadCell className="col-slug" label="repo#pr" tip="Repository and pull request number" />
+            <HeadCell className="col-author" label="author" tip="Who opened the pull request" />
+            <HeadCell className="col-title" label="title" tip="Pull request title" />
+            <HeadCell
+              className="col-comments"
+              label="comments"
+              tip="Comments in the draft (— before one exists)"
+            />
+            <HeadCell className="col-size" label="size" tip="Files changed, lines added, lines removed" />
+            <HeadCell
+              className="col-verdict"
+              label="verdict"
+              tip="Recommendation, and how sure the review is"
+            />
+            <HeadCell className="col-age" label="upd" tip="When this review last changed" />
           </div>
 
           {rows.length === 0 ? (
