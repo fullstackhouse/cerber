@@ -3,6 +3,7 @@ import type { Tab } from "./inbox";
 import {
   ageLabel,
   bucket,
+  commentsCell,
   hiddenAwaiting,
   hiddenAwaitingNote,
   filedOn,
@@ -555,6 +556,20 @@ describe("verdictCell", () => {
       sent: { at: "2026-08-14T09:00:00.000Z", event: "APPROVE", url: null, auto: true },
     });
     expect(verdictCell(sent)).toEqual({ label: "sent · approve", tone: "sent" });
+  });
+});
+
+describe("commentsCell", () => {
+  it("shows a dash while there is no draft to count", () => {
+    expect(commentsCell(row({ status: "awaiting", verdict: null, commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ status: "running", commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ status: "failed", verdict: null, commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ verdict: null, commentCount: 0 }))).toBe("—");
+  });
+
+  it("shows 0 for a draft with no inline comments, not a blank cell", () => {
+    expect(commentsCell(row({ commentCount: 0 }))).toBe("0");
+    expect(commentsCell(row({ commentCount: 3 }))).toBe("3");
   });
 });
 

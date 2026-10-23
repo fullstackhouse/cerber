@@ -8,6 +8,7 @@ import {
   Tab,
   ageLabel,
   bucket,
+  commentsCell,
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
@@ -143,7 +144,7 @@ function Row({
         </span>
       )}
       {tag && <span className="tag tag-done">{tag}</span>}
-      <span className="col-comments">{r.commentCount || ""}</span>
+      <span className="col-comments">{commentsCell(r)}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
           <>
@@ -433,13 +434,27 @@ export function Queue() {
 
           <div className="table-head">
             <span className="col-caret" />
-            <span className="col-slug">repo#pr</span>
-            <span className="col-author">author</span>
-            <span className="col-title">title</span>
-            <span className="col-comments">c</span>
-            <span className="col-size">size</span>
-            <span className="col-verdict">verdict</span>
-            <span className="col-age">upd</span>
+            <span className="col-slug" title="Repository and pull request number">
+              repo#pr
+            </span>
+            <span className="col-author" title="Who opened the pull request">
+              author
+            </span>
+            <span className="col-title" title="Pull request title">
+              title
+            </span>
+            <span className="col-comments" title="Comments in the drafted review (— while there is no draft yet)">
+              c
+            </span>
+            <span className="col-size" title="Files changed, lines added, lines removed">
+              size
+            </span>
+            <span className="col-verdict" title="What the review recommends, and how sure it is of itself">
+              verdict
+            </span>
+            <span className="col-age" title="When this review last changed">
+              upd
+            </span>
           </div>
 
           {rows.length === 0 ? (
