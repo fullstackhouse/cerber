@@ -1,6 +1,6 @@
 import { Artifact, FiledInfo, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
-import { AutoReviewKnobs, anyAutoReview, autoReviewFor } from "../core/autoreview.js";
+import { anyAutoReview, autoReviewFor, capAutoReview } from "../core/autoreview.js";
 import { Config, loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
@@ -46,11 +46,10 @@ export interface DaemonOptions {
   /**
    * Draft an AI review for whatever lands in the queue. False discovers only:
    * awaiting rows appear, and the human clicks review when they want a draft.
-   * False (--no-auto-review) turns the default off for this run; the config's
-   * daemon.autoReview is consulted live on every poll, so the cockpit toggle
-   * needs no restart. Repos set to true in daemon.autoReviewRepos still draft:
-   * an exception names one repo on purpose, and a blanket flag does not
-   * outrank it.
+   * This is the per-run cap (--no-auto-review), and it caps the per-repo
+   * exceptions too: false means this process starts no runs at all. The
+   * config's daemon.autoReview and autoReviewRepos are consulted live on every
+   * poll, so the cockpit toggles need no restart.
    */
   autoReview: boolean;
   /**
@@ -905,10 +904,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    */
   function applyKnobs(config: Config) {
     const knobs = config.daemon;
-    const autoReview: AutoReviewKnobs = {
-      autoReview: opts.autoReview && knobs.autoReview,
-      autoReviewRepos: knobs.autoReviewRepos,
-    };
+    const autoReview = capAutoReview(knobs, opts.autoReview);
     const drafts = (pr: { owner: string; repo: string }) => autoReviewFor(autoReview, pr.owner, pr.repo);
     status.pollEnabled = knobs.poll;
     // What the cockpit's bell defers to: a loop that isn't polling announces

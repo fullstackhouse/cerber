@@ -5,7 +5,7 @@ import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
-import { anyAutoReview } from "../core/autoreview.js";
+import { anyAutoReview, capAutoReview } from "../core/autoreview.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
@@ -540,7 +540,7 @@ program
   .option("--no-poll", "don't poll GitHub for PRs awaiting your review (also disables auto-review)")
   .option(
     "--no-auto-review",
-    "list awaiting PRs but don't review them until you click review (repos set to true in daemon.autoReviewRepos still draft)",
+    "list awaiting PRs but don't review them until you click review (per-repo exceptions included)",
   )
   .option("--no-notify", "don't notify this machine when a review is ready for you")
   .option("-d, --daemon", "(deprecated no-op — polling and auto-review are now the default)")
@@ -612,7 +612,7 @@ program
 
       // Trust means "run this PR's code". A human clicking review accepted that
       // per PR; auto-review does it unattended, on whatever lands in the queue.
-      const drafting = anyAutoReview({ autoReview: opts.autoReview && d.autoReview, autoReviewRepos: d.autoReviewRepos });
+      const drafting = anyAutoReview(capAutoReview(d, opts.autoReview));
       if (opts.poll && d.poll && drafting && opts.trust && config.trust.length > 0) {
         console.log(
           `⚠ ${config.trust.length} trust rule(s) in ${configPath()}: unattended reviews will run commands from ` +

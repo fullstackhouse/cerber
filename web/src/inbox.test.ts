@@ -4,6 +4,7 @@ import {
   ageLabel,
   bucket,
   commentsCell,
+  exceptionsLabel,
   hiddenAwaiting,
   hiddenAwaitingNote,
   filedOn,
@@ -401,6 +402,14 @@ describe("a draft cerber filed rather than you", () => {
     expect(strip(waiting, daemon()).reasoning).toContain("still queued");
   });
 
+  // Off everywhere is not an exception for this repo, and shouldn't read like one.
+  it("doesn't name the repo when auto-review is simply off", () => {
+    const waiting = row({ status: "awaiting" });
+    const s = strip(waiting, daemon({ autoReview: false }));
+    expect(s.reasoning).toContain("Auto-review is off, so it waits");
+    expect(s.reasoning).not.toContain(`${waiting.pr.owner}/${waiting.pr.repo}`);
+  });
+
   it("says why the row is filed, not what the verdict thought", () => {
     const s = strip(filed(), daemon());
     expect(s.reasoning).toContain("GitHub stopped asking you");
@@ -639,5 +648,17 @@ describe("strip", () => {
     );
     expect(s.reasoning).toContain("Sent to GitHub as approve");
     expect(s.meta).toContain("auto-sent by the daemon");
+  });
+});
+
+describe("the queue strip's count of per-repo exceptions", () => {
+  it("says nothing with no exceptions", () => {
+    expect(exceptionsLabel(true, {})).toBe("");
+  });
+
+  it("counts the repos that go against the default, and only those", () => {
+    expect(exceptionsLabel(true, { "acme/a": false, "acme/b": false, "acme/c": true })).toBe(" · 2 repos on click");
+    expect(exceptionsLabel(false, { "acme/a": true })).toBe(" · 1 repo auto");
+    expect(exceptionsLabel(true, { "acme/c": true })).toBe("");
   });
 });

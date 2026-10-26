@@ -50,6 +50,12 @@ describe("config", () => {
     await expect(loadConfig()).rejects.toThrow(/autoReviewRepos.acme: expected owner\/repo/);
   });
 
+  it("refuses two spellings of one repo, since the match ignores case", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"autoReviewRepos": {"Acme/Web": true, "acme/web": false}}}');
+    await expect(loadConfig()).rejects.toThrow(/autoReviewRepos.acme\/web: same repo as Acme\/Web/);
+  });
+
   it("round-trips what the cockpit writes", async () => {
     await saveConfig({ trust: ["@acme/*", "@someone", "!@acme/contractors"] });
     expect((await loadConfig()).trust).toEqual(["@acme/*", "@someone", "!@acme/contractors"]);

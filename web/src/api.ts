@@ -228,6 +228,13 @@ export const updateTrustRule = (rule: string, remove = false) =>
     body: JSON.stringify({ rule, remove }),
   });
 
+/** Set (`true`/`false`) or remove (`null`) one per-repo auto-review exception. */
+export const updateAutoReviewRepo = (repo: string, on: boolean | null) =>
+  request<ConfigView>("/api/config/auto-review-repo", {
+    method: "POST",
+    body: JSON.stringify({ repo, on }),
+  });
+
 /** Flip the inbox knobs. The daemon picks the change up on its next poll. */
 export const updateDaemonConfig = (patch: Partial<DaemonConfig>) =>
   request<ConfigView>("/api/config/daemon", {

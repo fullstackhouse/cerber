@@ -9,6 +9,7 @@ import {
   ageLabel,
   bucket,
   commentsCell,
+  exceptionsLabel,
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
@@ -30,13 +31,6 @@ function typing(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   const tag = el?.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable === true;
-}
-
-/** The repos that go the other way from the default, counted: " · 2 repos on click". */
-function exceptionsLabel(autoReview: boolean, repos: Record<string, boolean>): string {
-  const against = Object.values(repos).filter((on) => on !== autoReview).length;
-  if (against === 0) return "";
-  return ` · ${against} repo${against === 1 ? "" : "s"} ${autoReview ? "on click" : "auto"}`;
 }
 
 function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {

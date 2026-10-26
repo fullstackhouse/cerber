@@ -516,11 +516,11 @@ launch.
   daemon start and need a restart. Trust rules are re-read by every review run.
 - CLI `--no-poll`, `--no-auto-review`, `--no-notify`, `--no-trust` **cap** the
   config for that process — effective value = flag AND config — and can never
-  re-enable something the config disabled. `--no-source` is one exception:
+  re-enable something the config disabled. `--no-auto-review` caps
+  `autoReviewRepos` too: under it the process starts no AI runs at all, so a
+  repo set to `true` does not draft. `--no-source` is the exception:
   it sets the default a run starts from, and a per-re-review override exists
-  either way (§16.2). `--no-auto-review` is the other: it caps the `autoReview`
-  default only, and a repo set to `true` in `autoReviewRepos` still drafts —
-  an exception names one repo on purpose, and a blanket flag does not outrank it.
+  either way (§16.2).
 
 ### 6.4 Auto-review per Repo
 
@@ -528,7 +528,9 @@ launch.
 the repos it names, in either direction — `false` leaves that repo's PRs
 `awaiting` until the user asks for a draft, `true` drafts them with the default
 off. It is one map rather than an allow list and a deny list, so no repo can be
-on both. Keys MUST be `owner/repo`; anything else fails validation (§6.2). The
+on both. Keys MUST be `owner/repo`, and no two keys may name the same repo in
+different case; anything else fails validation (§6.2). An exception overrides
+the config's `autoReview` only — `--no-auto-review` caps both (§6.3). The
 resolution is `autoReviewFor` (`src/core/autoreview.ts`), shared by the daemon
 and the cockpit's bell so both agree on when a PR is news (§9.8). A repo set to
 `false` is still discovered, listed and announced — only the run waits — and
@@ -1797,7 +1799,7 @@ static assets included. No CORS: same-origin only.
 | Method & path | Purpose | Notable answers |
 |---|---|---|
 | `GET /api/daemon` | daemon status | `{enabled: false}` when none |
-| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` | settings | full config view, with the running package `version`; 400 with the trust parser's message verbatim |
+| `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` · `POST /api/config/auto-review-repo` | settings | full config view, with the running package `version`; 400 with the trust parser's message verbatim. The last sets (`on: true\|false`) or removes (`on: null`) one `autoReviewRepos` entry against the file as it is now, so a stale view can't overwrite another exception |
 | `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |

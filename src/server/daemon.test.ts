@@ -1506,9 +1506,9 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(reviewed.mock.calls.map((c) => c[0].repo)).toContain("widgets");
   });
 
-  // The flag turns the default off for the run, not an exception that names a
-  // repo on purpose.
-  it("still drafts a repo set to auto under --no-auto-review", async () => {
+  // The flag means this process starts no runs — the trust warning tells you to
+  // pass it, so an exception must not get past it.
+  it("drafts nothing under --no-auto-review, a repo set to auto included", async () => {
     config.mockResolvedValue({
       trust: [],
       daemon: { ...daemonKnobs, autoReviewRepos: { "acme/widgets": true } },
@@ -1517,10 +1517,11 @@ describe("when the tap comes, with cerber drafting for you", () => {
     const handle = startDaemon({ ...options, autoReview: false });
     try {
       await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+      // What the cockpit reads: nothing drafted, so both bells announce on arrival.
+      expect(handle.status().autoReviewRepos).toEqual({});
     } finally {
       await stopAndDrain(handle);
     }
-    expect(reviewed.mock.calls.map((c) => c[0].repo)).not.toContain("legacy");
-    expect(reviewed.mock.calls.map((c) => c[0].repo)).toContain("widgets");
+    expect(reviewed).not.toHaveBeenCalled();
   });
 });

@@ -30,6 +30,16 @@ export const DaemonConfigSchema = z.object({
    */
   autoReviewRepos: z
     .record(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/repo"), z.boolean())
+    // The match ignores case, so two spellings of one repo would leave the
+    // answer to key order — refused, like any other key that can't mean one thing.
+    .superRefine((repos, ctx) => {
+      const seen = new Map<string, string>();
+      for (const key of Object.keys(repos)) {
+        const first = seen.get(key.toLowerCase());
+        if (first !== undefined) ctx.addIssue({ code: "custom", path: [key], message: `same repo as ${first}` });
+        else seen.set(key.toLowerCase(), key);
+      }
+    })
     .default({}),
   /**
    * Tap this machine's notification centre when a PR is worth coming back for

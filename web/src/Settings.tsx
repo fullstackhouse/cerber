@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, fetchReviews, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, fetchReviews, updateAutoReviewRepo, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
 import { SendKey, useSendKey } from "./sendkey";
 import { useStickyChapters } from "./sticky-chapters";
@@ -54,7 +54,7 @@ function AutoReviewExceptions({
 }: {
   daemon: DaemonConfig;
   busy: boolean;
-  save: (repos: Record<string, boolean>) => void;
+  save: (repo: string, on: boolean | null) => void;
 }) {
   const [repo, setRepo] = useState("");
   const [auto, setAuto] = useState(!daemon.autoReview);
@@ -72,14 +72,14 @@ function AutoReviewExceptions({
   const name = repo.trim();
   const valid = REPO.test(name);
 
-  // GitHub ignores case in owner/repo and so does the match, so a second
-  // spelling of the same repo replaces the first rather than sitting beside it.
-  const without = (key: string) =>
-    Object.fromEntries(Object.entries(daemon.autoReviewRepos).filter(([k]) => k.toLowerCase() !== key.toLowerCase()));
+  // Repos already excepted, in any spelling, aren't offered again.
+  const listed = new Set(entries.map(([k]) => k.toLowerCase()));
 
+  // The server replaces any other spelling of the same repo, since the match
+  // ignores case — one repo per write, merged into the file as it is now.
   const add = () => {
     if (busy || !valid) return;
-    save({ ...without(name), [name]: auto });
+    save(name, auto);
     setRepo("");
   };
 
@@ -104,7 +104,7 @@ function AutoReviewExceptions({
         />
         <datalist id="auto-review-repos">
           {known
-            .filter((k) => !(k.toLowerCase() in lowerKeys(daemon.autoReviewRepos)))
+            .filter((k) => !listed.has(k.toLowerCase()))
             .map((k) => (
               <option key={k} value={k} />
             ))}
@@ -139,10 +139,10 @@ function AutoReviewExceptions({
                   {on === daemon.autoReview && " — same as the default, so it changes nothing"}
                 </td>
                 <td className="trust-actions">
-                  <button className="btn" disabled={busy} onClick={() => save({ ...daemon.autoReviewRepos, [key]: !on })}>
+                  <button className="btn" disabled={busy} onClick={() => save(key, !on)}>
                     {on ? "wait for a click" : "draft automatically"}
                   </button>{" "}
-                  <button className="btn" disabled={busy} onClick={() => save(without(key))}>
+                  <button className="btn" disabled={busy} onClick={() => save(key, null)}>
                     remove
                   </button>
                 </td>
@@ -154,9 +154,6 @@ function AutoReviewExceptions({
     </>
   );
 }
-
-const lowerKeys = (repos: Record<string, boolean>) =>
-  Object.fromEntries(Object.keys(repos).map((k) => [k.toLowerCase(), true]));
 
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
@@ -221,7 +218,7 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         <AutoReviewExceptions
           daemon={config.daemon}
           busy={busy}
-          save={(autoReviewRepos) => apply(updateDaemonConfig({ autoReviewRepos }))}
+          save={(repo, on) => apply(updateAutoReviewRepo(repo, on))}
         />
       )}
       <p className="muted">

@@ -676,9 +676,8 @@ read-only) and auto-send does nothing but log.
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,
-`--no-trust` — with one carve-out: `--no-auto-review` caps the `autoReview`
-default only, and a repo set to `true` in `autoReviewRepos` still drafts.
-`--no-source` is the other exception: it sets the default a run starts
+`--no-trust`. `--no-auto-review` caps `autoReviewRepos` too, so a repo set to
+`true` does not draft under it. `--no-source` is the exception: it sets the default a run starts
 from, and the re-review endpoint's `?source=` overrides it either way, so the
 cockpit's button can ask for a source-backed run on a server started without
 one.
