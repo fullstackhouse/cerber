@@ -29,6 +29,7 @@ import {
   submitReview,
 } from "../core/gh.js";
 import { z } from "zod";
+import { setException } from "../core/autoreview.js";
 import { DaemonConfig, DaemonConfigSchema, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { version } from "../core/version.js";
 import { refreshArtifact, userOwnsStatus } from "../core/refresh.js";
@@ -225,6 +226,43 @@ export async function buildApp(
     try {
       const config = await loadConfig();
       const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
+      await saveConfig({ ...config, daemon });
+      opts.daemon?.reconfigure({ ...config, daemon });
+      return c.json(configView(config.trust, daemon));
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) {
+        return c.json(
+          { error: err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") },
+          400,
+        );
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // One per-repo auto-review exception at a time: `on` true or false sets it,
+  // null removes it. Merged into the file as it is now, not the map the cockpit
+  // loaded, so a second tab or a hand edit since then is not overwritten.
+  app.post("/api/config/auto-review-repo", async (c) => {
+    let body: { repo?: unknown; on?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "body must be JSON" }, 400);
+    }
+    const { repo, on } = body;
+    if (typeof repo !== "string" || !repo.trim()) {
+      return c.json({ error: "repo is required" }, 400);
+    }
+    if (on !== null && typeof on !== "boolean") {
+      return c.json({ error: "on must be true, false or null" }, 400);
+    }
+    try {
+      const config = await loadConfig();
+      const daemon = DaemonConfigSchema.parse({
+        ...config.daemon,
+        autoReviewRepos: setException(config.daemon.autoReviewRepos, repo.trim(), on),
+      });
       await saveConfig({ ...config, daemon });
       opts.daemon?.reconfigure({ ...config, daemon });
       return c.json(configView(config.trust, daemon));

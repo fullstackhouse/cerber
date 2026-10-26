@@ -5,6 +5,7 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
+import { autoReviewFor } from "../../src/core/autoreview";
 import { DaemonStatus, Filed, FiledReason, Handoff, Reply, ReviewListItem } from "./types";
 
 export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
@@ -451,6 +452,14 @@ function commentsPart(r: ReviewListItem): string {
   return parts.join(", ");
 }
 
+/** The repos that go the other way from the default, counted for the queue
+ *  strip: " · 2 repos on click". One that agrees with the default changes nothing. */
+export function exceptionsLabel(autoReview: boolean, repos: Record<string, boolean>): string {
+  const against = Object.values(repos).filter((on) => on !== autoReview).length;
+  if (against === 0) return "";
+  return ` · ${against} repo${against === 1 ? "" : "s"} ${autoReview ? "on click" : "auto"}`;
+}
+
 /**
  * Why this row reads the way it does — the strip under the table. `meta` is the
  * quiet line under the reasoning; the view joins it with " · ".
@@ -467,6 +476,21 @@ export function strip(
     };
   }
   if (r.status === "awaiting") {
+    // Said outright when the daemon is not going to draft this repo, rather
+    // than leaving the reader to wait for a run that is never coming.
+    if (
+      daemon?.enabled &&
+      daemon.pollEnabled &&
+      !autoReviewFor({ autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} }, r.pr.owner, r.pr.repo)
+    ) {
+      // Naming the repo only when an exception is why, so nobody goes looking
+      // for a per-repo setting they never made.
+      const off = daemon.autoReview ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}` : "Auto-review is off";
+      return {
+        reasoning: `Found by the inbox poll. ${off}, so it waits for you to ask for a draft.`,
+        meta: ["no run yet", "press r to review now"],
+      };
+    }
     return {
       reasoning:
         "Found by the inbox poll, not drafted yet — auto-review was off when it arrived, or it is still queued behind another run.",

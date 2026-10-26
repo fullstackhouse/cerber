@@ -9,6 +9,7 @@ import {
   ageLabel,
   bucket,
   commentsCell,
+  exceptionsLabel,
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
@@ -51,6 +52,7 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         )}
         <span>
           auto-review <b>{daemon.autoReview ? "on" : "off"}</b>
+          {exceptionsLabel(daemon.autoReview, daemon.autoReviewRepos ?? {})}
         </span>
         <span>
           auto-send <b>{daemon.autoSend === "on" ? "on" : "shadow"}</b> ≥{daemon.autoSendThreshold}%

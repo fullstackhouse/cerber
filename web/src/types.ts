@@ -326,7 +326,10 @@ export type DaemonStatus =
       pollEnabled: boolean;
       /** The daemon taps this machine itself when a PR lands — see notify.ts. */
       notify: boolean;
+      /** The default for repos with no exception in `autoReviewRepos`. */
       autoReview: boolean;
+      /** Per-repo exceptions to `autoReview`; absent from servers that predate them. */
+      autoReviewRepos?: Record<string, boolean>;
       /** Unattended reviews may run PR code: auto-review on + trust rules set. */
       trustedRuns: boolean;
       polls: number;
@@ -368,6 +371,8 @@ export interface TrustEntry {
 export interface DaemonConfig {
   poll: boolean;
   autoReview: boolean;
+  /** owner/repo → true (draft it) or false (wait for a click), overriding `autoReview`. */
+  autoReviewRepos: Record<string, boolean>;
   notify: boolean;
   intervalMinutes: number;
   parallel: number;

@@ -36,11 +36,20 @@ const pr = (n: number, over: Partial<ReviewListItem> = {}) =>
   row({ key: `acme-web-${n}`, pr: { ...row().pr, number: n }, ...over });
 
 // Nobody is drafting for you, so a PR landing is all the news there will be.
-const BY_HAND = false;
+const BY_HAND = { autoReview: false, autoReviewRepos: {} };
 /** The default: cerber drafts every arrival itself, and that takes minutes. */
-const DRAFTING = true;
+const DRAFTING = { autoReview: true, autoReviewRepos: {} };
 
 describe("arrivals", () => {
+  // The daemon's rule per repo: an arrival in a repo set to review-on-click is
+  // the news, one in a repo it drafts waits for its draft.
+  it("announces an arrival in a repo nobody drafts, and holds one it does", () => {
+    const other = row({ key: "acme-api-1", pr: { ...row().pr, repo: "api" } });
+    const drafting = { autoReview: true, autoReviewRepos: { "acme/web": false } };
+    expect(arrivals([pr(1), other], [], drafting).map((r) => r.key)).toEqual(["acme-web-1"]);
+    expect(announced([pr(1), other], drafting)).not.toContain("acme-api-1");
+  });
+
   it("announces a PR the browser has never seen", () => {
     expect(arrivals([pr(1), pr(2)], ["acme-web-1"], BY_HAND).map((r) => r.key)).toEqual([
       "acme-web-2",
@@ -266,18 +275,20 @@ describe("who announces an arrival when both could", () => {
 
   describe("whether anything is coming for an undrafted row", () => {
     it("reads it off the daemon when the status says", () => {
-      expect(daemonDrafts(daemon(), false)).toBe(true);
-      expect(daemonDrafts(daemon({ autoReview: false }), true)).toBe(false);
-      expect(daemonDrafts(daemon({ pollEnabled: false }), true)).toBe(false);
-      expect(daemonDrafts({ enabled: false }, true)).toBe(false);
+      expect(daemonDrafts(daemon(), BY_HAND)).toEqual(DRAFTING);
+      expect(daemonDrafts(daemon({ autoReview: false }), DRAFTING)).toEqual(BY_HAND);
+      expect(daemonDrafts(daemon({ pollEnabled: false }), DRAFTING)).toEqual(BY_HAND);
+      expect(daemonDrafts({ enabled: false }, DRAFTING)).toEqual(BY_HAND);
+      const excepted = { autoReview: true, autoReviewRepos: { "acme/web": false } };
+      expect(daemonDrafts(daemon(excepted), BY_HAND)).toEqual(excepted);
     });
 
     // A read that failed answers nothing. Taken for a no, it announces a row
     // the daemon is drafting right now — and the draft-ready tap then arrives
     // second, two popups for one PR out of a single hiccup.
     it("keeps the last answer when the status read fails", () => {
-      expect(daemonDrafts(null, true)).toBe(true);
-      expect(daemonDrafts(null, false)).toBe(false);
+      expect(daemonDrafts(null, DRAFTING)).toBe(DRAFTING);
+      expect(daemonDrafts(null, BY_HAND)).toBe(BY_HAND);
     });
   });
 });
