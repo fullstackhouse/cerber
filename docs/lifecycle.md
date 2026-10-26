@@ -92,7 +92,7 @@ going in another terminal is invisible to it:
 
 ```
 (nothing)           ──you paste a URL, or `cerber review`──► running
-awaiting            ──the poll, when auto-review is on────► running
+awaiting            ──the poll, if auto-review is on for its repo──► running
 ready | sent        ──the poll, once the head has moved───► running
 failed              ──the poll, next time round───────────► running
 anything            ──the cockpit's re-review button──────► running
@@ -154,8 +154,8 @@ Notes on the edges that surprise people:
   that has just legitimately begun.
 - **`failed` is retried automatically** — it is neither settled nor
   head-sensitive, so the freshness guard below lets it through every time. Only
-  by the poll, and only on its terms: `reviewAll` runs solely when auto-review
-  is on and solely over PRs the awaiting search returned, so a failed artifact
+  by the poll, and only on its terms: `reviewAll` runs solely over PRs the awaiting search returned
+  whose repo auto-review is on for (`autoReviewFor`, `src/core/autoreview.ts`), so a failed artifact
   GitHub has stopped asking about is never picked up *on its own*. You can
   always start one yourself — both forcing paths take any status at all,
   `sent` included.
@@ -658,7 +658,7 @@ dropped. Deleting a stub deletes its history with it; nothing else removes one.
 ## 7. Settings that change any of this
 
 `~/.cerber/config.json`, zod-validated, and mostly live. The poll re-reads it
-every tick and acts on `poll` and `autoReview`, so the cockpit's toggles apply
+every tick and acts on `poll`, `autoReview` and `autoReviewRepos`, so the cockpit's toggles apply
 without a restart; `trust` is re-read by every `reviewPr` call, so a rule you
 add binds the next run. Only `intervalMinutes`, `parallel` and `repos` are
 captured by `startDaemon` and need a restart. Absent = defaults, which is a working state,
@@ -669,13 +669,16 @@ read-only) and auto-send does nothing but log.
 | --- | --- | --- |
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
+| `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
 | `daemon.intervalMinutes` | `5` | |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,
-`--no-trust`. `--no-source` is the exception: it sets the default a run starts
+`--no-trust` — with one carve-out: `--no-auto-review` caps the `autoReview`
+default only, and a repo set to `true` in `autoReviewRepos` still drafts.
+`--no-source` is the other exception: it sets the default a run starts
 from, and the re-review endpoint's `?source=` overrides it either way, so the
 cockpit's button can ask for a source-backed run on a server started without
 one.

@@ -1,5 +1,6 @@
 import { Artifact, FiledInfo, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
+import { AutoReviewKnobs, anyAutoReview, autoReviewFor } from "../core/autoreview.js";
 import { Config, loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
@@ -45,8 +46,11 @@ export interface DaemonOptions {
   /**
    * Draft an AI review for whatever lands in the queue. False discovers only:
    * awaiting rows appear, and the human clicks review when they want a draft.
-   * This is the per-run cap (--no-auto-review); the config's daemon.autoReview
-   * is consulted live on every poll, so the cockpit toggle needs no restart.
+   * False (--no-auto-review) turns the default off for this run; the config's
+   * daemon.autoReview is consulted live on every poll, so the cockpit toggle
+   * needs no restart. Repos set to true in daemon.autoReviewRepos still draft:
+   * an exception names one repo on purpose, and a blanket flag does not
+   * outrank it.
    */
   autoReview: boolean;
   /**
@@ -96,7 +100,10 @@ export interface DaemonStatus {
    * `web/src/notify.ts`.
    */
   notify: boolean;
+  /** The default for repos with no exception below. */
   autoReview: boolean;
+  /** Per-repo exceptions to `autoReview` (config's daemon.autoReviewRepos). */
+  autoReviewRepos: Record<string, boolean>;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
   polls: number;
@@ -371,6 +378,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // keeps its own counsel for the few seconds that takes.
     notify: false,
     autoReview: opts.autoReview,
+    autoReviewRepos: {},
     trustedRuns: false,
     polls: 0,
     errors: 0,
@@ -752,9 +760,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * quiet week would announce that whole week at once — the same reason the
    * browser bell records what it stays quiet about.
    */
-  async function announce(autoReview: boolean, tell: boolean): Promise<void> {
+  async function announce(drafts: (pr: { owner: string; repo: string }) => boolean, tell: boolean): Promise<void> {
     const owed = (await listArtifacts()).flatMap((a) => {
-      const news = pendingNews(a, autoReview);
+      const news = pendingNews(a, drafts(a.pr));
       return news ? [{ id: a.id, news }] : [];
     });
     // `cockpitUrl` is where a click lands, and it is read here rather than
@@ -897,7 +905,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    */
   function applyKnobs(config: Config) {
     const knobs = config.daemon;
-    const autoReview = opts.autoReview && knobs.autoReview;
+    const autoReview: AutoReviewKnobs = {
+      autoReview: opts.autoReview && knobs.autoReview,
+      autoReviewRepos: knobs.autoReviewRepos,
+    };
+    const drafts = (pr: { owner: string; repo: string }) => autoReviewFor(autoReview, pr.owner, pr.repo);
     status.pollEnabled = knobs.poll;
     // What the cockpit's bell defers to: a loop that isn't polling announces
     // nothing, whatever the notify toggle says.
@@ -907,10 +919,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // should be standing down for.
     const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
     status.notify = announcing();
-    status.autoReview = autoReview;
+    status.autoReview = autoReview.autoReview;
+    status.autoReviewRepos = autoReview.autoReviewRepos;
     // Recomputed too, so a trust rule added mid-run shows up in the strip.
-    status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
-    return { knobs, autoReview, notifyOn, announcing };
+    status.trustedRuns = anyAutoReview(autoReview) && opts.trust !== false && config.trust.length > 0;
+    return { knobs, drafts, drafting: anyAutoReview(autoReview), notifyOn, announcing };
   }
 
   /** Everything a poll writes is the poll's — including the reviews it starts,
@@ -928,7 +941,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // or the knobs), so a broken file skips the tick loudly instead of
       // proceeding on guessed defaults.
       const config = await loadConfig();
-      const { knobs, autoReview, notifyOn, announcing } = applyKnobs(config);
+      const { knobs, drafts, drafting, notifyOn, announcing } = applyKnobs(config);
 
       if (!knobs.poll) {
         // Deliberately off is not an outage — don't leave a stale error up, or
@@ -947,11 +960,16 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       status.awaiting = await classifyAll(refs);
       const { discovered } = await syncQueue(refs);
 
-      if (autoReview) {
-        const { reviewed, skipped, failed } = await reviewAll(refs);
+      if (drafting) {
+        // A repo excepted from auto-review is discovered like any other — it
+        // is in the queue above — and only its run waits for the click.
+        const toDraft = refs.filter(drafts);
+        const onClick = refs.length - toDraft.length;
+        const { reviewed, skipped, failed } = await reviewAll(toDraft);
         status.lastSummary =
           `${refs.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
-          `${failed > 0 ? `, ${failed} failed` : ""}`;
+          `${failed > 0 ? `, ${failed} failed` : ""}` +
+          `${onClick > 0 ? `, ${onClick} waiting for a click` : ""}`;
       } else {
         status.lastSummary = `${refs.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""} (auto-review off)`;
       }
@@ -963,7 +981,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // for the draft — and for a PR nobody is drafting (auto-review off, or a
       // run that failed) it goes out here all the same. `isNews` is the rule,
       // and the cockpit's bell reads the same one.
-      await announce(autoReview, notifyOn);
+      await announce(drafts, notifyOn);
       // Recomputed on the spot rather than left to the next poll: that is
       // minutes away, and the cockpit would spend them deferring to a tap that
       // never came. Recomputed rather than only cleared, so a machine whose

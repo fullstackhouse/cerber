@@ -2679,6 +2679,15 @@ button {
   margin: 20px 0 12px;
 }
 
+.trust-add select {
+  font: inherit;
+  padding: 7px 10px;
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
 .trust-add input {
   flex: 1;
   font: inherit;

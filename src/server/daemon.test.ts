@@ -102,6 +102,7 @@ describe("the awaiting list the daemon publishes", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -307,6 +308,7 @@ describe("draft PRs in the inbox", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -413,6 +415,7 @@ describe("a draft you already answered on GitHub", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -736,6 +739,7 @@ describe("the tap on the machine when a PR lands", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -888,6 +892,7 @@ describe("a review you settled, and were asked for again", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -1251,6 +1256,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
   const daemonKnobs = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -1466,5 +1472,55 @@ describe("when the tap comes, with cerber drafting for you", () => {
     config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
     await pollTimes(2);
     expect(notified).not.toHaveBeenCalled();
+  });
+
+  // A repo excepted from auto-review is still found and listed; only its run
+  // waits for the click — so its arrival is the news, told as it lands.
+  it("leaves a repo set to review-on-click undrafted, and announces it at once", async () => {
+    config.mockResolvedValue({
+      trust: [],
+      daemon: { ...daemonKnobs, autoReviewRepos: { "acme/legacy": false } },
+    });
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, repo: "legacy", number: 9, url: "https://github.com/acme/legacy/pull/9" }]);
+    const status = await pollTimes(1);
+
+    // Polls repeat every 10ms here, so every run is checked, not counted.
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).not.toContain("legacy");
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).toContain("widgets");
+    expect((await loadArtifact("acme/legacy#9"))!.status).toBe("awaiting");
+    expect(status.lastSummary).toContain("1 waiting for a click");
+    expect(status.autoReviewRepos).toEqual({ "acme/legacy": false });
+    expect(notified).toHaveBeenCalledWith(expect.objectContaining({ title: "2 PRs await your review" }));
+  });
+
+  it("drafts a repo set to auto even with auto-review off", async () => {
+    config.mockResolvedValue({
+      trust: [],
+      daemon: { ...daemonKnobs, autoReview: false, autoReviewRepos: { "acme/widgets": true } },
+    });
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, repo: "legacy", number: 9, url: "https://github.com/acme/legacy/pull/9" }]);
+    await pollTimes(1);
+
+    // Polls repeat every 10ms here, so every run is checked, not counted.
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).not.toContain("legacy");
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).toContain("widgets");
+  });
+
+  // The flag turns the default off for the run, not an exception that names a
+  // repo on purpose.
+  it("still drafts a repo set to auto under --no-auto-review", async () => {
+    config.mockResolvedValue({
+      trust: [],
+      daemon: { ...daemonKnobs, autoReviewRepos: { "acme/widgets": true } },
+    });
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, repo: "legacy", number: 9, url: "https://github.com/acme/legacy/pull/9" }]);
+    const handle = startDaemon({ ...options, autoReview: false });
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).not.toContain("legacy");
+    expect(reviewed.mock.calls.map((c) => c[0].repo)).toContain("widgets");
   });
 });

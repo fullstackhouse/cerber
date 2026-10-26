@@ -5,6 +5,7 @@ import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
+import { anyAutoReview } from "../core/autoreview.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
@@ -537,7 +538,10 @@ program
   .option("-H, --host <host>", "host to bind (0.0.0.0 for VPS — requires --token)", "127.0.0.1")
   .option("-t, --token <token>", "require this token on every request (env: CERBER_TOKEN)")
   .option("--no-poll", "don't poll GitHub for PRs awaiting your review (also disables auto-review)")
-  .option("--no-auto-review", "list awaiting PRs but don't review them until you click review")
+  .option(
+    "--no-auto-review",
+    "list awaiting PRs but don't review them until you click review (repos set to true in daemon.autoReviewRepos still draft)",
+  )
   .option("--no-notify", "don't notify this machine when a review is ready for you")
   .option("-d, --daemon", "(deprecated no-op — polling and auto-review are now the default)")
   .option("-i, --interval <minutes>", "poll interval (default: config daemon.intervalMinutes, 5)")
@@ -608,7 +612,8 @@ program
 
       // Trust means "run this PR's code". A human clicking review accepted that
       // per PR; auto-review does it unattended, on whatever lands in the queue.
-      if (opts.poll && d.poll && opts.autoReview && d.autoReview && opts.trust && config.trust.length > 0) {
+      const drafting = anyAutoReview({ autoReview: opts.autoReview && d.autoReview, autoReviewRepos: d.autoReviewRepos });
+      if (opts.poll && d.poll && drafting && opts.trust && config.trust.length > 0) {
         console.log(
           `⚠ ${config.trust.length} trust rule(s) in ${configPath()}: unattended reviews will run commands from ` +
             `matching PRs, with nobody watching. Pass --no-trust to keep every review read-only, ` +

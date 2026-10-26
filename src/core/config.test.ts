@@ -22,6 +22,7 @@ describe("config", () => {
   const DEFAULT_DAEMON = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 3,
@@ -36,6 +37,17 @@ describe("config", () => {
     await fs.mkdir(home, { recursive: true });
     await fs.writeFile(configPath(), '{"daemon": {"autoReview": false}}');
     expect((await loadConfig()).daemon).toEqual({ ...DEFAULT_DAEMON, autoReview: false });
+  });
+
+  it("keeps per-repo auto-review exceptions", async () => {
+    await saveConfig({ daemon: { autoReviewRepos: { "acme/infra": false, "acme/web": true } } });
+    expect((await loadConfig()).daemon.autoReviewRepos).toEqual({ "acme/infra": false, "acme/web": true });
+  });
+
+  it("refuses an auto-review exception that is not owner/repo", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"autoReviewRepos": {"acme": false}}}');
+    await expect(loadConfig()).rejects.toThrow(/autoReviewRepos.acme: expected owner\/repo/);
   });
 
   it("round-trips what the cockpit writes", async () => {

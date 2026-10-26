@@ -32,6 +32,13 @@ function typing(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable === true;
 }
 
+/** The repos that go the other way from the default, counted: " · 2 repos on click". */
+function exceptionsLabel(autoReview: boolean, repos: Record<string, boolean>): string {
+  const against = Object.values(repos).filter((on) => on !== autoReview).length;
+  if (against === 0) return "";
+  return ` · ${against} repo${against === 1 ? "" : "s"} ${autoReview ? "on click" : "auto"}`;
+}
+
 function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
   if (!daemon?.enabled) return null;
   return (
@@ -51,6 +58,7 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         )}
         <span>
           auto-review <b>{daemon.autoReview ? "on" : "off"}</b>
+          {exceptionsLabel(daemon.autoReview, daemon.autoReviewRepos ?? {})}
         </span>
         <span>
           auto-send <b>{daemon.autoSend === "on" ? "on" : "shadow"}</b> ≥{daemon.autoSendThreshold}%

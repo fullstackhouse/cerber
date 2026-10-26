@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, fetchReviews, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
 import { SendKey, useSendKey } from "./sendkey";
 import { useStickyChapters } from "./sticky-chapters";
 import { ThemeChoice, useTheme } from "./theme";
-import { ConfigView } from "./types";
+import { ConfigView, DaemonConfig } from "./types";
 
 const EXAMPLES = [
   { rule: "@acme/*", meaning: "anyone in the acme org" },
@@ -35,6 +35,128 @@ const SEND_KEYS: { choice: SendKey; label: string }[] = [
   { choice: "mod-enter", label: "⌘↵ sends a chat message, Enter starts a new line" },
   { choice: "enter", label: "Enter sends a chat message, Shift+Enter starts a new line" },
 ];
+
+const REPO = /^[\w.-]+\/[\w.-]+$/;
+
+/** How an exception reads, by which way it turns the default. */
+const modeLabel = (auto: boolean) => (auto ? "drafts automatically" : "waits for a click");
+
+/**
+ * Per-repo exceptions to the auto-review switch (`daemon.autoReviewRepos`).
+ * A new exception starts as the opposite of the default, since one that agrees
+ * with it changes nothing. The repos already in the queue are offered as you
+ * type, because that is where the one you want to except came from.
+ */
+function AutoReviewExceptions({
+  daemon,
+  busy,
+  save,
+}: {
+  daemon: DaemonConfig;
+  busy: boolean;
+  save: (repos: Record<string, boolean>) => void;
+}) {
+  const [repo, setRepo] = useState("");
+  const [auto, setAuto] = useState(!daemon.autoReview);
+  const [known, setKnown] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetchReviews()
+      .then((list) => setKnown([...new Set(list.map((r) => `${r.pr.owner}/${r.pr.repo}`))].sort()))
+      .catch(() => {});
+  }, []);
+  // The default flipped under it: keep offering the useful direction.
+  useEffect(() => setAuto(!daemon.autoReview), [daemon.autoReview]);
+
+  const entries = Object.entries(daemon.autoReviewRepos).sort(([a], [b]) => a.localeCompare(b));
+  const name = repo.trim();
+  const valid = REPO.test(name);
+
+  // GitHub ignores case in owner/repo and so does the match, so a second
+  // spelling of the same repo replaces the first rather than sitting beside it.
+  const without = (key: string) =>
+    Object.fromEntries(Object.entries(daemon.autoReviewRepos).filter(([k]) => k.toLowerCase() !== key.toLowerCase()));
+
+  const add = () => {
+    if (busy || !valid) return;
+    save({ ...without(name), [name]: auto });
+    setRepo("");
+  };
+
+  return (
+    <>
+      <h2>Per-repo exceptions</h2>
+      <p className="muted">
+        Every repo not listed here follows the switch above. List a busy repo to keep it to the
+        click, or, with the switch off, one repo you still want drafted.
+      </p>
+      <div className="trust-add">
+        <input
+          value={repo}
+          aria-label="Repository"
+          placeholder="owner/repo"
+          list="auto-review-repos"
+          disabled={busy}
+          onChange={(e) => setRepo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <datalist id="auto-review-repos">
+          {known
+            .filter((k) => !(k.toLowerCase() in lowerKeys(daemon.autoReviewRepos)))
+            .map((k) => (
+              <option key={k} value={k} />
+            ))}
+        </datalist>
+        <select
+          aria-label="What the poll does for this repo"
+          value={auto ? "auto" : "click"}
+          disabled={busy}
+          onChange={(e) => setAuto(e.target.value === "auto")}
+        >
+          <option value="click">{modeLabel(false)}</option>
+          <option value="auto">{modeLabel(true)}</option>
+        </select>
+        <button className="btn" disabled={busy || !valid} onClick={add}>
+          add
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="muted">
+          No exceptions — every repo {daemon.autoReview ? "is drafted automatically" : "waits for a click"}.
+        </p>
+      ) : (
+        <table className="trust-table">
+          <tbody>
+            {entries.map(([key, on]) => (
+              <tr key={key}>
+                <td>
+                  <code>{key}</code>
+                </td>
+                <td className="muted">
+                  {modeLabel(on)}
+                  {on === daemon.autoReview && " — same as the default, so it changes nothing"}
+                </td>
+                <td className="trust-actions">
+                  <button className="btn" disabled={busy} onClick={() => save({ ...daemon.autoReviewRepos, [key]: !on })}>
+                    {on ? "wait for a click" : "draft automatically"}
+                  </button>{" "}
+                  <button className="btn" disabled={busy} onClick={() => save(without(key))}>
+                    remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+const lowerKeys = (repos: Record<string, boolean>) =>
+  Object.fromEntries(Object.keys(repos).map((k) => [k.toLowerCase(), true]));
 
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
@@ -95,6 +217,13 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         />{" "}
         draft a review automatically (off: awaiting PRs wait for a click)
       </label>
+      {config.daemon.poll && (
+        <AutoReviewExceptions
+          daemon={config.daemon}
+          busy={busy}
+          save={(autoReviewRepos) => apply(updateDaemonConfig({ autoReviewRepos }))}
+        />
+      )}
       <p className="muted">
         Interval, concurrency and a repo filter live in <code>{config.path}</code> under{" "}
         <code>daemon</code> — hand-editable, like everything here.

@@ -86,7 +86,9 @@ npx @fullstackhouse/cerber list
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip those
 switches in the cockpit's Settings, which persist in `~/.cerber/config.json`
-and apply on the next poll.
+and apply on the next poll. Settings also takes per-repo exceptions
+(`daemon.autoReviewRepos`): keep a busy repo to the click while the rest are
+drafted, or draft one repo with auto-review otherwise off.
 
 ## Contents
 
@@ -200,7 +202,7 @@ into one popup when several land at once. Ready means *there is something to
 read*: cerber drafts the review itself, so the tap waits for the draft and says
 what it found — "widgets#7 draft ready · requests changes · 2 blockers" — rather
 than walking you back to a row that says "no run yet". A PR nobody is going to
-draft (auto-review off, or a run that failed) is announced as it arrives, since
+draft (auto-review off for its repo, or a run that failed) is announced as it arrives, since
 that is all the news there will be — and if a retry drafts it after all, that is
 new news and you are told. Nothing else is: a PR whose draft you have been told
 about stays quiet however its next re-review ends. The tap comes from the poll, so it reaches

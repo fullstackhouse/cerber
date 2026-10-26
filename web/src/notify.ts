@@ -12,6 +12,7 @@
 // the second when the first was "nobody is drafting this".
 
 import { useEffect, useRef, useState } from "react";
+import { AutoReviewKnobs, autoReviewFor } from "../../src/core/autoreview";
 import { fetchDaemonStatus, fetchReviews } from "./api";
 import { walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
@@ -50,19 +51,29 @@ const write = (key: string, value: string) => {
   }
 };
 
+/** Nobody is drafting anything: what a daemon that is off or idle amounts to. */
+export const NOBODY_DRAFTS: AutoReviewKnobs = { autoReview: false, autoReviewRepos: {} };
+
 /**
- * Whether the daemon is drafting for you, which is what decides whether an
- * undrafted row's arrival is the news or its draft will be.
+ * Which repos the daemon is drafting for you, which is what decides whether an
+ * undrafted row's arrival is the news or its draft will be — per repo, since
+ * `autoReviewRepos` excepts some from the default either way.
  *
  * `null` is a status read that failed, and it answers nothing: taken for a no,
  * it announces a row the daemon is drafting at that moment, records it as seen,
  * and leaves the real draft-ready tap to arrive second — an early popup and a
  * duplicate, from one hiccup. So the last answer that worked stands.
  */
-export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: boolean): boolean {
+export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: AutoReviewKnobs): AutoReviewKnobs {
   if (!daemon) return lastKnown;
-  return Boolean(daemon.enabled && daemon.pollEnabled && daemon.autoReview);
+  if (!daemon.enabled || !daemon.pollEnabled) return NOBODY_DRAFTS;
+  // A server from before the exceptions sends none.
+  return { autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} };
 }
+
+/** `isNews` for a row, with the drafting decision for its own repo. */
+const newsFor = (r: ReviewListItem, drafting: AutoReviewKnobs) =>
+  isNews(r, autoReviewFor(drafting, r.pr.owner, r.pr.repo));
 
 /**
  * Whether this row is news *yet* — the browser half of the rule the daemon
@@ -107,10 +118,10 @@ const newsKey = (r: ReviewListItem) => (drafted(r) ? draftKey(r) : r.key);
 export function arrivals(
   list: ReviewListItem[],
   seen: string[],
-  autoReview: boolean,
+  drafting: AutoReviewKnobs,
 ): ReviewListItem[] {
   const known = new Set(seen);
-  return walkable(list).filter((r) => isNews(r, autoReview) && !known.has(newsKey(r)));
+  return walkable(list).filter((r) => newsFor(r, drafting) && !known.has(newsKey(r)));
 }
 
 /**
@@ -130,14 +141,14 @@ export function arrivals(
  */
 export function announced(
   list: ReviewListItem[],
-  autoReview: boolean,
+  drafting: AutoReviewKnobs,
   before: string[] = [],
 ): string[] {
   const known = new Set(before);
   const inQueue = new Set(walkable(list).map((r) => r.key));
   const out: string[] = [];
   for (const r of list) {
-    if (inQueue.has(r.key) && !isNews(r, autoReview)) {
+    if (inQueue.has(r.key) && !newsFor(r, drafting)) {
       for (const k of [r.key, draftKey(r)]) if (known.has(k)) out.push(k);
       continue;
     }
@@ -321,7 +332,7 @@ export function useArrivalNotifications(): boolean {
    * notice, since a held-back row is not recorded as seen either, so the first
    * successful read announces it properly.
    */
-  const drafting = useRef(true);
+  const drafting = useRef<AutoReviewKnobs>({ autoReview: true, autoReviewRepos: {} });
   const [daemonAnnounces, setDaemonAnnounces] = useState(false);
 
   useEffect(() => {
@@ -337,11 +348,10 @@ export function useArrivalNotifications(): boolean {
           // Whether anything is coming for an undrafted row, which is what says
           // if its arrival is the news or the draft is.
           drafting.current = daemonDrafts(daemon, drafting.current);
-          const autoReview = drafting.current;
           const before = seen.current;
           // Recorded even when we stay quiet, so turning the bell on later
           // announces what arrives next rather than everything already here.
-          seen.current = announced(list, autoReview, before ?? []);
+          seen.current = announced(list, drafting.current, before ?? []);
           write(SEEN, JSON.stringify(seen.current));
           if (!before) return;
           if (notifyState() !== "on") return;
@@ -350,7 +360,7 @@ export function useArrivalNotifications(): boolean {
           if (machineHasIt) return;
           // Looking straight at the queue? The row appearing is the notice.
           if (document.visibilityState === "visible" && document.hasFocus()) return;
-          const n = notice(arrivals(list, before, autoReview));
+          const n = notice(arrivals(list, before, drafting.current));
           if (n) show(n);
         })
         .catch(() => {

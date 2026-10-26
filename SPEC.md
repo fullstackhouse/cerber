@@ -487,6 +487,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `trust` | string[] | `[]` | trust rules, §14.2; each line validated at load |
 | `daemon.poll` | boolean | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | boolean | `true` | draft a review for what the poll finds |
+| `daemon.autoReviewRepos` | record `owner/repo` → boolean | `{}` | per-repo exceptions to `autoReview`, either way (§6.4); keys matched case-insensitively |
 | `daemon.notify` | boolean | `true` | desktop announcements on this machine (§9.8) |
 | `daemon.intervalMinutes` | positive int | `5` | |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
@@ -510,14 +511,29 @@ launch.
 ### 6.3 Reload and Precedence
 
 - The daemon MUST re-read the config on **every poll tick**, so cockpit
-  toggles for `poll` and `autoReview` (and `notify`) apply on the next tick
+  toggles for `poll`, `autoReview`, `autoReviewRepos` (and `notify`) apply on the next tick
   without a restart. `intervalMinutes`, `parallel` and `repos` are captured at
   daemon start and need a restart. Trust rules are re-read by every review run.
 - CLI `--no-poll`, `--no-auto-review`, `--no-notify`, `--no-trust` **cap** the
   config for that process — effective value = flag AND config — and can never
-  re-enable something the config disabled. `--no-source` is the one exception:
+  re-enable something the config disabled. `--no-source` is one exception:
   it sets the default a run starts from, and a per-re-review override exists
-  either way (§16.2).
+  either way (§16.2). `--no-auto-review` is the other: it caps the `autoReview`
+  default only, and a repo set to `true` in `autoReviewRepos` still drafts —
+  an exception names one repo on purpose, and a blanket flag does not outrank it.
+
+### 6.4 Auto-review per Repo
+
+`daemon.autoReview` is the default; `daemon.autoReviewRepos` overrides it for
+the repos it names, in either direction — `false` leaves that repo's PRs
+`awaiting` until the user asks for a draft, `true` drafts them with the default
+off. It is one map rather than an allow list and a deny list, so no repo can be
+on both. Keys MUST be `owner/repo`; anything else fails validation (§6.2). The
+resolution is `autoReviewFor` (`src/core/autoreview.ts`), shared by the daemon
+and the cockpit's bell so both agree on when a PR is news (§9.8). A repo set to
+`false` is still discovered, listed and announced — only the run waits — and
+the daemon never starts one there, including on a new push to a draft the user
+asked for.
 
 ## 7. Severity, Verdict and Confidence
 
@@ -771,7 +787,7 @@ Each tick, in order:
 4. **Sync the queue** (§9.3–9.6): create stubs for new arrivals, archive
    merged/closed PRs, reap dead stubs, file drafts GitHub moved past, and
    reopen settled rows someone has asked about again.
-5. If auto-review is on: run a review for every awaiting PR (bounded by
+5. If auto-review is on for its repo (§6.4): run a review for every awaiting PR (bounded by
    `parallel`; the freshness guard makes already-current drafts free), and
    evaluate auto-send for each *fresh* result (§15).
 6. **Announce** on this machine whatever has become worth coming back for
@@ -974,7 +990,7 @@ back: with auto-review on, a tap on arrival lands on a row that says "no run
 yet", and the moment there is finally something to read would then pass in
 silence. The rule (`isNews`) is that a row is news when its draft is written
 (`ready`), when its run failed, or when it is `awaiting` and **nothing is
-coming** — auto-review off. A settled row, and a PR that is no longer open, are
+coming** — auto-review off for that PR's repo (§6.4). A settled row, and a PR that is no longer open, are
 never news. A run that falls over *before it owns the artifact* (the PR read,
 the diff fetch) MUST be recorded on the row as `failed` by the caller, so that
 "no draft is coming" is a fact on disk rather than one the poll alone knows —

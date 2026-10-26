@@ -5,6 +5,7 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
+import { autoReviewFor } from "../../src/core/autoreview";
 import { DaemonStatus, Filed, FiledReason, Handoff, Reply, ReviewListItem } from "./types";
 
 export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
@@ -467,6 +468,18 @@ export function strip(
     };
   }
   if (r.status === "awaiting") {
+    // Said outright when the daemon is not going to draft this repo, rather
+    // than leaving the reader to wait for a run that is never coming.
+    if (
+      daemon?.enabled &&
+      daemon.pollEnabled &&
+      !autoReviewFor({ autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} }, r.pr.owner, r.pr.repo)
+    ) {
+      return {
+        reasoning: `Found by the inbox poll. Auto-review is off for ${r.pr.owner}/${r.pr.repo}, so it waits for you to ask for a draft.`,
+        meta: ["no run yet", "press r to review now"],
+      };
+    }
     return {
       reasoning:
         "Found by the inbox poll, not drafted yet — auto-review was off when it arrived, or it is still queued behind another run.",

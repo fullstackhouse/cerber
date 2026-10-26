@@ -24,6 +24,14 @@ export const DaemonConfigSchema = z.object({
   /** Draft an AI review for whatever lands in the queue. Never sends. */
   autoReview: z.boolean().default(true),
   /**
+   * Per-repo exceptions to `autoReview`, either way: `false` leaves that repo's
+   * PRs waiting for a click, `true` drafts them even with `autoReview` off.
+   * Resolved by `autoReviewFor` in core/autoreview.ts.
+   */
+  autoReviewRepos: z
+    .record(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/repo"), z.boolean())
+    .default({}),
+  /**
    * Tap this machine's notification centre when a PR is worth coming back for
    * — the draft landing, or the arrival itself when nothing is going to be
    * drafted (`isNews` in `core/notify.ts`). The cockpit's bell needs a tab open

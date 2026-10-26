@@ -392,6 +392,15 @@ describe("a draft cerber filed rather than you", () => {
     expect(rowTag(row({ status: "reviewed" }))).toBe("reviewed");
   });
 
+  it("says outright when the poll is not going to draft the row's repo", () => {
+    const waiting = row({ status: "awaiting" });
+    const repo = `${waiting.pr.owner}/${waiting.pr.repo}`;
+    expect(strip(waiting, daemon({ autoReviewRepos: { [repo]: false } })).reasoning).toContain(
+      `Auto-review is off for ${repo}`,
+    );
+    expect(strip(waiting, daemon()).reasoning).toContain("still queued");
+  });
+
   it("says why the row is filed, not what the verdict thought", () => {
     const s = strip(filed(), daemon());
     expect(s.reasoning).toContain("GitHub stopped asking you");
