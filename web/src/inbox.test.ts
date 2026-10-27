@@ -9,12 +9,14 @@ import {
   hiddenAwaitingNote,
   filedOn,
   isArchived,
+  ownLast,
   replyOf,
   replyTag,
   requestTag,
   rowTag,
   shownTab,
   sortReviews,
+  startsOwnGroup,
   strip,
   tabOf,
   verdictCell,
@@ -660,5 +662,48 @@ describe("the queue strip's count of per-repo exceptions", () => {
     expect(exceptionsLabel(true, { "acme/a": false, "acme/b": false, "acme/c": true })).toBe(" · 2 repos on click");
     expect(exceptionsLabel(false, { "acme/a": true })).toBe(" · 1 repo auto");
     expect(exceptionsLabel(true, { "acme/c": true })).toBe("");
+  });
+});
+
+describe("your own PRs in the queue", () => {
+  const theirsReady = row({ id: "acme/web#1", key: "theirs-ready", status: "ready" });
+  const theirsQueued = row({ id: "acme/web#2", key: "theirs-queued", status: "awaiting" });
+  const mineReady = row({ id: "acme/web#3", key: "mine-ready", status: "ready", own: true });
+  const mineQueued = row({ id: "acme/web#4", key: "mine-queued", status: "awaiting", own: true });
+  const list = [mineReady, theirsQueued, mineQueued, theirsReady];
+
+  it("lists them after every PR awaiting you, in every live tab and on the walk", () => {
+    const b = bucket(list, daemon());
+    expect(b.inbox.map((r) => r.key)).toEqual(["theirs-ready", "theirs-queued", "mine-ready", "mine-queued"]);
+    expect(b.awaiting.map((r) => r.key)).toEqual(["theirs-queued", "mine-queued"]);
+    expect(b.drafted.map((r) => r.key)).toEqual(["theirs-ready", "mine-ready"]);
+    // The ‹ › arrows walk the same order the table draws.
+    expect(walkable(list).map((r) => r.key)).toEqual(b.inbox.map((r) => r.key));
+  });
+
+  it("heads the group once, at its first row", () => {
+    const rows = ownLast(list);
+    expect(rows.map((_, i) => startsOwnGroup(rows, i))).toEqual([false, false, true, false]);
+    // An inbox holding only your own PRs still says whose they are.
+    expect(startsOwnGroup([mineQueued], 0)).toBe(true);
+    expect(startsOwnGroup([theirsReady], 0)).toBe(false);
+  });
+
+  it("says an undrafted one waits for you to ask, and that it sends as a comment", () => {
+    const s = strip(mineQueued, daemon());
+    expect(s.reasoning).toContain("Your own PR");
+    expect(s.reasoning).toContain("comment");
+    expect(s.meta).toContain("press r to review now");
+  });
+
+  it("never offers a drafted one as an auto-send candidate", () => {
+    const meta = strip(mineReady, daemon()).meta;
+    expect(meta).toContain("your PR — sends as a comment");
+    expect(meta.join(" ")).not.toContain("auto-send");
+    expect(strip(theirsReady, daemon()).meta.join(" ")).toContain("auto-send candidate");
+  });
+
+  it("treats a row from a server too old to say as somebody else's", () => {
+    expect(ownLast([row({ key: "a" }), row({ key: "b", own: undefined })]).map((r) => r.key)).toEqual(["a", "b"]);
   });
 });

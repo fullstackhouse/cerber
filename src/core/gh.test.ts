@@ -212,7 +212,8 @@ describe("lastMentionOfYou", () => {
     expect(lastMentionOfYou([], "me")).toBeNull();
   });
 });
-import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
+import { ghErrorDetail, parsePrRef, searchAwaitingArgs, searchPrsArgs } from "./gh.js";
+import { isOwnPr } from "./own.js";
 
 describe("latestOwnReview", () => {
   const r = (author: string, at: string | null, state: string) => ({
@@ -316,6 +317,40 @@ describe("parsePrRef", () => {
 
   it("rejects garbage", () => {
     expect(() => parsePrRef("what is this")).toThrow(/Cannot parse/);
+  });
+});
+
+describe("searchPrsArgs", () => {
+  it("asks the same question both ways, one qualifier apart", () => {
+    const awaiting = searchPrsArgs("review-requested", "acme/widgets", 10);
+    const authored = searchPrsArgs("author", "acme/widgets", 10);
+    expect(awaiting).toContain("--review-requested=@me");
+    expect(authored).toContain("--author=@me");
+    expect(authored).not.toContain("--review-requested=@me");
+    // Everything else — open only, archived repos out, the repo filter, the
+    // fields the queue needs — is shared, so the two cannot drift apart.
+    const rest = (args: string[]) => args.filter((a) => !a.startsWith("--review-requested") && !a.startsWith("--author"));
+    expect(rest(authored)).toEqual(rest(awaiting));
+    expect(authored).toContain("archived:false");
+    expect(authored).toContain("--state=open");
+  });
+
+  it("is what the CLI's --awaiting-me still asks — review requests only", () => {
+    expect(searchAwaitingArgs("acme/widgets", 10)).toEqual(searchPrsArgs("review-requested", "acme/widgets", 10));
+  });
+});
+
+describe("isOwnPr", () => {
+  it("matches the PR's author against your login, case-insensitively", () => {
+    expect(isOwnPr({ author: "jtomaszewski" }, "jtomaszewski")).toBe(true);
+    expect(isOwnPr({ author: "JTomaszewski" }, "jtomaszewski")).toBe(true);
+    expect(isOwnPr({ author: "someone" }, "jtomaszewski")).toBe(false);
+  });
+
+  it("claims nothing without a login or an author", () => {
+    expect(isOwnPr({ author: "me" }, null)).toBe(false);
+    expect(isOwnPr({ author: "" }, "")).toBe(false);
+    expect(isOwnPr({ author: "" }, "me")).toBe(false);
   });
 });
 

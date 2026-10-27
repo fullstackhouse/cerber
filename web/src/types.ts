@@ -37,6 +37,13 @@ export interface ReviewListItem {
    * must not silence the bell.
    */
   announceable?: boolean;
+  /**
+   * A PR you opened yourself. Listed under "your PRs", below the ones awaiting
+   * you; never drafted or announced unasked; sent as a comment only, because
+   * GitHub takes no approve or change request from a PR's author. Optional:
+   * a server too old to send it has no own PRs in its inbox.
+   */
+  own?: boolean;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;

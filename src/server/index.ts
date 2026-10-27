@@ -17,6 +17,7 @@ import {
   artifactKey,
 } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
+import { isOwnPr } from "../core/own.js";
 import {
   currentLogin,
   fetchAssignableUsers,
@@ -40,6 +41,7 @@ import {
   buildReviewPayload,
   computeCalibration,
   describeReplyFailures,
+  ownPrRefusal,
   recordReplies,
 } from "../core/send.js";
 import { raisedChanged, rewriteFinding, startRaisedCheck } from "../core/raised.js";
@@ -316,6 +318,9 @@ export async function buildApp(
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();
+    // Cached for the process after the first answer; a gh that cannot say
+    // marks nothing as yours rather than failing the whole list.
+    const me = await currentLogin().catch(() => null);
     return c.json(
       artifacts.map((a) => ({
         id: a.id,
@@ -354,6 +359,9 @@ export async function buildApp(
         // rows the daemon deliberately stays silent about, and the two bells
         // would stop telling one story.
         announceable: a.notified !== undefined,
+        // A PR you opened: listed apart from the ones awaiting you, and sent
+        // as a comment only (`ownPrRefusal`).
+        own: isOwnPr(a.pr, me),
         costUsd: a.run?.costUsd ?? null,
         withSource: a.run?.withSource ?? null,
         trusted: a.run?.trusted ?? null,
@@ -1021,6 +1029,13 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     if (artifact.sent) {
       return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    }
+    // Only a comment on your own PR. The cockpit offers nothing else there, so
+    // this is for a stale tab or a direct call; the login is only asked for
+    // when the event could be refused.
+    if (event !== "COMMENT") {
+      const refusal = ownPrRefusal(artifact.pr, event, await currentLogin().catch(() => null));
+      if (refusal) return c.json({ error: refusal }, 400);
     }
     // Not while a run is rewriting this draft. Vouching for a review that is
     // being replaced under you is reason enough on its own; on top of that the

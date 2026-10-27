@@ -1,4 +1,5 @@
 import { Artifact } from "./artifact.js";
+import { isOwnPr } from "./own.js";
 import { sendTreatment } from "./raised.js";
 
 export interface AutoSendDecision {
@@ -16,9 +17,24 @@ export interface AutoSendDecision {
  * there to decide, and the default is the side that posts less. A reply into
  * someone's thread is never auto-sent — that is a decision only a person makes,
  * and auto-send posts one review and nothing else.
+ *
+ * Never on your own PR. GitHub refuses an approve from a PR's author, and the
+ * poll never drafts one of yours to begin with — this is the line that holds
+ * if anything ever does. `login` is who you are; null is "gh could not say",
+ * and a post nobody is watching does not go out on a guess.
  */
-export function evaluateAutoSend(artifact: Artifact, threshold: number): AutoSendDecision {
+export function evaluateAutoSend(
+  artifact: Artifact,
+  threshold: number,
+  login: string | null,
+): AutoSendDecision {
   if (artifact.sent) return { eligible: false, reason: "already sent" };
+  if (login === null) {
+    return { eligible: false, reason: "could not ask gh who you are, so whether this PR is your own is unknown" };
+  }
+  if (isOwnPr(artifact.pr, login)) {
+    return { eligible: false, reason: "this is your own PR — GitHub takes no approve from its author" };
+  }
   // The same rule, for a send a re-review has since superseded. `sent` only
   // ever describes the draft on the row, so once one moves to `priorSends`
   // that guard stops seeing it — and "never a re-send" would quietly come to

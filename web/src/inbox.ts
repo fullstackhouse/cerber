@@ -80,13 +80,34 @@ export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
 /** Statuses that mean you have dealt with this review, one way or another. */
 export const SETTLED = ["sent", "reviewed", "skipped"];
 
+/** A PR you opened yourself (`own` on the row — the server knows your login). */
+export const isOwn = (r: ReviewListItem) => r.own === true;
+
+/**
+ * The same list with your own PRs moved after everybody else's, each half in
+ * the order it had.
+ *
+ * Your own PRs are in the inbox for a self-review whenever you want one; the
+ * rest are there because somebody is waiting on you. So the waiting comes
+ * first — in the table, under the cursor, and on the ‹ › walk — and yours
+ * follow as a group of their own (`startsOwnGroup`).
+ */
+export function ownLast(list: ReviewListItem[]): ReviewListItem[] {
+  return [...list.filter((r) => !isOwn(r)), ...list.filter(isOwn)];
+}
+
+/** Whether row `i` is the first of your own PRs — where the table draws the
+ *  "your PRs" heading. */
+export const startsOwnGroup = (rows: ReviewListItem[], i: number) =>
+  isOwn(rows[i]!) && (i === 0 || !isOwn(rows[i - 1]!));
+
 /**
  * The reviews the ‹ › arrows walk: open PRs that still want something from you.
  * A sent review is a record and a skipped one is a decision, so walking past
  * either would be walking backwards.
  */
 export function walkable(list: ReviewListItem[]): ReviewListItem[] {
-  return sortReviews(list.filter((r) => !isArchived(r) && !SETTLED.includes(r.status)));
+  return ownLast(sortReviews(list.filter((r) => !isArchived(r) && !SETTLED.includes(r.status))));
 }
 
 /**
@@ -139,7 +160,9 @@ export const isHiddenAwaiting = (r: ReviewListItem, hidden: ReviewListItem[]) =>
  */
 export function bucket(all: ReviewListItem[], daemon: DaemonStatus | null): Record<Tab, ReviewListItem[]> {
   const open = all.filter((r) => !isArchived(r));
-  const live = sortReviews(open.filter((r) => !SETTLED.includes(r.status)));
+  // Your own PRs after the rest, in every live tab — the order the table
+  // draws them in, under their own heading.
+  const live = ownLast(sortReviews(open.filter((r) => !SETTLED.includes(r.status))));
   return {
     inbox: live,
     awaiting: live.filter((r) => tabOf(r) === "awaiting"),
@@ -475,6 +498,14 @@ export function strip(
       meta: [`started ${ageLabel(r.updatedAt, now)} ago`, readMode(r)],
     };
   }
+  if (r.status === "awaiting" && isOwn(r)) {
+    return {
+      reasoning:
+        "Your own PR. Cerber never drafts these on its own — ask for a self-review when you want one. " +
+        "Send posts it as a comment: GitHub takes no approve or change request from a PR's author.",
+      meta: ["no run yet", "press r to review now"],
+    };
+  }
   if (r.status === "awaiting") {
     // Said outright when the daemon is not going to draft this repo, rather
     // than leaving the reader to wait for a run that is never coming.
@@ -536,8 +567,11 @@ export function strip(
   else if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
   meta.push(commentsPart(r));
+  // Your own PR is never auto-sent, and Send posts it as a comment whatever
+  // the verdict says — the one fact about this row the verdict cannot tell you.
+  if (isOwn(r)) meta.push("your PR — sends as a comment");
   // Auto-send is approve-only, so the bar is only news on an approve verdict.
-  if (daemon?.enabled && r.status === "ready" && r.verdict?.recommendation === "approve") {
+  else if (daemon?.enabled && r.status === "ready" && r.verdict?.recommendation === "approve") {
     meta.push(
       r.verdict.confidence >= daemon.autoSendThreshold
         ? `auto-send candidate at ${r.verdict.confidence}%`

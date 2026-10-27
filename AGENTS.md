@@ -113,7 +113,10 @@ left unwritten. Code and tests win when they disagree.
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
   auto-review is off for its repo (`daemon.autoReview`, overridden per repo
-  either way by `daemon.autoReviewRepos` — `core/autoreview.ts`), archives merged/closed PRs, and files a draft
+  either way by `daemon.autoReviewRepos` — `core/autoreview.ts`). Your own
+  open PRs come in through a second `author:@me` search and are never drafted,
+  announced, filed, reopened or auto-sent, and Send takes only a comment there
+  (`isOwnPr` in `core/own.ts`; `docs/lifecycle.md` §5). It archives merged/closed PRs, and files a draft
   under settled once GitHub has moved past it without cerber's help. Three
   reasons, most-telling first (`filed.reason`): you submitted a review there
   (`fetchOwnReview`), you commented and nobody has answered since

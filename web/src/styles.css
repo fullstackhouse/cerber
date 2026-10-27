@@ -635,6 +635,17 @@ button {
   border-bottom: 1px solid var(--line-2);
 }
 
+/* The heading over your own PRs, below the ones awaiting you. Set like the
+   table head, so it reads as structure rather than as one more row. */
+.group-head {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 18px 10px 7px;
+  border-bottom: 1px solid var(--line-2);
+}
+
 .row {
   font-size: 12px;
   padding: 8px 10px;

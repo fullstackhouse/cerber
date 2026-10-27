@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
@@ -16,6 +16,7 @@ import {
   requestTag,
   rowTag,
   shownTab,
+  startsOwnGroup,
   strip,
   verdictCell,
 } from "./inbox";
@@ -496,15 +497,27 @@ export function Queue() {
               )}
             </div>
           ) : (
-            rows.map((r) => (
-              <Row
-                key={r.key}
-                r={r}
-                selected={r.key === selected?.key}
-                onSelect={() => setCursor(r.key)}
-                onOpen={() => openReview(r.key)}
-                awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-              />
+            rows.map((r, i) => (
+              <Fragment key={r.key}>
+                {/* Your own PRs follow the ones awaiting you, under a heading
+                    of their own: nobody is waiting on you for these. Only in
+                    the live tabs — the filed ones are records, in date order. */}
+                {INBOX_TABS.includes(tab) && startsOwnGroup(rows, i) && (
+                  <div
+                    className="group-head"
+                    title="PRs you opened. Never drafted on their own — press r for a self-review. Send posts it as a comment."
+                  >
+                    your PRs
+                  </div>
+                )}
+                <Row
+                  r={r}
+                  selected={r.key === selected?.key}
+                  onSelect={() => setCursor(r.key)}
+                  onOpen={() => openReview(r.key)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
+                />
+              </Fragment>
             ))
           )}
 

@@ -52,7 +52,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
 
 describe("evaluateAutoSend", () => {
   it("accepts a high-confidence approve", () => {
-    expect(evaluateAutoSend(makeArtifact(), 90).eligible).toBe(true);
+    expect(evaluateAutoSend(makeArtifact(), 90, "me").eligible).toBe(true);
   });
 
   it("rejects a PR you already sent a review on, however good the draft", () => {
@@ -64,14 +64,14 @@ describe("evaluateAutoSend", () => {
     const a = makeArtifact({
       priorSends: [{ at: "2026-08-20T09:00:00Z", event: "COMMENT", url: "u", auto: false }],
     });
-    const d = evaluateAutoSend(a, 90);
+    const d = evaluateAutoSend(a, 90, "me");
     expect(d.eligible).toBe(false);
     expect(d.reason).toContain("already sent");
   });
 
   it("rejects below the threshold", () => {
     const a = makeArtifact({ verdict: { recommendation: "approve", confidence: 89, reasoning: "" } });
-    const d = evaluateAutoSend(a, 90);
+    const d = evaluateAutoSend(a, 90, "me");
     expect(d.eligible).toBe(false);
     expect(d.reason).toContain("89");
   });
@@ -79,7 +79,7 @@ describe("evaluateAutoSend", () => {
   it("rejects non-approve verdicts regardless of confidence", () => {
     for (const rec of ["comment", "request_changes"] as const) {
       const a = makeArtifact({ verdict: { recommendation: rec, confidence: 99, reasoning: "" } });
-      expect(evaluateAutoSend(a, 90).eligible).toBe(false);
+      expect(evaluateAutoSend(a, 90, "me").eligible).toBe(false);
     }
   });
 
@@ -89,7 +89,7 @@ describe("evaluateAutoSend", () => {
       severity: "blocker" as const, origin: "ai" as const, status: "draft" as const,
       editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null,
     };
-    const d = evaluateAutoSend(makeArtifact({ comments: [finding] }), 90);
+    const d = evaluateAutoSend(makeArtifact({ comments: [finding] }), 90, "me");
     expect(d.eligible).toBe(false);
     expect(d.reason).toContain("blocker");
   });
@@ -101,10 +101,10 @@ describe("evaluateAutoSend", () => {
       originalLine: null, drifted: false, alreadyRaised: null,
     });
     expect(
-      evaluateAutoSend(makeArtifact({ comments: [c("blocker", "dropped")] }), 90).eligible,
+      evaluateAutoSend(makeArtifact({ comments: [c("blocker", "dropped")] }), 90, "me").eligible,
     ).toBe(true);
     expect(
-      evaluateAutoSend(makeArtifact({ comments: [c("minor", "draft"), c("nit", "draft")] }), 90)
+      evaluateAutoSend(makeArtifact({ comments: [c("minor", "draft"), c("nit", "draft")] }), 90, "me")
         .eligible,
     ).toBe(true);
   });
@@ -120,13 +120,13 @@ describe("evaluateAutoSend", () => {
         decision: null, replied: null, others: [],
       },
     };
-    const d = evaluateAutoSend(makeArtifact({ comments: [dup] }), 90);
+    const d = evaluateAutoSend(makeArtifact({ comments: [dup] }), 90, "me");
     expect(d.eligible).toBe(true);
     expect(d.reason).toContain("1 finding(s) already raised by another reviewer left out");
 
     // A reply is a person's decision to answer somebody; auto-send never posts one.
     const reply = { ...dup, alreadyRaised: { ...dup.alreadyRaised, decision: "reply" as const } };
-    const r = evaluateAutoSend(makeArtifact({ comments: [reply] }), 90);
+    const r = evaluateAutoSend(makeArtifact({ comments: [reply] }), 90, "me");
     expect(r.eligible).toBe(false);
     expect(r.reason).toContain("only a human Send posts replies");
   });
@@ -137,30 +137,46 @@ describe("evaluateAutoSend", () => {
         raisedCheck: { at: "t", checkingSince: null, remarks: [], findings: [], error: "gh: rate limited" },
       }),
       90,
+      "me",
     );
     expect(d.eligible).toBe(false);
     expect(d.reason).toContain("gh: rate limited");
   });
 
   it("waits for a human when the check never ran, or has not finished", () => {
-    const never = evaluateAutoSend(makeArtifact({ raisedCheck: null }), 90);
+    const never = evaluateAutoSend(makeArtifact({ raisedCheck: null }), 90, "me");
     expect(never.eligible).toBe(false);
     expect(never.reason).toContain("has not finished");
     const running = makeArtifact({
       raisedCheck: { at: "t", checkingSince: "t2", remarks: [], findings: [], error: null },
     });
-    expect(evaluateAutoSend(running, 90).eligible).toBe(false);
+    expect(evaluateAutoSend(running, 90, "me").eligible).toBe(false);
+  });
+
+  it("never fires on your own PR, however clean the approve", () => {
+    // GitHub refuses an approve from the author; nobody is watching to see it fail.
+    const d = evaluateAutoSend(makeArtifact(), 90, "a");
+    expect(d.eligible).toBe(false);
+    expect(d.reason).toContain("your own PR");
+    // Logins are case-insensitive on GitHub.
+    expect(evaluateAutoSend(makeArtifact(), 90, "A").eligible).toBe(false);
+  });
+
+  it("does not post on a guess when gh could not say who you are", () => {
+    const d = evaluateAutoSend(makeArtifact(), 90, null);
+    expect(d.eligible).toBe(false);
+    expect(d.reason).toContain("who you are");
   });
 
   it("rejects already-sent and non-ready artifacts", () => {
     expect(
       evaluateAutoSend(
         makeArtifact({ sent: { at: "x", event: "APPROVE", url: null, auto: false } }),
-        90,
+         90, "me",
       ).eligible,
     ).toBe(false);
-    expect(evaluateAutoSend(makeArtifact({ status: "failed" }), 90).eligible).toBe(false);
-    expect(evaluateAutoSend(makeArtifact({ verdict: null }), 90).eligible).toBe(false);
+    expect(evaluateAutoSend(makeArtifact({ status: "failed" }), 90, "me").eligible).toBe(false);
+    expect(evaluateAutoSend(makeArtifact({ verdict: null }), 90, "me").eligible).toBe(false);
   });
 });
 

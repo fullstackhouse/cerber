@@ -783,9 +783,13 @@ Each tick, in order:
    requested from the current user (one search per repo filter, or one global;
    results deduplicated by artifact id; draft PRs included — an explicit
    request is an explicit request; archived repos excluded because a review
-   there could never be sent).
+   there could never be sent). The same search is run a second time with
+   `author:@me` for the user's own open PRs (§9.10), its results appended
+   after the review requests and deduplicated with them — only when the
+   current login is known.
 3. **Classify** whose move each awaiting PR is (§9.7) and publish the list on
-   the daemon status.
+   the daemon status. The user's own PRs are not on it: nobody is asking for
+   them.
 4. **Sync the queue** (§9.3–9.6): create stubs for new arrivals, archive
    merged/closed PRs, reap dead stubs, file drafts GitHub moved past, and
    reopen settled rows someone has asked about again.
@@ -804,7 +808,8 @@ awaits you".
 
 A newly discovered PR gets a stub artifact: `status: "awaiting"`, the search
 result's PR fields, everything else empty. The stub is schema-valid, and its
-`notified: null` opens the announcement ledger (§9.8).
+`notified: null` opens the announcement ledger (§9.8) — except on the user's
+own PR, whose stub carries no `notified` at all (§9.10).
 
 ### 9.3 Pure Stubs and Reaping
 
@@ -1095,6 +1100,29 @@ Any failure of the above — no `osacompile`, a refused write, a timeout — MUS
 fall back to the plain `osascript` notification, which cannot be clicked
 usefully but still says what arrived. The build is attempted at most once per
 process, so a machine that cannot build one does not pay a timeout per arrival.
+
+### 9.10 Your Own PRs
+
+GitHub does not let anyone request a review from a PR's author, so the review
+-request search can never return the user's own PRs. They come in through the
+second search of §9.1 and are in the inbox for a **self-review on demand**.
+"Own" is derived, never stored: `pr.author` equals the current login,
+case-insensitively (`isOwnPr`); an unknown login or an empty author is not
+own. On an own PR:
+
+- the poll MUST NOT draft it, whatever auto-review says for its repo (§6.4) —
+  it waits for the user's click;
+- it MUST NOT be announced by either bell: its stub opens no ledger, so it is
+  absent (§9.8) — and stays absent after a draft the user asks for;
+- it is never filed (§9.5) and never reopened (§9.6): both read the user's own
+  activity, or comments naming them, as an answer to a review request, and on
+  their own PR there is no request to answer. A skip stands until undone;
+- it leaves the inbox the way every PR does: merged or closed, it drops out of
+  the search and is archived (§9.3–9.4);
+- Send MUST accept only `COMMENT` (§14.4), and auto-send MUST NOT fire (§15.2).
+
+`cerber review --awaiting-me` runs the review-request search alone — it reviews
+everything it finds, so it MUST NOT pick up the user's own PRs.
 
 ## 10. Checkout Management
 
@@ -1420,8 +1448,8 @@ re-finds a previously drifted line un-drifts it.
 All GitHub access shells out to `gh` with an **argument array, never a shell
 string** — a shell interpolation carrying PR-sourced text is a
 specification-level defect. Auth is entirely `gh`'s. Reads used: PR view, PR
-diff, review-request search (`--review-requested=@me`, open, non-archived,
-limit 50), issue-comment pagination, PR review listing, review-request
+diff, review-request and own-PR searches (`--review-requested=@me` /
+`--author=@me`, open, non-archived, limit 50 each), issue-comment pagination, PR review listing, review-request
 listing, the review-request timeline (GraphQL, one call, for the reopen check
 of §9.6), the PR's review threads with their resolution state and its review
 bodies (GraphQL, one call, last 100 of each, for §14.7), org/team membership probes, current login (cached per process,
@@ -1467,6 +1495,12 @@ inline comments in a single request, no retry, no partial send. Reachable from
 exactly four places, every one of them a human act: the cockpit send (requires `confirm: true` in the request), `cerber
 send` (interactive `[y/N]` unless `--yes`), daemon auto-send (§15), and a
 handoff asked to carry the draft (§14.6 — this same composition, always COMMENT).
+
+On the user's own PR (§9.10) only `COMMENT` may be sent: the cockpit offers
+nothing else there and says why, `cerber send` defaults to it, and both refuse
+`APPROVE` and `REQUEST_CHANGES` before anything reaches GitHub (the server with
+`400`) — GitHub refuses both from a PR's author. A login `gh` cannot supply
+refuses nothing; GitHub is then the last word.
 
 A Send MAY carry **replies** besides the review: one `POST
 …/pulls/N/comments/{replyTo}/replies` per finding the user marked "reply in
@@ -1748,17 +1782,19 @@ re-logged. All of, in order, first failure terminal:
 
 1. never sent before — neither `sent` nor a `priorSends` record a re-review
    superseded (§8.3); no re-sends, on this draft or on this PR;
-2. status `ready`;
-3. a verdict exists;
-4. recommendation is `approve` — `comment` and `request_changes` always wait
+2. the current login is known and the PR is not the user's own (§9.10) — a
+   post nobody watches does not go out on a guess;
+3. status `ready`;
+4. a verdict exists;
+5. recommendation is `approve` — `comment` and `request_changes` always wait
    for a human, at any confidence;
-5. zero non-dropped blocker findings standing (an approve over a live blocker
+6. zero non-dropped blocker findings standing (an approve over a live blocker
    is a contradiction a human resolves);
-6. confidence ≥ threshold (equality is eligible);
-7. no finding marked "reply in their thread" (§14.7) — a reply is a person's
+7. confidence ≥ threshold (equality is eligible);
+8. no finding marked "reply in their thread" (§14.7) — a reply is a person's
    decision to answer somebody, and auto-send posts one review and nothing
    else;
-8. the check for already-raised findings finished cleanly — `raisedCheck`
+9. the check for already-raised findings finished cleanly — `raisedCheck`
    present, `at` set, `checkingSince` and `error` null. Nobody is watching an
    auto-send, so a check that never ran, is still running or failed must not
    read as one that found nothing.
@@ -1852,6 +1888,10 @@ settled: **inbox** = live; **awaiting** = live with status
 **archived** = everything closed/merged. Filed tabs appear only while
 non-empty; a tab that empties under the user falls back to the inbox.
 
+In the live tabs the user's own PRs (§9.10; the list carries `own` per row,
+computed by the server from the cached login) follow every other row, under a
+heading of their own — "your PRs" — each half keeping the status order.
+
 ### 17.2 Open Requests
 
 The daemon's published awaiting list (§9.1) drives one more tab: rows GitHub
@@ -1868,7 +1908,7 @@ who has it now rather than with the whose-move label.
 
 A single definition — non-archived, non-settled, status-ordered
 (`ready, awaiting, running, failed, reviewed, skipped, sent`, newest first
-within a band) — MUST back the prev/next walk, the arrival bell and the
+within a band), the user's own PRs last (§17.1) — MUST back the prev/next walk, the arrival bell and the
 favicon dot. These are one invariant, not three coincidences: the dot on the
 tab, the popup, and the arrows all answer "what still wants me?".
 
@@ -1910,8 +1950,9 @@ one notification. The bell MUST stand down when the daemon announces
 arrivals on this same machine (daemon says notify works AND the cockpit is
 served from loopback) — one PR is one popup — and a non-loopback cockpit
 keeps ringing, since that machine's tap lands where nobody is looking. The
-favicon shows a dot exactly while the walkable set is non-empty, re-derived
-on every queue fetch so no screen can leave it stale.
+favicon shows a dot exactly while the walkable set holds a row other than an
+undrafted own PR (§9.10) — those wait on nobody, for as long as they are open —
+re-derived on every queue fetch so no screen can leave it stale.
 
 ### 17.5 The Walkthrough
 
@@ -2163,11 +2204,14 @@ tick():
   config = load_config()                  # throws loudly if invalid
   if not config.daemon.poll and cli_poll:
       publish awaiting=[]; return
-  refs = dedupe(search_awaiting(each repo filter))
-  publish awaiting = classify_whose_move(refs)     # unknown on failure
+  me = current_login() or null
+  refs = dedupe(search_awaiting(each repo filter)
+                ++ (me ? search_authored(each repo filter) : []))
+  asked = [r for r in refs if not own(r, me)]       # §9.10
+  publish awaiting = classify_whose_move(asked)    # unknown on failure
   discovered = sync_queue(refs)           # stubs, reopen, archive, reap, file
   if auto_review:
-      for ref in refs, parallelism P:
+      for ref in asked, parallelism P:
           r = review(ref, trigger=daemon)          # freshness guard inside
           if fresh(r): evaluate_auto_send(r)       # §15
   announce(rows owed a tap that are news now, tell=notify_on)   # §9.8
@@ -2329,6 +2373,10 @@ An implementation conforms when all of the following hold:
       checkout.
 
 **GitHub**
+- [ ] The user's own PRs (§9.10) are discovered by a second search, never
+      drafted, announced, filed or reopened by the poll, never auto-sent, and
+      take only a `COMMENT` from Send; `cerber review --awaiting-me` never
+      picks them up.
 - [ ] `submitReview` is the only write that speaks as a review, gated by
       explicit confirmation or §15's full auto-send predicate; the payload folds
       unanchorable comments and pins `commit_id`; every subprocess uses argv

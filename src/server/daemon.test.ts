@@ -12,6 +12,7 @@ import {
   fetchPrInfo,
   fetchReviewRequests,
   mapSearchResults,
+  searchAuthoredByMe,
   searchAwaitingMe,
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
@@ -21,6 +22,7 @@ import { reviewPr } from "../runner/review.js";
 import {
   DaemonHandle,
   askedAgainAfterSettling,
+  dedupeDiscovered,
   filedByWithdrawnRequest,
   filedByYourAct,
   isPureStub,
@@ -36,6 +38,9 @@ import {
 vi.mock("../core/gh.js", async (orig) => ({
   ...(await orig<typeof import("../core/gh.js")>()),
   searchAwaitingMe: vi.fn(),
+  // Your own PRs: none, unless a test says otherwise. An implementation rather
+  // than a bare mock, so `clearAllMocks` in every suite's setup keeps it.
+  searchAuthoredByMe: vi.fn(async () => []),
   fetchPrInfo: vi.fn(),
   fetchConversation: vi.fn(),
   fetchLastReviewRequest: vi.fn(),
@@ -62,6 +67,7 @@ vi.mock("../runner/review.js", async (orig) => ({
 }));
 
 const search = searchAwaitingMe as Mock;
+const authored = searchAuthoredByMe as Mock;
 const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
@@ -1523,5 +1529,171 @@ describe("when the tap comes, with cerber drafting for you", () => {
       await stopAndDrain(handle);
     }
     expect(reviewed).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Your own open PRs come into the inbox through a second search — GitHub will
+ * not let anyone request a review from a PR's author, so the awaiting search
+ * can never return one — and sit there for a self-review on demand: never
+ * drafted, never announced, never filed or reopened on cerber's own reading of
+ * the conversation, and archived like any other PR once it merges.
+ */
+describe("your own PRs in the inbox", () => {
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    autoReviewRepos: {},
+    notify: true,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
+  const options = {
+    repos: [],
+    intervalMs: 10,
+    parallel: 1,
+    // On, so anything left undrafted was left that way on purpose.
+    autoReview: true,
+    notify: true,
+    autoSend: "on" as const,
+    autoSendThreshold: 90,
+  };
+  const MINE = {
+    ...DISCOVERED,
+    repo: "gadgets",
+    number: 9,
+    title: "feat: my own change",
+    url: "https://github.com/acme/gadgets/pull/9",
+    author: "Me",
+  };
+  const mineId = artifactId(MINE);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-own-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    login.mockResolvedValue("me");
+    conversation.mockResolvedValue([]);
+    ownReview.mockResolvedValue(null);
+    notified.mockResolvedValue(true);
+    search.mockResolvedValue([DISCOVERED]);
+    authored.mockResolvedValue([MINE]);
+    reviewed.mockResolvedValue({ skipped: true });
+  });
+
+  async function pollTimes(polls: number) {
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(polls));
+      return handle.status();
+    } finally {
+      await stopAndDrain(handle);
+    }
+  }
+
+  it("lands as an undrafted, unannounced stub beside the PRs awaiting you", async () => {
+    const status = await pollTimes(1);
+    const mine = await loadArtifact(mineId);
+    expect(mine?.status).toBe("awaiting");
+    // Absent, not null: no bell owes anybody a tap for it.
+    expect(mine && "notified" in mine).toBe(false);
+    expect((await loadArtifact(artifactId(DISCOVERED)))?.notified).toBeNull();
+    // Auto-review is on, and only the PR somebody asked you for was drafted.
+    expect(reviewed).toHaveBeenCalled();
+    expect(reviewed.mock.calls.map((c) => artifactId(c[0]))).not.toContain(mineId);
+    // Nobody is asking you for it, so it is not on the awaiting list the
+    // cockpit's open-requests tab is built from, nor in the awaiting count.
+    expect(status.awaiting.map((a) => a.id)).toEqual([artifactId(DISCOVERED)]);
+    expect(status.lastSummary).toContain("1 awaiting");
+    expect(status.lastSummary).toContain("1 of your own");
+  });
+
+  it("stays drafted-on-demand even in a repo auto-review is on for by exception", async () => {
+    config.mockResolvedValue({
+      trust: [],
+      daemon: { ...daemonKnobs, autoReview: false, autoReviewRepos: { "acme/gadgets": true } },
+    });
+    await pollTimes(1);
+    expect(reviewed).not.toHaveBeenCalled();
+  });
+
+  it("never taps the machine, with auto-review off and nothing coming", async () => {
+    // The case where an ordinary PR is announced as it lands.
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReview: false } });
+    search.mockResolvedValue([]);
+    await pollTimes(2);
+    expect(await loadArtifact(mineId)).not.toBeNull();
+    expect(notified).not.toHaveBeenCalled();
+  });
+
+  it("is not brought in when cerber cannot tell who you are", async () => {
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    await pollTimes(1);
+    expect(authored).not.toHaveBeenCalled();
+    expect(await loadArtifact(mineId)).toBeNull();
+  });
+
+  it("is never filed away by your own activity on it", async () => {
+    // A finished draft of your own PR that has dropped out of the searches
+    // (an index lagging, say) while the PR is still open.
+    await saveArtifact({
+      ...stubArtifact(MINE, true),
+      status: "ready",
+      verdict: { recommendation: "comment", confidence: 70, reasoning: "" },
+      run: {
+        model: null,
+        startedAt: "2026-08-19T00:00:00Z",
+        finishedAt: "2026-08-19T00:05:00Z",
+        costUsd: null,
+        error: null,
+        withSource: true,
+        trusted: false,
+        sessionId: null,
+        trigger: "user",
+        reviewedSha: null,
+      },
+    });
+    authored.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(MINE).pr, state: "OPEN" });
+    // Replying to your PR's review threads posts reviews of yours.
+    ownReview.mockResolvedValue({ state: "COMMENTED", at: "2026-08-20T00:00:00Z", url: null });
+    await pollTimes(1);
+    const mine = await loadArtifact(mineId);
+    expect(mine?.status).toBe("ready");
+    expect(mine?.filed).toBeNull();
+    expect(ownReview).not.toHaveBeenCalled();
+  });
+
+  it("stays skipped when somebody mentions you on it", async () => {
+    await saveArtifact({ ...stubArtifact(MINE, true), status: "skipped", settledAt: "2026-08-19T00:00:00Z" });
+    conversation.mockResolvedValue([
+      { author: "reviewer", at: "2026-08-20T00:00:00Z", body: "@me can you rebase?", bot: false, url: null },
+    ]);
+    lastRequest.mockResolvedValue(null);
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.status).toBe("skipped");
+    expect(lastRequest).not.toHaveBeenCalled();
+  });
+
+  it("is archived once it merges and leaves the search", async () => {
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.state).toBe("OPEN");
+    authored.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(MINE).pr, state: "MERGED" });
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.state).toBe("MERGED");
+  });
+});
+
+describe("dedupeDiscovered", () => {
+  it("keeps the first of each PR, so a review request outranks authorship", () => {
+    const asked = { ...DISCOVERED, title: "from the awaiting search" };
+    const mine = { ...DISCOVERED, title: "from the author search" };
+    const other = { ...DISCOVERED, number: 8 };
+    expect(dedupeDiscovered([asked, mine, other]).map((r) => [r.number, r.title])).toEqual([
+      [7, "from the awaiting search"],
+      [8, DISCOVERED.title],
+    ]);
   });
 });

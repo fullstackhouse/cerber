@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Artifact } from "./artifact.js";
 import { newSideLines } from "./diff.js";
 import { toMarkdown } from "./export.js";
-import { buildReviewPayload, describeReplyFailures, eventForRecommendation, recordReplies } from "./send.js";
+import {
+  buildReviewPayload,
+  defaultSendEvent,
+  describeReplyFailures,
+  eventForRecommendation,
+  ownPrRefusal,
+  recordReplies,
+} from "./send.js";
 import { AlreadyRaised, Comment } from "./artifact.js";
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
@@ -253,5 +260,26 @@ describe("findings somebody else already raised", () => {
   it("says in the export who raised it first", () => {
     const md = toMarkdown(makeArtifact({ comments: [finding("dup", thread())] }));
     expect(md).toContain("Already raised by @a-bot[bot]: same double count");
+  });
+});
+
+describe("ownPrRefusal / defaultSendEvent — your own PR takes a comment only", () => {
+  const theirs = { author: "someone" };
+  const mine = { author: "me" };
+
+  it("refuses an approve or a change request on your own PR, and nothing else", () => {
+    expect(ownPrRefusal(mine, "APPROVE", "me")).toContain("approve");
+    expect(ownPrRefusal(mine, "REQUEST_CHANGES", "me")).toContain("change request");
+    expect(ownPrRefusal(mine, "COMMENT", "me")).toBeNull();
+    expect(ownPrRefusal(theirs, "APPROVE", "me")).toBeNull();
+    // gh could not say who you are: GitHub stays the last word.
+    expect(ownPrRefusal(mine, "APPROVE", null)).toBeNull();
+  });
+
+  it("defaults your own PR to a comment, whatever the verdict", () => {
+    const verdict = { recommendation: "approve" as const, confidence: 90, reasoning: "" };
+    expect(defaultSendEvent({ pr: { ...makeArtifact().pr, author: "me" }, verdict }, "me")).toBe("COMMENT");
+    expect(defaultSendEvent({ pr: makeArtifact().pr, verdict }, "me")).toBe("APPROVE");
+    expect(defaultSendEvent({ pr: makeArtifact().pr, verdict: null }, "me")).toBe("COMMENT");
   });
 });

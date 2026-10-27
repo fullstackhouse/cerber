@@ -10,13 +10,15 @@ import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
-import { PrRef, parsePrRef, postReplies, searchAwaitingMe, submitReview } from "../core/gh.js";
+import { PrRef, currentLogin, parsePrRef, postReplies, searchAwaitingMe, submitReview } from "../core/gh.js";
 import {
   ReviewEvent,
   buildReviewPayload,
   computeCalibration,
+  defaultSendEvent,
   describeReplyFailures,
   eventForRecommendation,
+  ownPrRefusal,
   recordReplies,
 } from "../core/send.js";
 import {
@@ -271,12 +273,17 @@ program
       process.exit(1);
     }
 
-    const event = (
-      opts.event ??
-      (artifact.verdict ? eventForRecommendation(artifact.verdict.recommendation) : "COMMENT")
-    ).toUpperCase() as ReviewEvent;
+    // Your own PR defaults to a comment, the one event GitHub takes from its
+    // author — the same rule the cockpit's send button follows.
+    const me = await currentLogin().catch(() => null);
+    const event = (opts.event ?? defaultSendEvent(artifact, me)).toUpperCase() as ReviewEvent;
     if (!["APPROVE", "COMMENT", "REQUEST_CHANGES"].includes(event)) {
       console.error(`Invalid event: ${event}`);
+      process.exit(1);
+    }
+    const refusal = ownPrRefusal(artifact.pr, event, me);
+    if (refusal) {
+      console.error(`Not sent: ${refusal}.`);
       process.exit(1);
     }
 

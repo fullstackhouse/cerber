@@ -225,7 +225,9 @@ export interface DiscoveredPr extends PrRef {
  * pressed the button, which makes it a review someone is waiting on rather than
  * work-in-progress to leave alone. Filtering drafts here would be redundant with
  * a stronger filter that already ran, and it would contradict the promise the
- * daemon config makes: the inbox holds what awaits you, drafts and all.
+ * daemon config makes: the inbox holds what awaits you, drafts and all. The
+ * `author:@me` search keeps them for a plainer reason: your own draft is where
+ * a self-review is most worth having, and nothing is drafted there unasked.
  */
 export function mapSearchResults(
   raw: {
@@ -709,14 +711,26 @@ export async function fetchPriorRemarks(
   return priorRemarks({ threads: pr.reviewThreads?.nodes ?? [], reviews: pr.reviews?.nodes ?? [] }, people);
 }
 
-export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
+/**
+ * The two questions the inbox asks GitHub, as `gh search prs` qualifiers.
+ *
+ * `review-requested` is the inbox proper: PRs somebody is waiting on you for.
+ * `author` is your own open PRs, which that search can never return — GitHub
+ * will not let anyone request a review from a PR's author — so self-reviewing
+ * one would otherwise mean pasting its URL every time. Both are the same
+ * search with one flag changed, so they cannot drift apart on what "open"
+ * means or which repos are read-only.
+ */
+export type PrSearch = "review-requested" | "author";
+
+export function searchPrsArgs(search: PrSearch, repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",
     "prs",
     // An archived repo is read-only: its PRs can never merge, close, or take a
     // review. Without this they'd sit in the inbox forever — nothing retires them.
     "archived:false",
-    "--review-requested=@me",
+    `--${search}=@me`,
     "--state=open",
     "--limit",
     String(limit),
@@ -727,9 +741,21 @@ export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   return args;
 }
 
+export const searchAwaitingArgs = (repoFilter?: string, limit = 50) =>
+  searchPrsArgs("review-requested", repoFilter, limit);
+
 /** Open PRs where the current gh user's review is requested, drafts included. */
 export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
   const out = await gh(searchAwaitingArgs(repoFilter, limit));
+  return mapSearchResults(JSON.parse(out));
+}
+
+/**
+ * Open PRs the current gh user opened, drafts included. They come to the inbox
+ * to be reviewed on demand and never automatically — see `isOwnPr` (`own.ts`).
+ */
+export async function searchAuthoredByMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
+  const out = await gh(searchPrsArgs("author", repoFilter, limit));
   return mapSearchResults(JSON.parse(out));
 }
 

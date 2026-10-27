@@ -348,6 +348,35 @@ back into the PR you just skipped. The review you have open keeps its place
 whatever you did to it, because it is what the arrows and the "n of m" count
 read their position from, and a send leaves you standing on it.
 
+### Your own PRs
+
+GitHub never asks you to review your own PR — it will not let anyone request a
+review from the author — so the awaiting search cannot find one. The poll runs
+the same search a second time with `author:@me` (`searchAuthoredByMe`,
+`src/core/gh.ts`) and brings your open PRs in for a self-review **when you ask
+for one**. "Yours" is `pr.author` matching your login (`isOwnPr`,
+`src/core/own.ts`); nothing on the artifact records it. On such a row:
+
+- the poll never drafts it, whatever auto-review says for the repo, and never
+  announces it — its stub has no `notified` ledger (`stubArtifact`), so both
+  bells leave it alone, before and after you ask for a draft;
+- it is never filed (replying to your own PR's threads posts reviews of yours,
+  which is not you answering a request) and never reopened (a comment naming
+  the author is the PR's conversation, not an ask). Skip it to hide it; it
+  stays skipped;
+- it is listed after everything else in the live tabs, under a **your PRs**
+  heading, and the arrows walk it last (`ownLast`, `web/src/inbox.ts`). An
+  undrafted one does not light the favicon dot;
+- Send posts a comment and nothing else — GitHub refuses an approve or a change
+  request from the author — and auto-send never fires (`ownPrRefusal`,
+  `src/core/send.ts`; `evaluateAutoSend`);
+- it is not on the daemon's awaiting list, so it never shows under **open
+  requests**.
+
+It leaves the way every PR does: merged or closed, it drops out of the search
+and is archived. `cerber review --awaiting-me` still runs the awaiting search
+alone.
+
 ### Things that remove a row without you touching it
 
 | Cause | Effect | Where |
