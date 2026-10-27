@@ -720,9 +720,8 @@ export type PrSearch = "review-requested" | "author";
  * `author` is your own open PRs, which that search returns only when a team
  * you are on was requested — GitHub will not let anyone request a review from
  * a PR's author — so self-reviewing one would otherwise mean pasting its URL
- * every time. Both are the same
- * search with one flag changed, so they cannot drift apart on what "open"
- * means or which repos are read-only.
+ * every time. Both are the same search with one flag changed, so they cannot
+ * drift apart on what "open" means or which repos are read-only.
  */
 export function searchPrsArgs(search: PrSearch, repoFilter?: string, limit = 50): string[] {
   const args = [
