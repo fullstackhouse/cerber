@@ -391,6 +391,8 @@ export interface DaemonConfig {
   intervalMinutes: number;
   parallel: number;
   repos: string[];
+  /** Your own PRs idle longer than this many days stay out of the inbox; 0/null is off. */
+  ownPrMaxAgeDays?: number | null;
 }
 
 export interface ConfigView {

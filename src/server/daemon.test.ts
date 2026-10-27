@@ -754,6 +754,7 @@ describe("the tap on the machine when a PR lands", () => {
     intervalMinutes: 5,
     parallel: 1,
     repos: [],
+    ownPrMaxAgeDays: 30,
   };
 
   const options = {
@@ -1552,6 +1553,7 @@ describe("your own PRs in the inbox", () => {
     intervalMinutes: 5,
     parallel: 1,
     repos: [],
+    ownPrMaxAgeDays: 30,
   };
   const options = {
     repos: [],
@@ -1731,6 +1733,62 @@ describe("your own PRs in the inbox", () => {
     // The review's date is the review's: a comment on the PR is not a change to it.
     expect(mine?.updatedAt).toBe("2026-08-19T00:05:00.000Z");
     expect(mine?.pr.updatedAt).toBe(MINE.updatedAt);
+  });
+
+  it("asks only for your PRs active within the configured days, and never ages review requests", async () => {
+    await pollTimes(1);
+    const since = authored.mock.calls[0]![1] as string | null;
+    expect(since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const days = (Date.now() - new Date(`${since}T00:00:00Z`).getTime()) / 86_400_000;
+    expect(Math.round(days)).toBeGreaterThanOrEqual(30);
+    expect(Math.round(days)).toBeLessThanOrEqual(31);
+    expect(search.mock.calls[0]).toHaveLength(1);
+
+    vi.clearAllMocks();
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, ownPrMaxAgeDays: 0 } });
+    login.mockResolvedValue("me");
+    authored.mockResolvedValue([MINE]);
+    search.mockResolvedValue([DISCOVERED]);
+    conversation.mockResolvedValue([]);
+    reviewed.mockResolvedValue({ skipped: true });
+    await pollTimes(1);
+    expect(authored.mock.calls[0]![1]).toBeNull();
+  });
+
+  it("drops a stub of yours that went stale — removed, not archived", async () => {
+    await pollTimes(1);
+    expect(await loadArtifact(mineId)).not.toBeNull();
+    // Past the age cut: the author search stops returning it, while it is still open.
+    authored.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(MINE).pr, state: "OPEN" });
+    await pollTimes(1);
+    expect(await loadArtifact(mineId)).toBeNull();
+  });
+
+  it("keeps a drafted row of yours that went stale, as it was", async () => {
+    await saveArtifact({
+      ...stubArtifact(MINE, true),
+      status: "ready",
+      verdict: { recommendation: "comment", confidence: 70, reasoning: "" },
+      run: {
+        model: null,
+        startedAt: "2026-08-19T00:00:00Z",
+        finishedAt: "2026-08-19T00:05:00Z",
+        costUsd: null,
+        error: null,
+        withSource: true,
+        trusted: false,
+        sessionId: null,
+        trigger: "user",
+        reviewedSha: null,
+      },
+    });
+    authored.mockResolvedValue([]);
+    prInfo.mockResolvedValue({ ...stubArtifact(MINE).pr, state: "OPEN" });
+    await pollTimes(1);
+    const mine = await loadArtifact(mineId);
+    expect(mine?.status).toBe("ready");
+    expect(mine?.pr.state).toBe("OPEN");
   });
 
   it("is archived once it merges and leaves the search", async () => {

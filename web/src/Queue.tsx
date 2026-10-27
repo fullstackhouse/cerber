@@ -295,6 +295,11 @@ export function Queue() {
   // The cursor is a review, not a row number: the list re-sorts under it every
   // poll, and the strip below must keep explaining the same PR.
   const [cursor, setCursor] = useState<string | null>(null);
+  // Set when the keyboard moved the cursor, so the row it lands on is scrolled
+  // into view — clear of the sticky strip, whose height `--strip-h` carries.
+  // Not on hover: the pointer is already on the row it selected.
+  const keyMoved = useRef(false);
+  const stripEl = useRef<HTMLDivElement | null>(null);
 
   // Fetches outlive the component; never set state after unmount.
   const alive = useRef(true);
@@ -363,7 +368,10 @@ export function Queue() {
       const at = rows.findIndex((r) => r.key === selected?.key);
       const move = (delta: number) => {
         const next = rows[Math.min(rows.length - 1, Math.max(0, at + delta))];
-        if (next) setCursor(next.key);
+        if (next) {
+          keyMoved.current = true;
+          setCursor(next.key);
+        }
       };
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
@@ -390,6 +398,27 @@ export function Queue() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selected?.key]);
+
+  useEffect(() => {
+    if (!keyMoved.current) return;
+    keyMoved.current = false;
+    document.querySelector(".row-on")?.scrollIntoView({ block: "nearest" });
+  }, [selected?.key]);
+
+  // The strip is sticky at the bottom, so a row scrolled "into view" must clear
+  // it: rows take their bottom scroll margin from its measured height.
+  useEffect(() => {
+    const el = stripEl.current;
+    if (!el) return;
+    const apply = () => document.documentElement.style.setProperty("--strip-h", `${el.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--strip-h");
+    };
+  }, [selected != null]);
 
   if (error && !reviews) return <p className="error">{error}</p>;
   if (!reviews) return <p className="muted pad">Loading…</p>;
@@ -534,7 +563,7 @@ export function Queue() {
           )}
 
           {selected && detail && (
-            <div className="cursor-strip">
+            <div className="cursor-strip" ref={stripEl}>
               <div className="cursor-strip-body">
                 <div className="lab">
                   {selected.pr.owner}/{selected.pr.repo}#{selected.pr.number}

@@ -14,6 +14,7 @@ import {
   fetchReviewRequests,
   lastMentionOfYou,
   lastWordOfYours,
+  ownPrUpdatedSince,
   searchAuthoredByMe,
   searchAwaitingMe,
   stillRequested,
@@ -447,13 +448,20 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * PR decides nothing — a team you are on can be requested on your own PR,
    * and `isOwnPr` reads the author either way.
    */
-  async function discover(me: string | null): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
+  async function discover(
+    me: string | null,
+    ownPrMaxAgeDays: number | null | undefined,
+  ): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
+    // Your own PRs only: a review request is never aged out. One that went
+    // stale leaves the search, and the reaper below drops its stub like any
+    // other the search stopped returning — a draft of yours stays put.
+    const since = ownPrUpdatedSince(ownPrMaxAgeDays);
     const [awaiting, authored] = await Promise.all([
       Promise.all(filters.map((repo) => searchAwaitingMe(repo))),
       me === null
         ? Promise.resolve(null)
-        : Promise.all(filters.map((repo) => searchAuthoredByMe(repo))).catch((err: unknown) => {
+        : Promise.all(filters.map((repo) => searchAuthoredByMe(repo, since))).catch((err: unknown) => {
             log(`could not search for your own PRs: ${err instanceof Error ? err.message : String(err)}`);
             return null;
           }),
@@ -1039,7 +1047,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         return;
       }
 
-      const { refs, ownSearched } = await discover(me);
+      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays);
       // Your own PRs are synced into the queue with the rest, but nobody is
       // asking you for them: they are not "awaiting" in anything the strip
       // counts, and the cockpit's open-requests tab — "GitHub still lists you

@@ -52,6 +52,13 @@ export const DaemonConfigSchema = z.object({
   parallel: z.number().int().positive().default(3),
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
   repos: z.array(z.string()).default([]),
+  /**
+   * Your own PRs with no activity for longer than this many days are left out
+   * of the inbox — applied in the author search itself (`updated:>=`), so they
+   * never arrive and never take a slot of its 50. 0 or null turns the cut off.
+   * Your own PRs only: a review somebody asked you for is never aged out.
+   */
+  ownPrMaxAgeDays: z.number().int().nonnegative().nullable().default(30),
 });
 export type DaemonConfig = z.infer<typeof DaemonConfigSchema>;
 

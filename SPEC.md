@@ -492,6 +492,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `daemon.intervalMinutes` | positive int | `5` | |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
 | `daemon.repos` | string[] | `[]` | `owner/repo` filters; empty = everything `gh` can see |
+| `daemon.ownPrMaxAgeDays` | non-negative int or null | `30` | the user's own PRs idle longer than this stay out (§9.10); `0`/`null` = no cut |
 
 Auto-send has deliberately **no** config-file surface; its mode and threshold
 exist only as CLI flags (§15.1), so enabling it requires a decision at every
@@ -1109,7 +1110,9 @@ process, so a machine that cannot build one does not pay a timeout per arrival.
 GitHub does not let anyone request a review from a PR's author, so the review
 -request search returns the user's own PRs only through a team they belong to
 being requested — never as a request for them. They come in through the second
-search of §9.1 and are in the inbox for a **self-review on demand**. "Own" is
+search of §9.1 — limited to PRs updated within `daemon.ownPrMaxAgeDays` days
+(default 30, an `updated:>=` qualifier; `0`/`null` lifts it; review requests
+are never aged) — and are in the inbox for a **self-review on demand**. "Own" is
 derived from the PR, never from which search found it, and never stored:
 `pr.author` equals the current login, case-insensitively (`isOwnPr`); an
 unknown login or an empty author is not own. On an own PR:

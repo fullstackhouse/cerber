@@ -709,6 +709,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.intervalMinutes` | `5` | |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
+| `daemon.ownPrMaxAgeDays` | `30` | your own PRs idle longer than this many days stay out of the inbox — an `updated:>=` qualifier on the author search, so review requests are never aged. A stub that goes stale is reaped like any the search stopped returning; a draft stays. `0`/`null` = no cut |
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,

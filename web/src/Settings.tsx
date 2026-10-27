@@ -222,8 +222,15 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         />
       )}
       <p className="muted">
-        Interval, concurrency and a repo filter live in <code>{config.path}</code> under{" "}
-        <code>daemon</code> — hand-editable, like everything here.
+        Your own open PRs come in too, under <b>your PRs</b>, for a self-review when you ask —
+        {config.daemon.ownPrMaxAgeDays
+          ? ` except ones idle for more than ${config.daemon.ownPrMaxAgeDays} days`
+          : " all of them, however long idle"}{" "}
+        (<code>ownPrMaxAgeDays</code>; 0 turns the cut off).
+      </p>
+      <p className="muted">
+        Interval, concurrency, a repo filter and that age cut live in <code>{config.path}</code>{" "}
+        under <code>daemon</code> — hand-editable, like everything here.
       </p>
 
       <h1>Notifications</h1>

@@ -724,13 +724,20 @@ export type PrSearch = "review-requested" | "author";
  * every time. Both are the same search with one flag changed, so they cannot
  * drift apart on what "open" means or which repos are read-only.
  */
-export function searchPrsArgs(search: PrSearch, repoFilter?: string, limit = 50): string[] {
+export function searchPrsArgs(
+  search: PrSearch,
+  repoFilter?: string,
+  limit = 50,
+  updatedSince: string | null = null,
+): string[] {
   const args = [
     "search",
     "prs",
     // An archived repo is read-only: its PRs can never merge, close, or take a
     // review. Without this they'd sit in the inbox forever — nothing retires them.
     "archived:false",
+    // Only the author search is ever given one (`ownPrUpdatedSince`).
+    ...(updatedSince ? [`updated:>=${updatedSince}`] : []),
     `--${search}=@me`,
     "--state=open",
     "--limit",
@@ -755,9 +762,26 @@ export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise
  * Open PRs the current gh user opened, drafts included. They come to the inbox
  * to be reviewed on demand and never automatically — see `isOwnPr` (`own.ts`).
  */
-export async function searchAuthoredByMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
-  const out = await gh(searchPrsArgs("author", repoFilter, limit));
+export async function searchAuthoredByMe(
+  repoFilter?: string,
+  updatedSince: string | null = null,
+  limit = 50,
+): Promise<DiscoveredPr[]> {
+  const out = await gh(searchPrsArgs("author", repoFilter, limit, updatedSince));
   return mapSearchResults(JSON.parse(out));
+}
+
+/**
+ * The day your own PRs must have been active on or after to come into the
+ * inbox (`daemon.ownPrMaxAgeDays`), as GitHub's `updated:>=` reads it — or null
+ * for no cut. A PR of yours nobody has touched in months is not one you are
+ * about to self-review, and fifty of them would fill the search's whole page.
+ * A calendar day in UTC: GitHub's qualifier takes a date, and a day either way
+ * at the edge changes nothing anyone would notice.
+ */
+export function ownPrUpdatedSince(days: number | null | undefined, now: Date = new Date()): string | null {
+  if (!days) return null;
+  return new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10);
 }
 
 /**
