@@ -17,8 +17,8 @@ export function eventForRecommendation(rec: Verdict["recommendation"]): ReviewEv
  * Why Send refuses this event on this PR, or null when it may go.
  *
  * Your own PR takes a comment and nothing else: GitHub refuses an approve or a
- * change request from a PR's author, and an error after the click — with the
- * replies half-posted behind it — is a worse place to learn that than here.
+ * change request from a PR's author, and GitHub's error after the click is a
+ * worse place to learn that than here.
  * A login nobody could fetch refuses nothing; GitHub is still the last word.
  */
 export function ownPrRefusal(

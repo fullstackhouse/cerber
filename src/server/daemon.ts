@@ -745,7 +745,9 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           // Otherwise this poll could not look for your own PRs, so "not in
           // the results" says nothing about a stub that may be yours: it
           // stays, rather than being dropped and logged as gone only to
-          // return next poll. Everybody else's is reaped as before.
+          // return next poll. Everybody else's is reaped as before — unless
+          // gh cannot say who you are, when any stub may be yours and every
+          // one waits for a poll that can tell.
         } catch {
           // GitHub unreachable — leave the stub; next poll retries.
         }

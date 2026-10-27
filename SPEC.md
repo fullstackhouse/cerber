@@ -824,7 +824,8 @@ the PR closed or merged, its state is written (→ archived); if it is still
 open, the stub is **deleted** — it held no work, and GitHub no longer asks.
 Search lag at worst re-creates a deleted stub on the next poll. The one stub
 kept is one that may be the user's own (§9.10) on a poll whose own-PR search
-did not run or failed: its absence there says nothing.
+did not run or failed: its absence there says nothing. With the login unknown
+that is every stub, so reaping waits for a poll that knows it.
 
 ### 9.4 Archiving and Rate-Limited State Checks
 
