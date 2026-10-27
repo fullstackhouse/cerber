@@ -1710,6 +1710,29 @@ describe("your own PRs in the inbox", () => {
     expect(await loadArtifact(artifactId({ ...DISCOVERED, number: 8 }))).toBeNull();
   });
 
+  it("carries the PR's own last activity, and keeps it current each poll", async () => {
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.updatedAt).toBe(MINE.updatedAt);
+    authored.mockResolvedValue([{ ...MINE, updatedAt: "2026-09-01T00:00:00Z" }]);
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
+  });
+
+  it("leaves a drafted row's date alone when only its PR's activity moved", async () => {
+    await saveArtifact({
+      ...stubArtifact(MINE, true),
+      status: "ready",
+      updatedAt: "2026-08-19T00:05:00.000Z",
+      verdict: { recommendation: "comment", confidence: 70, reasoning: "" },
+    });
+    authored.mockResolvedValue([{ ...MINE, updatedAt: "2026-09-01T00:00:00Z" }]);
+    await pollTimes(1);
+    const mine = await loadArtifact(mineId);
+    // The review's date is the review's: a comment on the PR is not a change to it.
+    expect(mine?.updatedAt).toBe("2026-08-19T00:05:00.000Z");
+    expect(mine?.pr.updatedAt).toBe(MINE.updatedAt);
+  });
+
   it("is archived once it merges and leaves the search", async () => {
     await pollTimes(1);
     expect((await loadArtifact(mineId))?.pr.state).toBe("OPEN");

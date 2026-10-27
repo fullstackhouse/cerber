@@ -16,6 +16,8 @@ export interface ReviewListItem {
     state?: "OPEN" | "CLOSED" | "MERGED";
     /** A draft still awaiting you: reviewable, but its author hasn't finished. */
     isDraft?: boolean;
+    /** When the PR itself last changed on GitHub. Absent from older servers and rows. */
+    updatedAt?: string;
     additions: number;
     deletions: number;
     changedFiles: number;

@@ -361,6 +361,9 @@ export async function buildApp(
           number: a.pr.number,
           state: a.pr.state,
           isDraft: a.pr.isDraft,
+          // When the PR itself last changed — what an undrafted row is dated
+          // and sorted by in the queue (`activityAt`).
+          updatedAt: a.pr.updatedAt,
           additions: a.pr.additions,
           deletions: a.pr.deletions,
           changedFiles: a.pr.changedFiles,

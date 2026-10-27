@@ -215,6 +215,15 @@ describe("GET /api/reviews/:key — whether it is yours", () => {
   });
 });
 
+describe("GET /api/reviews — the PR's own last activity", () => {
+  it("carries pr.updatedAt when the row has one", async () => {
+    await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), updatedAt: "2026-08-01T00:00:00Z" } });
+    const app = await buildApp({});
+    const rows = (await (await app.request("/api/reviews")).json()) as { id: string; pr: { updatedAt?: string } }[];
+    expect(rows.find((r) => r.id === ID)?.pr.updatedAt).toBe("2026-08-01T00:00:00Z");
+  });
+});
+
 describe("GET /api/reviews — never held up by gh", () => {
   it("answers without the login when gh does not, marking nothing as yours", async () => {
     login.mockReturnValue(new Promise(() => {}));

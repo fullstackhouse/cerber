@@ -1913,10 +1913,12 @@ who has it now rather than with the whose-move label.
 
 A single definition — non-archived, non-settled, status-ordered
 (`ready, awaiting, running, failed, reviewed, skipped, sent`, newest first
-within a band), the user's own PRs last (§17.1) — MUST back the prev/next
-walk, the arrival bell and the favicon dot. These are one invariant, not three
-coincidences: the dot on the tab, the popup, and the arrows all answer "what
-still wants me?". One row is in the walk and answers "nothing": the user's own
+within a band — an `awaiting` row dated by the PR's own last activity
+(`pr.updatedAt`), since its artifact's `updatedAt` is only when the poll found
+it; every other row by the review's), the user's own PRs last (§17.1) — MUST
+back the prev/next walk, the arrival bell and the favicon dot. These are one
+invariant, not three coincidences: the dot on the tab, the popup, and the
+arrows all answer "what still wants me?". One row is in the walk and answers "nothing": the user's own
 PR nobody has drafted (§9.10). The arrows reach it, but neither the bell nor
 the dot counts it — it waits on nobody, for as long as it is open (§17.4).
 

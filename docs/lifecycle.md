@@ -338,7 +338,11 @@ has asked you again since — so its tag names who has it now
 does not send you back into a PR you deliberately passed on.
 
 **Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
-`reviewed`, `skipped`, `sent` — newest first inside each band. The `‹ ›` arrows
+`reviewed`, `skipped`, `sent` — newest first inside each band. "Newest" is
+`activityAt`: an `awaiting` row nobody has drafted is dated by the PR's own last
+activity on GitHub (`pr.updatedAt`, refreshed from every poll's search result),
+because its artifact's `updatedAt` is only when the poll found it; every other
+row by the review. The `upd` column shows the same date. The `‹ ›` arrows
 walk `walkable()`: open, unsettled rows only. That list is fetched once, when
 the review opens — finishing one must not renumber the walk under you — so a
 review you settle *during* the walk (skipped, marked reviewed, or sent) is

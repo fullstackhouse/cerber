@@ -8,6 +8,7 @@ import {
   hiddenAwaiting,
   hiddenAwaitingNote,
   filedOn,
+  activityAt,
   isArchived,
   ownLast,
   replyOf,
@@ -708,5 +709,36 @@ describe("your own PRs in the queue", () => {
     const unsaid = row({ key: "unsaid", own: undefined });
     expect(ownLast([mine, unsaid]).map((r) => r.key)).toEqual(["unsaid", "mine"]);
     expect(startsOwnGroup([unsaid], 0)).toBe(false);
+  });
+});
+
+describe("activityAt — what the upd column and the sort read", () => {
+  const PR_AT = "2026-08-10T09:00:00.000Z";
+  const FOUND_AT = "2026-08-19T12:00:00.000Z";
+
+  it("is the PR's own last activity on a row nobody has drafted", () => {
+    // A stub's updatedAt is only when the poll found it — the same minute for
+    // every row discovered together.
+    const stub = row({ status: "awaiting", updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } });
+    expect(activityAt(stub)).toBe(PR_AT);
+  });
+
+  it("is the review's on a drafted row, and on a stub from a server too old to say", () => {
+    expect(activityAt(row({ status: "ready", updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } }))).toBe(
+      FOUND_AT,
+    );
+    expect(activityAt(row({ status: "awaiting", updatedAt: FOUND_AT }))).toBe(FOUND_AT);
+  });
+
+  it("orders undrafted rows by PR activity, newest first — your PRs and the rest alike", () => {
+    const stub = (key: string, prAt: string, own = false) =>
+      row({ key, status: "awaiting", updatedAt: FOUND_AT, own, pr: { ...row().pr, updatedAt: prAt } });
+    const list = [
+      stub("mine-old", "2026-07-01T00:00:00.000Z", true),
+      stub("theirs-old", "2026-07-02T00:00:00.000Z"),
+      stub("mine-new", "2026-08-15T00:00:00.000Z", true),
+      stub("theirs-new", "2026-08-16T00:00:00.000Z"),
+    ];
+    expect(walkable(list).map((r) => r.key)).toEqual(["theirs-new", "theirs-old", "mine-new", "mine-old"]);
   });
 });

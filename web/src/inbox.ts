@@ -69,11 +69,24 @@ export const isArchived = (r: ReviewListItem) => !!r.pr.state && r.pr.state !== 
  */
 const STATUS_ORDER = ["ready", "awaiting", "running", "failed", "reviewed", "skipped", "sent"];
 
+/**
+ * When this row last moved, for the `upd` column and the order inside a band.
+ *
+ * A row nobody has drafted (`awaiting`) has nothing of cerber's in it: its
+ * `updatedAt` is only the minute the poll found it, which is the same minute
+ * for every row found together — so every one read "3m" and the order meant
+ * nothing. There the PR's own last activity on GitHub is the fact worth
+ * reading. Every other row is dated by the review, which is what changed.
+ */
+export function activityAt(r: ReviewListItem): string {
+  return r.status === "awaiting" ? (r.pr.updatedAt ?? r.updatedAt) : r.updatedAt;
+}
+
 export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
   return [...list].sort(
     (a, b) =>
       STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
-      b.updatedAt.localeCompare(a.updatedAt),
+      activityAt(b).localeCompare(activityAt(a)),
   );
 }
 

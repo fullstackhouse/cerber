@@ -199,6 +199,7 @@ export function stubArtifact(ref: DiscoveredPr, own = false): Artifact {
       headSha: "",
       state: "OPEN",
       isDraft: ref.isDraft,
+      updatedAt: ref.updatedAt,
       additions: 0,
       deletions: 0,
       changedFiles: 0,
@@ -611,10 +612,22 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         // predate a draft→ready flip. Refresh from it — it costs nothing, it's
         // already in hand — or the queue keeps calling a ready PR a draft until
         // something happens to re-review it.
-        if (existing.pr.isDraft !== ref.isDraft) {
+        //
+        // The PR's last activity is refreshed only on a row nobody has drafted,
+        // the one place the queue reads it (`activityAt`). Every write bumps the
+        // artifact's own `updatedAt`, and on a drafted row that is the review's
+        // date: refreshing there would re-date every draft by the poll each time
+        // its PR saw a comment, which is the meaningless date this field exists
+        // to replace — and would race an open review's refresh besides.
+        const activity = existing.status === "awaiting" && existing.pr.updatedAt !== ref.updatedAt;
+        if (existing.pr.isDraft !== ref.isDraft || activity) {
           await updateArtifactByKey(artifactKey(existing.id), (a) => ({
             ...a,
-            pr: { ...a.pr, isDraft: ref.isDraft },
+            pr: {
+              ...a.pr,
+              isDraft: ref.isDraft,
+              updatedAt: a.status === "awaiting" ? ref.updatedAt : a.pr.updatedAt,
+            },
           }));
         }
         continue;

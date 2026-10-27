@@ -58,7 +58,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     "--repo",
     `${ref.owner}/${ref.repo}`,
     "--json",
-    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isDraft",
+    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isDraft,updatedAt",
   ]);
   const raw = JSON.parse(out);
   return PrInfoSchema.parse({
@@ -77,6 +77,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
+    updatedAt: raw.updatedAt ?? undefined,
   });
 }
 

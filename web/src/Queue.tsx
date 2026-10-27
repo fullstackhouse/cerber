@@ -6,6 +6,7 @@ import {
   INBOX_TABS,
   TAB_META,
   Tab,
+  activityAt,
   ageLabel,
   bucket,
   commentsCell,
@@ -177,7 +178,12 @@ function Row({
         )}
       </span>
       <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      <span
+        className="col-age"
+        title={r.status === "awaiting" ? "When the PR last changed on GitHub" : "When this review last changed"}
+      >
+        {ageLabel(activityAt(r))}
+      </span>
     </div>
   );
 }
@@ -469,7 +475,11 @@ export function Queue() {
               label="verdict"
               tip="Recommendation, and how sure the review is"
             />
-            <HeadCell className="col-age" label="upd" tip="When this review last changed" />
+            <HeadCell
+              className="col-age"
+              label="upd"
+              tip="When this review last changed — or, on a PR nobody has drafted yet, when the PR itself last changed on GitHub"
+            />
           </div>
 
           {rows.length === 0 ? (
