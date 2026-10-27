@@ -2882,6 +2882,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [freshnessError, setFreshnessError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [neighbours, setNeighbours] = useState<ReviewListItem[]>([]);
+  // Whether this is your own PR — said by the server on the review's own read,
+  // and kept apart from `artifact`, which most writes hand back without it.
+  const [ownPr, setOwnPr] = useState(false);
   // The reviews settled since this page opened — skipped, marked reviewed, or
   // sent. Kept here rather than refetched, so a decision leaves the walk the
   // moment you make it without the rest of the list moving.
@@ -2956,10 +2959,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setFreshnessError(null);
     setSendError(null);
     setRaisedReading(false);
+    setOwnPr(false);
     fetchReview(reviewKey)
       .then((a) => {
         if (cancelled) return;
         setArtifact(a);
+        setOwnPr(a.own === true);
         // Opening a review checks GitHub for new commits and pulls the comments
         // forward onto them, so what you read is anchored to current code. If
         // that check fails the review still reads — it is just older than we
@@ -3255,10 +3260,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     scrollToComment(commentId);
   };
 
-  // Whether this is your own PR. The list knows (the server has your login);
-  // until it has loaded, Send follows the verdict and the server's guard
-  // refuses what GitHub would.
-  const own = neighbours.some((r) => r.key === reviewKey && r.own === true);
+  // Whether this is your own PR. Should the server not know who you are, Send
+  // follows the verdict and GitHub refuses what it would.
+  const own = ownPr;
   // What Send will do, and the only thing it can do: the verdict decides it —
   // except on your own PR, which takes a comment and nothing else.
   const event = eventForVerdict(artifact?.verdict, own);

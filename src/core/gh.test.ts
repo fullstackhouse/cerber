@@ -213,7 +213,6 @@ describe("lastMentionOfYou", () => {
   });
 });
 import { ghErrorDetail, parsePrRef, searchAwaitingArgs, searchPrsArgs } from "./gh.js";
-import { isOwnPr } from "./own.js";
 
 describe("latestOwnReview", () => {
   const r = (author: string, at: string | null, state: string) => ({
@@ -337,20 +336,6 @@ describe("searchPrsArgs", () => {
 
   it("is what the CLI's --awaiting-me still asks — review requests only", () => {
     expect(searchAwaitingArgs("acme/widgets", 10)).toEqual(searchPrsArgs("review-requested", "acme/widgets", 10));
-  });
-});
-
-describe("isOwnPr", () => {
-  it("matches the PR's author against your login, case-insensitively", () => {
-    expect(isOwnPr({ author: "jtomaszewski" }, "jtomaszewski")).toBe(true);
-    expect(isOwnPr({ author: "JTomaszewski" }, "jtomaszewski")).toBe(true);
-    expect(isOwnPr({ author: "someone" }, "jtomaszewski")).toBe(false);
-  });
-
-  it("claims nothing without a login or an author", () => {
-    expect(isOwnPr({ author: "me" }, null)).toBe(false);
-    expect(isOwnPr({ author: "" }, "")).toBe(false);
-    expect(isOwnPr({ author: "" }, "me")).toBe(false);
   });
 });
 

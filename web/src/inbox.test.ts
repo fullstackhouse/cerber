@@ -704,6 +704,9 @@ describe("your own PRs in the queue", () => {
   });
 
   it("treats a row from a server too old to say as somebody else's", () => {
-    expect(ownLast([row({ key: "a" }), row({ key: "b", own: undefined })]).map((r) => r.key)).toEqual(["a", "b"]);
+    const mine = row({ key: "mine", own: true });
+    const unsaid = row({ key: "unsaid", own: undefined });
+    expect(ownLast([mine, unsaid]).map((r) => r.key)).toEqual(["unsaid", "mine"]);
+    expect(startsOwnGroup([unsaid], 0)).toBe(false);
   });
 });

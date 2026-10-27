@@ -207,6 +207,24 @@ describe("POST /api/reviews/:key/send — your own PR takes a comment only", () 
   });
 });
 
+describe("GET /api/reviews/:key — whether it is yours", () => {
+  it("says so on the review's own read", async () => {
+    await saveArtifact({ ...artifact("ready"), pr: { ...pr(), author: "me" } });
+    const app = await buildApp({});
+    expect(((await (await app.request(`/api/reviews/${KEY}`)).json()) as { own: boolean }).own).toBe(true);
+  });
+});
+
+describe("GET /api/reviews — never held up by gh", () => {
+  it("answers without the login when gh does not, marking nothing as yours", async () => {
+    login.mockReturnValue(new Promise(() => {}));
+    await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), author: "me" } });
+    const app = await buildApp({});
+    const rows = (await (await app.request("/api/reviews")).json()) as { id: string; own: boolean }[];
+    expect(rows.find((r) => r.id === ID)?.own).toBe(false);
+  }, 5000);
+});
+
 describe("GET /api/reviews — which rows are yours", () => {
   it("marks a PR you opened as own, and nobody else's", async () => {
     await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), author: "me" } });

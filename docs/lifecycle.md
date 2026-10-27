@@ -351,7 +351,8 @@ read their position from, and a send leaves you standing on it.
 ### Your own PRs
 
 GitHub never asks you to review your own PR — it will not let anyone request a
-review from the author — so the awaiting search cannot find one. The poll runs
+review from the author — so the awaiting search finds one only when a team you
+are on was requested. The poll runs
 the same search a second time with `author:@me` (`searchAuthoredByMe`,
 `src/core/gh.ts`) and brings your open PRs in for a self-review **when you ask
 for one**. "Yours" is `pr.author` matching your login (`isOwnPr`,
@@ -364,6 +365,8 @@ for one**. "Yours" is `pr.author` matching your login (`isOwnPr`,
   which is not you answering a request) and never reopened (a comment naming
   the author is the PR's conversation, not an ask). Skip it to hide it; it
   stays skipped;
+- yours is a fact about the PR, not about which search found it: a team
+  request on your own PR changes none of this;
 - it is listed after everything else in the live tabs, under a **your PRs**
   heading, and the arrows walk it last (`ownLast`, `web/src/inbox.ts`). An
   undrafted one does not light the favicon dot;

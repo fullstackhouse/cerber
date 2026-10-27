@@ -172,7 +172,8 @@ describe("evaluateAutoSend", () => {
     expect(
       evaluateAutoSend(
         makeArtifact({ sent: { at: "x", event: "APPROVE", url: null, auto: false } }),
-         90, "me",
+        90,
+        "me",
       ).eligible,
     ).toBe(false);
     expect(evaluateAutoSend(makeArtifact({ status: "failed" }), 90, "me").eligible).toBe(false);

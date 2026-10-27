@@ -715,9 +715,10 @@ export async function fetchPriorRemarks(
  * The two questions the inbox asks GitHub, as `gh search prs` qualifiers.
  *
  * `review-requested` is the inbox proper: PRs somebody is waiting on you for.
- * `author` is your own open PRs, which that search can never return — GitHub
- * will not let anyone request a review from a PR's author — so self-reviewing
- * one would otherwise mean pasting its URL every time. Both are the same
+ * `author` is your own open PRs, which that search returns only when a team
+ * you are on was requested — GitHub will not let anyone request a review from
+ * a PR's author — so self-reviewing one would otherwise mean pasting its URL
+ * every time. Both are the same
  * search with one flag changed, so they cannot drift apart on what "open"
  * means or which repos are read-only.
  */

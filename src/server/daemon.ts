@@ -427,22 +427,34 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
 
   /**
    * What GitHub has for you: the PRs awaiting your review, then your own open
-   * ones, as one deduplicated list.
+   * ones, as one deduplicated list — and whether the second search ran at all
+   * (`ownSearched`).
    *
    * Your own PRs are asked for only when cerber knows who you are (`me`). The
    * whole of their special handling — never drafted, never announced, never
    * approved — turns on recognising them, so a poll that could not tell would
    * be better off not bringing them in at all than bringing them in as if
-   * somebody had asked. Review-requested results go first, so a PR both
-   * searches return keeps the reading that somebody is waiting on it.
+   * somebody had asked. And that search is the optional half: when it fails,
+   * the PRs people are waiting on you for still come through, and the poll
+   * says what it could not see rather than failing whole. Which search found a
+   * PR decides nothing — a team you are on can be requested on your own PR,
+   * and `isOwnPr` reads the author either way.
    */
-  async function discover(me: string | null): Promise<DiscoveredPr[]> {
+  async function discover(me: string | null): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
     const [awaiting, authored] = await Promise.all([
       Promise.all(filters.map((repo) => searchAwaitingMe(repo))),
-      me === null ? Promise.resolve([]) : Promise.all(filters.map((repo) => searchAuthoredByMe(repo))),
+      me === null
+        ? Promise.resolve(null)
+        : Promise.all(filters.map((repo) => searchAuthoredByMe(repo))).catch((err: unknown) => {
+            log(`could not search for your own PRs: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          }),
     ]);
-    return dedupeDiscovered([...awaiting.flat(), ...authored.flat()]);
+    return {
+      refs: dedupeDiscovered([...awaiting.flat(), ...(authored ?? []).flat()]),
+      ownSearched: authored !== null,
+    };
   }
 
   /**
@@ -451,7 +463,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * request went away. Freshness decisions always come from local artifacts —
    * search results lag GitHub by minutes and never override them.
    */
-  async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: DiscoveredPr[] }> {
+  async function syncQueue(refs: DiscoveredPr[], ownSearched: boolean): Promise<{ discovered: DiscoveredPr[] }> {
     const discovered: DiscoveredPr[] = [];
     /** Reopen checks spent this poll — the same cap the state refresh below obeys. */
     let reopenChecks = 0;
@@ -720,10 +732,13 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           if (pr.state !== "OPEN") {
             await updateArtifactByKey(artifactKey(artifact.id), (a) => ({ ...a, pr }));
             log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
-          } else {
+          } else if (ownSearched) {
             await deleteArtifact(artifact.id);
             log(`[${artifact.id}] no longer awaiting your review — removed from the queue`);
           }
+          // Otherwise this poll could not look for your own PRs, so "not in
+          // the results" says nothing about a stub of yours: it stays, rather
+          // than being dropped and announced as gone only to return next poll.
         } catch {
           // GitHub unreachable — leave the stub; next poll retries.
         }
@@ -1002,7 +1017,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         return;
       }
 
-      const refs = await discover(me);
+      const { refs, ownSearched } = await discover(me);
       // Your own PRs are synced into the queue with the rest, but nobody is
       // asking you for them: they are not "awaiting" in anything the strip
       // counts, and the cockpit's open-requests tab — "GitHub still lists you
@@ -1015,7 +1030,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // and the rows the cockpit can name always come from one answer.
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(asked);
-      const { discovered } = await syncQueue(refs);
+      const { discovered } = await syncQueue(refs, ownSearched);
 
       if (drafting) {
         // A repo excepted from auto-review is discovered like any other — it

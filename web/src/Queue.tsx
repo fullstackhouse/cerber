@@ -505,6 +505,8 @@ export function Queue() {
                 {INBOX_TABS.includes(tab) && startsOwnGroup(rows, i) && (
                   <div
                     className="group-head"
+                    role="heading"
+                    aria-level={2}
                     title="PRs you opened. Never drafted on their own — press r for a self-review. Send posts it as a comment."
                   >
                     your PRs

@@ -14,9 +14,10 @@ import {
   mapSearchResults,
   searchAuthoredByMe,
   searchAwaitingMe,
+  submitReview,
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
-import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
+import { loadArtifact, readAutoSendLog, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { ReviewInProgressError } from "../runner/inflight.js";
 import { reviewPr } from "../runner/review.js";
 import {
@@ -41,6 +42,8 @@ vi.mock("../core/gh.js", async (orig) => ({
   // Your own PRs: none, unless a test says otherwise. An implementation rather
   // than a bare mock, so `clearAllMocks` in every suite's setup keeps it.
   searchAuthoredByMe: vi.fn(async () => []),
+  // The one write auto-send makes. Stubbed so a test can assert it never ran.
+  submitReview: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchConversation: vi.fn(),
   fetchLastReviewRequest: vi.fn(),
@@ -68,6 +71,7 @@ vi.mock("../runner/review.js", async (orig) => ({
 
 const search = searchAwaitingMe as Mock;
 const authored = searchAuthoredByMe as Mock;
+const submit = submitReview as Mock;
 const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
 const conversation = fetchConversation as Mock;
@@ -1535,7 +1539,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
 /**
  * Your own open PRs come into the inbox through a second search — GitHub will
  * not let anyone request a review from a PR's author, so the awaiting search
- * can never return one — and sit there for a self-review on demand: never
+ * returns one only through a team request — and sit there for a self-review on demand: never
  * drafted, never announced, never filed or reopened on cerber's own reading of
  * the conversation, and archived like any other PR once it merges.
  */
@@ -1676,6 +1680,26 @@ describe("your own PRs in the inbox", () => {
     expect(lastRequest).not.toHaveBeenCalled();
   });
 
+  it("does not take the poll down when the search for them fails", async () => {
+    authored.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    const status = await pollTimes(1);
+    // The PR somebody is waiting on still arrives and is drafted.
+    expect(status.lastPollError).toBeNull();
+    expect(await loadArtifact(artifactId(DISCOVERED))).not.toBeNull();
+    expect(reviewed).toHaveBeenCalled();
+  });
+
+  it("keeps a stub of yours through a poll that could not look for it", async () => {
+    await pollTimes(1);
+    expect(await loadArtifact(mineId)).not.toBeNull();
+    // Next poll: gh cannot say who you are, so the author search never runs,
+    // and the stub is missing from the results for that reason alone.
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    prInfo.mockResolvedValue({ ...stubArtifact(MINE).pr, state: "OPEN" });
+    await pollTimes(1);
+    expect(await loadArtifact(mineId)).not.toBeNull();
+  });
+
   it("is archived once it merges and leaves the search", async () => {
     await pollTimes(1);
     expect((await loadArtifact(mineId))?.pr.state).toBe("OPEN");
@@ -1695,5 +1719,58 @@ describe("dedupeDiscovered", () => {
       [7, "from the awaiting search"],
       [8, DISCOVERED.title],
     ]);
+  });
+});
+
+describe("auto-send without knowing who you are", () => {
+  const daemonKnobs = {
+    poll: true,
+    autoReview: true,
+    autoReviewRepos: {},
+    notify: false,
+    intervalMinutes: 5,
+    parallel: 1,
+    repos: [],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-autosend-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+    conversation.mockResolvedValue([]);
+    search.mockResolvedValue([DISCOVERED]);
+    // A finished, clean, confident approve: everything auto-send asks for.
+    reviewed.mockImplementation(async () => {
+      const artifact = await updateArtifactByKey(artifactKey(artifactId(DISCOVERED)), (a) => ({
+        ...a,
+        status: "ready" as const,
+        verdict: { recommendation: "approve" as const, confidence: 95, reasoning: "" },
+        raisedCheck: { at: "2026-08-19T00:00:00Z", checkingSince: null, remarks: [], findings: [], error: null },
+      }));
+      return { artifact: artifact!, skipped: false };
+    });
+  });
+
+  it("posts nothing when gh cannot say whether the PR is yours", async () => {
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    const handle = startDaemon({
+      repos: [],
+      intervalMs: 10,
+      parallel: 1,
+      autoReview: true,
+      notify: false,
+      autoSend: "on",
+      autoSendThreshold: 90,
+    });
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect(reviewed).toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    const log = await readAutoSendLog();
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.every((e) => !e.sent && e.decision.includes("who you are"))).toBe(true);
   });
 });

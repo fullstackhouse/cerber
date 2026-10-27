@@ -76,6 +76,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 const SETTLEABLE = ["reviewed", "skipped"];
 
+/** How long a read of local state waits on `gh` to say who you are (`loginWithin`). */
+const LOGIN_WAIT_MS = 1500;
+
+/**
+ * The login, if `gh` can say within `ms`, else null — for reads that must not
+ * wait on GitHub, like the cockpit's queue list. A slow answer is not lost: the
+ * call it raced keeps going, and once it lands the cache answers instantly.
+ */
+function loginWithin(ms: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    currentLogin().then(
+      (login) => {
+        clearTimeout(timer);
+        resolve(login);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
 /** What the user may decide about a finding somebody else already raised. */
 const RaisedDecisionSchema = z.enum(["send", "reply"]).nullable();
 
@@ -318,9 +342,10 @@ export async function buildApp(
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();
-    // Cached for the process after the first answer; a gh that cannot say
-    // marks nothing as yours rather than failing the whole list.
-    const me = await currentLogin().catch(() => null);
+    // Cached for the process after the first answer. The list is local state
+    // and must not hang on GitHub: a gh that cannot say in time marks nothing
+    // as yours, and Send's own guard still refuses what GitHub would.
+    const me = await loginWithin(LOGIN_WAIT_MS);
     return c.json(
       artifacts.map((a) => ({
         id: a.id,
@@ -522,7 +547,9 @@ export async function buildApp(
   app.get("/api/reviews/:key", async (c) => {
     const artifact = await loadArtifactByKey(c.req.param("key"));
     if (!artifact) return c.json({ error: "not found" }, 404);
-    return c.json(artifact);
+    // `own` rides along so the review page knows what Send may post without
+    // depending on the queue list having loaded (§9.10).
+    return c.json({ ...artifact, own: isOwnPr(artifact.pr, await loginWithin(LOGIN_WAIT_MS)) });
   });
 
   // ---- Mutations (all local — artifact edits only) ----

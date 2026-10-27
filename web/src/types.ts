@@ -206,6 +206,11 @@ export interface SentInfo {
 }
 
 export interface Artifact {
+  /**
+   * Your own PR (§9.10) — sent only on `GET /api/reviews/:key`, never stored,
+   * and absent from every other response that returns an artifact.
+   */
+  own?: boolean;
   schemaVersion: number;
   id: string;
   status: string;

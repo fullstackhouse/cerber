@@ -1104,11 +1104,12 @@ process, so a machine that cannot build one does not pay a timeout per arrival.
 ### 9.10 Your Own PRs
 
 GitHub does not let anyone request a review from a PR's author, so the review
--request search can never return the user's own PRs. They come in through the
-second search of §9.1 and are in the inbox for a **self-review on demand**.
-"Own" is derived, never stored: `pr.author` equals the current login,
-case-insensitively (`isOwnPr`); an unknown login or an empty author is not
-own. On an own PR:
+-request search returns the user's own PRs only through a team they belong to
+being requested — never as a request for them. They come in through the second
+search of §9.1 and are in the inbox for a **self-review on demand**. "Own" is
+derived from the PR, never from which search found it, and never stored:
+`pr.author` equals the current login, case-insensitively (`isOwnPr`); an
+unknown login or an empty author is not own. On an own PR:
 
 - the poll MUST NOT draft it, whatever auto-review says for its repo (§6.4) —
   it waits for the user's click;
@@ -1121,8 +1122,9 @@ own. On an own PR:
   the search and is archived (§9.3–9.4);
 - Send MUST accept only `COMMENT` (§14.4), and auto-send MUST NOT fire (§15.2).
 
-`cerber review --awaiting-me` runs the review-request search alone — it reviews
-everything it finds, so it MUST NOT pick up the user's own PRs.
+`cerber review --awaiting-me` runs the review-request search alone and is
+otherwise unchanged by this section: it does not run the author search, so the
+only own PR it can meet is one a team of the user's was requested on.
 
 ## 10. Checkout Management
 
@@ -1908,9 +1910,12 @@ who has it now rather than with the whose-move label.
 
 A single definition — non-archived, non-settled, status-ordered
 (`ready, awaiting, running, failed, reviewed, skipped, sent`, newest first
-within a band), the user's own PRs last (§17.1) — MUST back the prev/next walk, the arrival bell and the
-favicon dot. These are one invariant, not three coincidences: the dot on the
-tab, the popup, and the arrows all answer "what still wants me?".
+within a band), the user's own PRs last (§17.1) — MUST back the prev/next
+walk, the arrival bell and the favicon dot. These are one invariant, not three
+coincidences: the dot on the tab, the popup, and the arrows all answer "what
+still wants me?". One row is in the walk and answers "nothing": the user's own
+PR nobody has drafted (§9.10). The arrows reach it, but neither the bell nor
+the dot counts it — it waits on nobody, for as long as it is open (§17.4).
 
 The walk is a snapshot taken when a review opens and MUST NOT be refetched
 under the reader. A review the reader settles during the walk — skipped,
@@ -2375,8 +2380,8 @@ An implementation conforms when all of the following hold:
 **GitHub**
 - [ ] The user's own PRs (§9.10) are discovered by a second search, never
       drafted, announced, filed or reopened by the poll, never auto-sent, and
-      take only a `COMMENT` from Send; `cerber review --awaiting-me` never
-      picks them up.
+      take only a `COMMENT` from Send; `cerber review --awaiting-me` does not
+      run the author search.
 - [ ] `submitReview` is the only write that speaks as a review, gated by
       explicit confirmation or §15's full auto-send predicate; the payload folds
       unanchorable comments and pins `commit_id`; every subprocess uses argv
