@@ -711,6 +711,8 @@ export async function fetchPriorRemarks(
   return priorRemarks({ threads: pr.reviewThreads?.nodes ?? [], reviews: pr.reviews?.nodes ?? [] }, people);
 }
 
+export type PrSearch = "review-requested" | "author";
+
 /**
  * The two questions the inbox asks GitHub, as `gh search prs` qualifiers.
  *
@@ -722,8 +724,6 @@ export async function fetchPriorRemarks(
  * search with one flag changed, so they cannot drift apart on what "open"
  * means or which repos are read-only.
  */
-export type PrSearch = "review-requested" | "author";
-
 export function searchPrsArgs(search: PrSearch, repoFilter?: string, limit = 50): string[] {
   const args = [
     "search",

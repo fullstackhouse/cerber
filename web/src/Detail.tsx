@@ -3038,6 +3038,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       fetchReview(reviewKey)
         .then((a) => {
           setArtifact(a);
+          // A login gh was slow to give on the first read is known by now.
+          setOwnPr(a.own === true);
           if (a.status !== "running") {
             setRerunning(false);
             // Back where it started, with the same run still on it: the

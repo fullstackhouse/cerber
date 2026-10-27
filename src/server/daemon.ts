@@ -148,6 +148,12 @@ export interface DaemonHandle {
 }
 
 /**
+ * Whether a row could be one of your own PRs: it is, or cerber cannot tell
+ * because gh would not say who you are.
+ */
+export const mightBeYours = (a: Artifact, me: string | null) => me === null || isOwnPr(a.pr, me);
+
+/**
  * The poll's searches as one list: first occurrence wins, so the order the
  * searches are passed in is the order of precedence.
  */
@@ -732,13 +738,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           if (pr.state !== "OPEN") {
             await updateArtifactByKey(artifactKey(artifact.id), (a) => ({ ...a, pr }));
             log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
-          } else if (ownSearched) {
+          } else if (ownSearched || !mightBeYours(artifact, await who())) {
             await deleteArtifact(artifact.id);
             log(`[${artifact.id}] no longer awaiting your review — removed from the queue`);
           }
           // Otherwise this poll could not look for your own PRs, so "not in
-          // the results" says nothing about a stub of yours: it stays, rather
-          // than being dropped and announced as gone only to return next poll.
+          // the results" says nothing about a stub that may be yours: it
+          // stays, rather than being dropped and logged as gone only to
+          // return next poll. Everybody else's is reaped as before.
         } catch {
           // GitHub unreachable — leave the stub; next poll retries.
         }

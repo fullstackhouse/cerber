@@ -1700,6 +1700,16 @@ describe("your own PRs in the inbox", () => {
     expect(await loadArtifact(mineId)).not.toBeNull();
   });
 
+  it("still reaps somebody else's stub when the search for yours fails", async () => {
+    // Somebody asked you, then withdrew the request: the stub has no work in it.
+    await saveArtifact(stubArtifact({ ...DISCOVERED, number: 8 }));
+    search.mockResolvedValue([]);
+    authored.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    prInfo.mockResolvedValue({ ...stubArtifact(DISCOVERED).pr, number: 8, state: "OPEN" });
+    await pollTimes(1);
+    expect(await loadArtifact(artifactId({ ...DISCOVERED, number: 8 }))).toBeNull();
+  });
+
   it("is archived once it merges and leaves the search", async () => {
     await pollTimes(1);
     expect((await loadArtifact(mineId))?.pr.state).toBe("OPEN");
