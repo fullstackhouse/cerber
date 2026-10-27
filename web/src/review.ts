@@ -23,8 +23,14 @@ export const EVENT_TONE: Record<ReviewEvent, "approve" | "comment" | "changes"> 
   REQUEST_CHANGES: "changes",
 };
 
-/** The event a verdict asks for. The user can still choose another one. */
-export function eventForVerdict(verdict: Verdict | null | undefined): ReviewEvent {
+/**
+ * The event a verdict asks for — and the event Send posts, on anybody's PR but
+ * yours. On your own PR it is a comment whatever the verdict says: GitHub takes
+ * no approve or change request from a PR's author, and the server refuses both
+ * there too (`ownPrRefusal`).
+ */
+export function eventForVerdict(verdict: Verdict | null | undefined, own = false): ReviewEvent {
+  if (own) return "COMMENT";
   if (verdict?.recommendation === "approve") return "APPROVE";
   if (verdict?.recommendation === "request_changes") return "REQUEST_CHANGES";
   return "COMMENT";

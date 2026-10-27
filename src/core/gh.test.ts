@@ -212,7 +212,7 @@ describe("lastMentionOfYou", () => {
     expect(lastMentionOfYou([], "me")).toBeNull();
   });
 });
-import { ghErrorDetail, parsePrRef, searchAwaitingArgs } from "./gh.js";
+import { ghErrorDetail, ownPrUpdatedSince, parsePrRef, searchAwaitingArgs, searchPrsArgs } from "./gh.js";
 
 describe("latestOwnReview", () => {
   const r = (author: string, at: string | null, state: string) => ({
@@ -316,6 +316,47 @@ describe("parsePrRef", () => {
 
   it("rejects garbage", () => {
     expect(() => parsePrRef("what is this")).toThrow(/Cannot parse/);
+  });
+});
+
+describe("searchPrsArgs", () => {
+  it("asks the same question both ways, one qualifier apart", () => {
+    const awaiting = searchPrsArgs("review-requested", "acme/widgets", 10);
+    const authored = searchPrsArgs("author", "acme/widgets", 10);
+    expect(awaiting).toContain("--review-requested=@me");
+    expect(authored).toContain("--author=@me");
+    expect(authored).not.toContain("--review-requested=@me");
+    // Everything else — open only, archived repos out, the repo filter, the
+    // fields the queue needs — is shared, so the two cannot drift apart.
+    const rest = (args: string[]) => args.filter((a) => !a.startsWith("--review-requested") && !a.startsWith("--author"));
+    expect(rest(authored)).toEqual(rest(awaiting));
+    expect(authored).toContain("archived:false");
+    expect(authored).toContain("--state=open");
+  });
+
+  it("is what the CLI's --awaiting-me still asks — review requests only", () => {
+    expect(searchAwaitingArgs("acme/widgets", 10)).toEqual(searchPrsArgs("review-requested", "acme/widgets", 10));
+  });
+});
+
+describe("ownPrUpdatedSince / the author search's age cut", () => {
+  const now = new Date("2026-10-27T15:00:00Z");
+
+  it("is the calendar day N days back, as GitHub's updated: qualifier reads it", () => {
+    expect(ownPrUpdatedSince(30, now)).toBe("2026-09-27");
+    expect(ownPrUpdatedSince(1, now)).toBe("2026-10-26");
+  });
+
+  it("is off at 0 or null", () => {
+    expect(ownPrUpdatedSince(0, now)).toBeNull();
+    expect(ownPrUpdatedSince(null, now)).toBeNull();
+  });
+
+  it("goes into the author search as a qualifier, and nowhere else", () => {
+    const authored = searchPrsArgs("author", "acme/widgets", 50, "2026-09-27");
+    expect(authored).toContain("updated:>=2026-09-27");
+    expect(searchPrsArgs("author", "acme/widgets", 50)).not.toContain("updated:>=2026-09-27");
+    expect(searchAwaitingArgs("acme/widgets").some((a) => a.startsWith("updated:"))).toBe(false);
   });
 });
 

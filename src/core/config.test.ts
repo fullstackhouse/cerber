@@ -27,10 +27,21 @@ describe("config", () => {
     intervalMinutes: 5,
     parallel: 3,
     repos: [],
+    ownPrMaxAgeDays: 30,
   };
 
   it("trusts nobody and runs the full inbox when there is no config at all", async () => {
     expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON });
+  });
+
+  it("leaves your own PRs past 30 days out by default, and takes 0 or null for off", async () => {
+    await fs.mkdir(home, { recursive: true });
+    for (const off of [0, null]) {
+      await fs.writeFile(configPath(), JSON.stringify({ daemon: { ownPrMaxAgeDays: off } }));
+      expect((await loadConfig()).daemon.ownPrMaxAgeDays).toBe(off);
+    }
+    await fs.writeFile(configPath(), '{"daemon": {"ownPrMaxAgeDays": -1}}');
+    await expect(loadConfig()).rejects.toThrow();
   });
 
   it("keeps an inbox knob a hand-edit flipped, defaulting the rest", async () => {

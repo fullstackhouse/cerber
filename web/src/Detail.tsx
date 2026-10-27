@@ -2270,6 +2270,7 @@ function SendPanel({
   artifact,
   reviewKey,
   event,
+  own,
   sending,
   checking,
   onSend,
@@ -2283,6 +2284,8 @@ function SendPanel({
   artifact: Artifact;
   reviewKey: string;
   event: ReviewEvent;
+  /** Your own PR: `event` is a comment whatever the verdict, and the panel says why. */
+  own: boolean;
   sending: boolean;
   /**
    * A check for findings others already raised is running. Send waits for it,
@@ -2431,6 +2434,12 @@ function SendPanel({
 
       {/* On the button rather than in a dialog: what changes is one fact
           about the click, and the click is already the deliberate act. */}
+      {own && eventForVerdict(artifact.verdict) !== "COMMENT" && (
+        <p className="send-note">
+          This is your own PR, and GitHub takes no approve or change request from its author — so it
+          posts as a comment.
+        </p>
+      )}
       {priorSends.length > 0 && (
         <p className="send-note">
           This posts review {sendCount(artifact) + 1} on this PR. What you sent before stays on
@@ -2873,6 +2882,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [freshnessError, setFreshnessError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [neighbours, setNeighbours] = useState<ReviewListItem[]>([]);
+  // Whether this is your own PR — said by the server on the review's own read,
+  // and kept apart from `artifact`, which most writes hand back without it.
+  const [ownPr, setOwnPr] = useState(false);
   // The reviews settled since this page opened — skipped, marked reviewed, or
   // sent. Kept here rather than refetched, so a decision leaves the walk the
   // moment you make it without the rest of the list moving.
@@ -2947,10 +2959,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setFreshnessError(null);
     setSendError(null);
     setRaisedReading(false);
+    setOwnPr(false);
     fetchReview(reviewKey)
       .then((a) => {
         if (cancelled) return;
         setArtifact(a);
+        setOwnPr(a.own === true);
         // Opening a review checks GitHub for new commits and pulls the comments
         // forward onto them, so what you read is anchored to current code. If
         // that check fails the review still reads — it is just older than we
@@ -3024,6 +3038,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       fetchReview(reviewKey)
         .then((a) => {
           setArtifact(a);
+          // A login gh was slow to give on the first read is known by now.
+          setOwnPr(a.own === true);
           if (a.status !== "running") {
             setRerunning(false);
             // Back where it started, with the same run still on it: the
@@ -3246,8 +3262,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     scrollToComment(commentId);
   };
 
-  // What Send will do, and the only thing it can do: the verdict decides it.
-  const event = eventForVerdict(artifact?.verdict);
+  // Whether this is your own PR. Should the server not know who you are, Send
+  // follows the verdict and GitHub refuses what it would.
+  const own = ownPr;
+  // What Send will do, and the only thing it can do: the verdict decides it —
+  // except on your own PR, which takes a comment and nothing else.
+  const event = eventForVerdict(artifact?.verdict, own);
   // A failure belongs to the send it came from; changing the verdict makes it
   // history rather than a warning about the button in front of you.
   useEffect(() => setSendError(null), [event]);
@@ -3821,6 +3841,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               artifact={artifact}
               reviewKey={reviewKey}
               event={event}
+              own={own}
               sending={sending}
               checking={raisedChecking}
               onSend={doSend}

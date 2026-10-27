@@ -635,12 +635,28 @@ button {
   border-bottom: 1px solid var(--line-2);
 }
 
+/* The heading over your own PRs, below the ones awaiting you. Set like the
+   table head, so it reads as structure rather than as one more row. */
+.group-head {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 18px 10px 7px;
+  border-bottom: 1px solid var(--line-2);
+}
+
 .row {
   font-size: 12px;
   padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--line-3);
   border-left: 2px solid transparent;
+}
+
+/* Clear of the sticky strip when the keyboard scrolls a row into view. */
+.row {
+  scroll-margin-bottom: calc(var(--strip-h, 0px) + 8px);
 }
 
 .row:hover {
@@ -900,14 +916,23 @@ button {
 }
 
 /* The cursor row, explaining itself without leaving the list. */
+/* Sticky at the bottom of the viewport: with a long queue the table runs off
+   screen and the row you are pointing at would be explained somewhere you
+   cannot see. Sticky rather than fixed, so it keeps its place in the flow —
+   scrolled to the end it settles under the last row instead of covering it,
+   and the page needs no padding guessed from its height. Opaque, with a
+   shadow upward, so the rows sliding under it read as underneath. */
 .cursor-strip {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   gap: 18px;
   align-items: flex-start;
   border: 1px solid var(--line-2);
-  border-top: none;
-  border-radius: 0 0 4px 4px;
+  border-radius: 4px 4px 0 0;
   background: var(--surface);
+  box-shadow: 0 -6px 14px -10px light-dark(rgb(15 17 21 / 0.25), rgb(0 0 0 / 0.6));
   padding: 14px 16px;
 }
 

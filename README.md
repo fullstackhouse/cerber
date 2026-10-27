@@ -157,6 +157,17 @@ ones you marked reviewed or skipped, merged and closed PRs — each tab appearin
 only while it holds something. PRs in archived repos are never picked up at
 all, since the repo is read-only and a review could never be sent.
 
+### Your own PRs
+
+Your own open PRs are in the inbox too, under **your PRs** below the ones
+awaiting you — GitHub never asks you to review them, so they would otherwise
+need their URL pasted every time. Cerber never drafts one on its own and never
+taps you about one: press `r` when you want a self-review. Send posts it as a
+comment, since GitHub takes no approve or change request from a PR's author,
+and auto-send leaves it alone. Skip one to hide it; it leaves for good once it
+merges or closes. PRs of yours idle for more than 30 days stay out
+(`daemon.ownPrMaxAgeDays`; 0 turns that off).
+
 ### Settled means you settled it
 
 Settling a review is your decision, not GitHub's: skip a PR, or mark one

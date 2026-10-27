@@ -4,6 +4,7 @@ import {
   ArtifactSchema,
   CommentSchema,
   HandoffInfoSchema,
+  PrInfoSchema,
   SCHEMA_VERSION,
 } from "./artifact.js";
 
@@ -107,5 +108,23 @@ describe("ArtifactSchema handoff", () => {
       withdrewYours: true,
       note: null,
     });
+  });
+});
+
+describe("PrInfoSchema updatedAt", () => {
+  const pr = {
+    owner: "o",
+    repo: "r",
+    number: 1,
+    title: "t",
+    url: "u",
+    author: "a",
+    baseRefName: "main",
+    headRefName: "f",
+  };
+
+  it("is optional, so artifacts written before it still load, and kept when present", () => {
+    expect(PrInfoSchema.parse(pr).updatedAt).toBeUndefined();
+    expect(PrInfoSchema.parse({ ...pr, updatedAt: "2026-08-01T00:00:00Z" }).updatedAt).toBe("2026-08-01T00:00:00Z");
   });
 });

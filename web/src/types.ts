@@ -16,6 +16,8 @@ export interface ReviewListItem {
     state?: "OPEN" | "CLOSED" | "MERGED";
     /** A draft still awaiting you: reviewable, but its author hasn't finished. */
     isDraft?: boolean;
+    /** When the PR itself last changed on GitHub. Absent from older servers and rows. */
+    updatedAt?: string;
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -37,6 +39,13 @@ export interface ReviewListItem {
    * must not silence the bell.
    */
   announceable?: boolean;
+  /**
+   * A PR you opened yourself. Listed under "your PRs", below the ones awaiting
+   * you; never drafted or announced unasked; sent as a comment only, because
+   * GitHub takes no approve or change request from a PR's author. Optional:
+   * a server too old to send it has no own PRs in its inbox.
+   */
+  own?: boolean;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;
@@ -199,6 +208,11 @@ export interface SentInfo {
 }
 
 export interface Artifact {
+  /**
+   * Your own PR (§9.10) — sent only on `GET /api/reviews/:key`, never stored,
+   * and absent from every other response that returns an artifact.
+   */
+  own?: boolean;
   schemaVersion: number;
   id: string;
   status: string;
@@ -377,6 +391,8 @@ export interface DaemonConfig {
   intervalMinutes: number;
   parallel: number;
   repos: string[];
+  /** Your own PRs idle longer than this many days stay out of the inbox; 0/null is off. */
+  ownPrMaxAgeDays?: number | null;
 }
 
 export interface ConfigView {

@@ -26,6 +26,13 @@ const row = (over: Partial<ReviewListItem> = {}): ReviewListItem => ({
 });
 
 describe("hasInboxWork", () => {
+  it("leaves your own undrafted PRs out — they wait on nobody", () => {
+    expect(hasInboxWork([row({ own: true })])).toBe(false);
+    // One you asked a draft for is work again.
+    expect(hasInboxWork([row({ own: true, status: "ready" })])).toBe(true);
+    expect(hasInboxWork([row({ own: true }), row({ key: "other" })])).toBe(true);
+  });
+
   it("is false on an empty queue", () => {
     expect(hasInboxWork([])).toBe(false);
   });

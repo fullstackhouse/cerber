@@ -17,6 +17,7 @@ import {
   artifactKey,
 } from "../core/artifact.js";
 import { toMarkdown } from "../core/export.js";
+import { isOwnPr } from "../core/own.js";
 import {
   currentLogin,
   fetchAssignableUsers,
@@ -40,6 +41,7 @@ import {
   buildReviewPayload,
   computeCalibration,
   describeReplyFailures,
+  ownPrRefusal,
   recordReplies,
 } from "../core/send.js";
 import { raisedChanged, rewriteFinding, startRaisedCheck } from "../core/raised.js";
@@ -73,6 +75,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * own decision about a PR. Everything else is a fact some other path owns.
  */
 const SETTLEABLE = ["reviewed", "skipped"];
+
+/** How long a read of local state waits on `gh` to say who you are (`loginWithin`). */
+const LOGIN_WAIT_MS = 1500;
+
+/**
+ * The login, if `gh` can say within `ms`, else null — for reads that must not
+ * wait on GitHub, like the cockpit's queue list. A slow answer is not lost: the
+ * call it raced keeps going, and once it lands the cache answers instantly.
+ */
+function loginWithin(ms: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    currentLogin().then(
+      (login) => {
+        clearTimeout(timer);
+        resolve(login);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
 
 /** What the user may decide about a finding somebody else already raised. */
 const RaisedDecisionSchema = z.enum(["send", "reply"]).nullable();
@@ -316,6 +342,10 @@ export async function buildApp(
 
   app.get("/api/reviews", async (c) => {
     const artifacts = await listArtifacts();
+    // Cached for the process after the first answer. The list is local state
+    // and must not hang on GitHub: a gh that cannot say in time marks nothing
+    // as yours, and Send's own guard still refuses what GitHub would.
+    const me = await loginWithin(LOGIN_WAIT_MS);
     return c.json(
       artifacts.map((a) => ({
         id: a.id,
@@ -331,6 +361,9 @@ export async function buildApp(
           number: a.pr.number,
           state: a.pr.state,
           isDraft: a.pr.isDraft,
+          // When the PR itself last changed — what an undrafted row is dated
+          // and sorted by in the queue (`activityAt`).
+          updatedAt: a.pr.updatedAt,
           additions: a.pr.additions,
           deletions: a.pr.deletions,
           changedFiles: a.pr.changedFiles,
@@ -354,6 +387,9 @@ export async function buildApp(
         // rows the daemon deliberately stays silent about, and the two bells
         // would stop telling one story.
         announceable: a.notified !== undefined,
+        // A PR you opened: listed apart from the ones awaiting you, and sent
+        // as a comment only (`ownPrRefusal`).
+        own: isOwnPr(a.pr, me),
         costUsd: a.run?.costUsd ?? null,
         withSource: a.run?.withSource ?? null,
         trusted: a.run?.trusted ?? null,
@@ -514,7 +550,9 @@ export async function buildApp(
   app.get("/api/reviews/:key", async (c) => {
     const artifact = await loadArtifactByKey(c.req.param("key"));
     if (!artifact) return c.json({ error: "not found" }, 404);
-    return c.json(artifact);
+    // `own` rides along so the review page knows what Send may post without
+    // depending on the queue list having loaded (§9.10).
+    return c.json({ ...artifact, own: isOwnPr(artifact.pr, await loginWithin(LOGIN_WAIT_MS)) });
   });
 
   // ---- Mutations (all local — artifact edits only) ----
@@ -1021,6 +1059,13 @@ export async function buildApp(
     if (!artifact) return c.json({ error: "not found" }, 404);
     if (artifact.sent) {
       return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    }
+    // Only a comment on your own PR. The cockpit offers nothing else there, so
+    // this is for a stale tab or a direct call; the login is only asked for
+    // when the event could be refused.
+    if (event !== "COMMENT") {
+      const refusal = ownPrRefusal(artifact.pr, event, await currentLogin().catch(() => null));
+      if (refusal) return c.json({ error: refusal }, 400);
     }
     // Not while a run is rewriting this draft. Vouching for a review that is
     // being replaced under you is reason enough on its own; on top of that the

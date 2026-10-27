@@ -58,7 +58,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     "--repo",
     `${ref.owner}/${ref.repo}`,
     "--json",
-    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isDraft",
+    "title,url,author,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,state,isDraft,updatedAt",
   ]);
   const raw = JSON.parse(out);
   return PrInfoSchema.parse({
@@ -77,6 +77,7 @@ export async function fetchPrInfo(ref: PrRef): Promise<PrInfo> {
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
+    updatedAt: raw.updatedAt ?? undefined,
   });
 }
 
@@ -225,7 +226,9 @@ export interface DiscoveredPr extends PrRef {
  * pressed the button, which makes it a review someone is waiting on rather than
  * work-in-progress to leave alone. Filtering drafts here would be redundant with
  * a stronger filter that already ran, and it would contradict the promise the
- * daemon config makes: the inbox holds what awaits you, drafts and all.
+ * daemon config makes: the inbox holds what awaits you, drafts and all. The
+ * `author:@me` search keeps them for a plainer reason: your own draft is where
+ * a self-review is most worth having, and nothing is drafted there unasked.
  */
 export function mapSearchResults(
   raw: {
@@ -709,14 +712,33 @@ export async function fetchPriorRemarks(
   return priorRemarks({ threads: pr.reviewThreads?.nodes ?? [], reviews: pr.reviews?.nodes ?? [] }, people);
 }
 
-export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
+export type PrSearch = "review-requested" | "author";
+
+/**
+ * The two questions the inbox asks GitHub, as `gh search prs` qualifiers.
+ *
+ * `review-requested` is the inbox proper: PRs somebody is waiting on you for.
+ * `author` is your own open PRs, which that search returns only when a team
+ * you are on was requested — GitHub will not let anyone request a review from
+ * a PR's author — so self-reviewing one would otherwise mean pasting its URL
+ * every time. Both are the same search with one flag changed, so they cannot
+ * drift apart on what "open" means or which repos are read-only.
+ */
+export function searchPrsArgs(
+  search: PrSearch,
+  repoFilter?: string,
+  limit = 50,
+  updatedSince: string | null = null,
+): string[] {
   const args = [
     "search",
     "prs",
     // An archived repo is read-only: its PRs can never merge, close, or take a
     // review. Without this they'd sit in the inbox forever — nothing retires them.
     "archived:false",
-    "--review-requested=@me",
+    // Only the author search is ever given one (`ownPrUpdatedSince`).
+    ...(updatedSince ? [`updated:>=${updatedSince}`] : []),
+    `--${search}=@me`,
     "--state=open",
     "--limit",
     String(limit),
@@ -727,10 +749,39 @@ export function searchAwaitingArgs(repoFilter?: string, limit = 50): string[] {
   return args;
 }
 
+export const searchAwaitingArgs = (repoFilter?: string, limit = 50) =>
+  searchPrsArgs("review-requested", repoFilter, limit);
+
 /** Open PRs where the current gh user's review is requested, drafts included. */
 export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
   const out = await gh(searchAwaitingArgs(repoFilter, limit));
   return mapSearchResults(JSON.parse(out));
+}
+
+/**
+ * Open PRs the current gh user opened, drafts included. They come to the inbox
+ * to be reviewed on demand and never automatically — see `isOwnPr` (`own.ts`).
+ */
+export async function searchAuthoredByMe(
+  repoFilter?: string,
+  updatedSince: string | null = null,
+  limit = 50,
+): Promise<DiscoveredPr[]> {
+  const out = await gh(searchPrsArgs("author", repoFilter, limit, updatedSince));
+  return mapSearchResults(JSON.parse(out));
+}
+
+/**
+ * The day your own PRs must have been active on or after to come into the
+ * inbox (`daemon.ownPrMaxAgeDays`), as GitHub's `updated:>=` reads it — or null
+ * for no cut. A PR of yours nobody has touched in months is not one you are
+ * about to self-review, and fifty of them would fill the search's whole page.
+ * A calendar day in UTC: GitHub's qualifier takes a date, and a day either way
+ * at the edge changes nothing anyone would notice.
+ */
+export function ownPrUpdatedSince(days: number | null | undefined, now: Date = new Date()): string | null {
+  if (!days) return null;
+  return new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10);
 }
 
 /**

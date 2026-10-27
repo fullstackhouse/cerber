@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
@@ -6,6 +6,7 @@ import {
   INBOX_TABS,
   TAB_META,
   Tab,
+  activityAt,
   ageLabel,
   bucket,
   commentsCell,
@@ -16,6 +17,7 @@ import {
   requestTag,
   rowTag,
   shownTab,
+  startsOwnGroup,
   strip,
   verdictCell,
 } from "./inbox";
@@ -176,7 +178,12 @@ function Row({
         )}
       </span>
       <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      <span
+        className="col-age"
+        title={r.status === "awaiting" ? "When the PR last changed on GitHub" : "When this review last changed"}
+      >
+        {ageLabel(activityAt(r))}
+      </span>
     </div>
   );
 }
@@ -288,6 +295,11 @@ export function Queue() {
   // The cursor is a review, not a row number: the list re-sorts under it every
   // poll, and the strip below must keep explaining the same PR.
   const [cursor, setCursor] = useState<string | null>(null);
+  // Set when the keyboard moved the cursor, so the row it lands on is scrolled
+  // into view — clear of the sticky strip, whose height `--strip-h` carries.
+  // Not on hover: the pointer is already on the row it selected.
+  const keyMoved = useRef(false);
+  const stripEl = useRef<HTMLDivElement | null>(null);
 
   // Fetches outlive the component; never set state after unmount.
   const alive = useRef(true);
@@ -356,7 +368,10 @@ export function Queue() {
       const at = rows.findIndex((r) => r.key === selected?.key);
       const move = (delta: number) => {
         const next = rows[Math.min(rows.length - 1, Math.max(0, at + delta))];
-        if (next) setCursor(next.key);
+        if (next) {
+          keyMoved.current = true;
+          setCursor(next.key);
+        }
       };
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
@@ -383,6 +398,27 @@ export function Queue() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selected?.key]);
+
+  useEffect(() => {
+    if (!keyMoved.current) return;
+    keyMoved.current = false;
+    document.querySelector(".row-on")?.scrollIntoView({ block: "nearest" });
+  }, [selected?.key]);
+
+  // The strip is sticky at the bottom, so a row scrolled "into view" must clear
+  // it: rows take their bottom scroll margin from its measured height.
+  useEffect(() => {
+    const el = stripEl.current;
+    if (!el) return;
+    const apply = () => document.documentElement.style.setProperty("--strip-h", `${el.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--strip-h");
+    };
+  }, [selected != null]);
 
   if (error && !reviews) return <p className="error">{error}</p>;
   if (!reviews) return <p className="muted pad">Loading…</p>;
@@ -468,7 +504,11 @@ export function Queue() {
               label="verdict"
               tip="Recommendation, and how sure the review is"
             />
-            <HeadCell className="col-age" label="upd" tip="When this review last changed" />
+            <HeadCell
+              className="col-age"
+              label="upd"
+              tip="When this review last changed — or, on a PR nobody has drafted yet, when the PR itself last changed on GitHub"
+            />
           </div>
 
           {rows.length === 0 ? (
@@ -496,20 +536,34 @@ export function Queue() {
               )}
             </div>
           ) : (
-            rows.map((r) => (
-              <Row
-                key={r.key}
-                r={r}
-                selected={r.key === selected?.key}
-                onSelect={() => setCursor(r.key)}
-                onOpen={() => openReview(r.key)}
-                awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-              />
+            rows.map((r, i) => (
+              <Fragment key={r.key}>
+                {/* Your own PRs follow the ones awaiting you, under a heading
+                    of their own: nobody is waiting on you for these. Only in
+                    the live tabs — the filed ones are records, in date order. */}
+                {INBOX_TABS.includes(tab) && startsOwnGroup(rows, i) && (
+                  <div
+                    className="group-head"
+                    role="heading"
+                    aria-level={2}
+                    title="PRs you opened. Never drafted on their own — press r for a self-review. Send posts it as a comment."
+                  >
+                    your PRs
+                  </div>
+                )}
+                <Row
+                  r={r}
+                  selected={r.key === selected?.key}
+                  onSelect={() => setCursor(r.key)}
+                  onOpen={() => openReview(r.key)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
+                />
+              </Fragment>
             ))
           )}
 
           {selected && detail && (
-            <div className="cursor-strip">
+            <div className="cursor-strip" ref={stripEl}>
               <div className="cursor-strip-body">
                 <div className="lab">
                   {selected.pr.owner}/{selected.pr.repo}#{selected.pr.number}

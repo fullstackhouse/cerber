@@ -338,7 +338,11 @@ has asked you again since — so its tag names who has it now
 does not send you back into a PR you deliberately passed on.
 
 **Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
-`reviewed`, `skipped`, `sent` — newest first inside each band. The `‹ ›` arrows
+`reviewed`, `skipped`, `sent` — newest first inside each band. "Newest" is
+`activityAt`: an `awaiting` row nobody has drafted is dated by the PR's own last
+activity on GitHub (`pr.updatedAt`, refreshed from every poll's search result),
+because its artifact's `updatedAt` is only when the poll found it; every other
+row by the review. The `upd` column shows the same date. The `‹ ›` arrows
 walk `walkable()`: open, unsettled rows only. That list is fetched once, when
 the review opens — finishing one must not renumber the walk under you — so a
 review you settle *during* the walk (skipped, marked reviewed, or sent) is
@@ -347,6 +351,38 @@ dropped from the snapshot in the browser instead (`walkFrom`, used by
 back into the PR you just skipped. The review you have open keeps its place
 whatever you did to it, because it is what the arrows and the "n of m" count
 read their position from, and a send leaves you standing on it.
+
+### Your own PRs
+
+GitHub never asks you to review your own PR — it will not let anyone request a
+review from the author — so the awaiting search finds one only when a team you
+are on was requested. The poll runs
+the same search a second time with `author:@me` (`searchAuthoredByMe`,
+`src/core/gh.ts`) and brings your open PRs in for a self-review **when you ask
+for one**. "Yours" is `pr.author` matching your login (`isOwnPr`,
+`src/core/own.ts`); nothing on the artifact records it. On such a row:
+
+- the poll never drafts it, whatever auto-review says for the repo, and never
+  announces it — its stub has no `notified` ledger (`stubArtifact`), so both
+  bells leave it alone, before and after you ask for a draft;
+- it is never filed (replying to your own PR's threads posts reviews of yours,
+  which is not you answering a request) and never reopened (a comment naming
+  the author is the PR's conversation, not an ask). Skip it to hide it; it
+  stays skipped;
+- yours is a fact about the PR, not about which search found it: a team
+  request on your own PR changes none of this;
+- it is listed after everything else in the live tabs, under a **your PRs**
+  heading, and the arrows walk it last (`ownLast`, `web/src/inbox.ts`). An
+  undrafted one does not light the favicon dot;
+- Send posts a comment and nothing else — GitHub refuses an approve or a change
+  request from the author — and auto-send never fires (`ownPrRefusal`,
+  `src/core/send.ts`; `evaluateAutoSend`);
+- it is not on the daemon's awaiting list, so it never shows under **open
+  requests**.
+
+It leaves the way every PR does: merged or closed, it drops out of the search
+and is archived. `cerber review --awaiting-me` still runs the awaiting search
+alone.
 
 ### Things that remove a row without you touching it
 
@@ -673,6 +709,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.intervalMinutes` | `5` | |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
+| `daemon.ownPrMaxAgeDays` | `30` | your own PRs idle longer than this many days stay out of the inbox — an `updated:>=` qualifier on the author search, so review requests are never aged. A stub that goes stale is reaped like any the search stopped returning; a draft stays. `0`/`null` = no cut |
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,

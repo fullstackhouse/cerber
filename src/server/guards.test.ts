@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { Artifact, ArtifactStatus, PrInfo, SCHEMA_VERSION } from "../core/artifact.js";
-import { fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
+import { currentLogin, fetchPrDiff, fetchPrInfo, submitReview } from "../core/gh.js";
 import { loadArtifact, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { beginReview, endReview } from "../runner/inflight.js";
 import { reviewPr } from "../runner/review.js";
@@ -16,12 +16,14 @@ vi.mock("../core/gh.js", async (orig) => ({
   submitReview: vi.fn(),
   fetchPrInfo: vi.fn(),
   fetchPrDiff: vi.fn(),
+  currentLogin: vi.fn(),
 }));
 vi.mock("../runner/review.js", () => ({ reviewPr: vi.fn(), pool: vi.fn() }));
 
 const submit = submitReview as Mock;
 const prInfo = fetchPrInfo as Mock;
 const prDiff = fetchPrDiff as Mock;
+const login = currentLogin as Mock;
 
 const home = mkdtempSync(path.join(os.tmpdir(), "cerber-guards-"));
 process.env.CERBER_HOME = home;
@@ -79,12 +81,12 @@ function artifact(status: ArtifactStatus): Artifact {
   };
 }
 
-const send = async () => {
+const send = async (event = "APPROVE") => {
   const app = await buildApp({});
   return app.request(`/api/reviews/${KEY}/send`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ event: "APPROVE", confirm: true }),
+    body: JSON.stringify({ event, confirm: true }),
   });
 };
 
@@ -109,6 +111,7 @@ const patchBody = async (body: Record<string, unknown>) => {
 beforeEach(() => {
   vi.clearAllMocks();
   submit.mockResolvedValue({ url: "https://github.com/acme/widgets/pull/42#r1" });
+  login.mockResolvedValue("me");
 });
 
 describe("POST /api/reviews/:key/send — not while a run is rewriting the draft", () => {
@@ -171,6 +174,74 @@ describe("POST /api/reviews/:key/send — not while a run is rewriting the draft
     const again = await send();
     expect(again.status).toBe(409);
     expect(submit).toHaveBeenCalledOnce();
+  });
+});
+
+describe("POST /api/reviews/:key/send — your own PR takes a comment only", () => {
+  const mine = () => ({ ...artifact("ready"), pr: { ...pr(), author: "Me" } });
+
+  it.each(["APPROVE", "REQUEST_CHANGES"])("refuses %s before anything reaches GitHub", async (event) => {
+    await saveArtifact(mine());
+    const res = await send(event);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("your own PR");
+    expect(submit).not.toHaveBeenCalled();
+    expect((await loadArtifact(ID))!.status).toBe("ready");
+  });
+
+  it("sends a comment", async () => {
+    await saveArtifact(mine());
+    const res = await send("COMMENT");
+    expect(res.status).toBe(200);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]![1].event).toBe("COMMENT");
+  });
+
+  it("leaves somebody else's PR alone, and GitHub the last word when gh cannot say who you are", async () => {
+    await saveArtifact(artifact("ready"));
+    expect((await send("APPROVE")).status).toBe(200);
+
+    await saveArtifact(mine());
+    login.mockRejectedValue(new Error("gh: not authenticated"));
+    expect((await send("APPROVE")).status).toBe(200);
+  });
+});
+
+describe("GET /api/reviews/:key — whether it is yours", () => {
+  it("says so on the review's own read", async () => {
+    await saveArtifact({ ...artifact("ready"), pr: { ...pr(), author: "me" } });
+    const app = await buildApp({});
+    expect(((await (await app.request(`/api/reviews/${KEY}`)).json()) as { own: boolean }).own).toBe(true);
+  });
+});
+
+describe("GET /api/reviews — the PR's own last activity", () => {
+  it("carries pr.updatedAt when the row has one", async () => {
+    await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), updatedAt: "2026-08-01T00:00:00Z" } });
+    const app = await buildApp({});
+    const rows = (await (await app.request("/api/reviews")).json()) as { id: string; pr: { updatedAt?: string } }[];
+    expect(rows.find((r) => r.id === ID)?.pr.updatedAt).toBe("2026-08-01T00:00:00Z");
+  });
+});
+
+describe("GET /api/reviews — never held up by gh", () => {
+  it("answers without the login when gh does not, marking nothing as yours", async () => {
+    login.mockReturnValue(new Promise(() => {}));
+    await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), author: "me" } });
+    const app = await buildApp({});
+    const rows = (await (await app.request("/api/reviews")).json()) as { id: string; own: boolean }[];
+    expect(rows.find((r) => r.id === ID)?.own).toBe(false);
+  }, 5000);
+});
+
+describe("GET /api/reviews — which rows are yours", () => {
+  it("marks a PR you opened as own, and nobody else's", async () => {
+    await saveArtifact({ ...artifact("awaiting"), pr: { ...pr(), author: "me" } });
+    await saveArtifact({ ...artifact("ready"), id: "acme/widgets#43", pr: { ...pr(), number: 43 } });
+    const app = await buildApp({});
+    const rows = (await (await app.request("/api/reviews")).json()) as { id: string; own: boolean }[];
+    expect(rows.find((r) => r.id === ID)?.own).toBe(true);
+    expect(rows.find((r) => r.id === "acme/widgets#43")?.own).toBe(false);
   });
 });
 

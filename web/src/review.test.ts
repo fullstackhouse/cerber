@@ -77,6 +77,13 @@ describe("eventForVerdict", () => {
     expect(eventForVerdict({ recommendation: "comment", confidence: 9, reasoning: "" })).toBe("COMMENT");
     expect(eventForVerdict(null)).toBe("COMMENT");
   });
+
+  it("is a comment on your own PR, whatever the verdict asks", () => {
+    expect(eventForVerdict({ recommendation: "approve", confidence: 9, reasoning: "" }, true)).toBe("COMMENT");
+    expect(eventForVerdict({ recommendation: "request_changes", confidence: 9, reasoning: "" }, true)).toBe(
+      "COMMENT",
+    );
+  });
 });
 
 describe("splitComments", () => {

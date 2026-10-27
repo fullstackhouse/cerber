@@ -1,5 +1,6 @@
 import { Artifact, Calibration, Comment, Verdict } from "./artifact.js";
 import type { ReplyOutcome } from "./gh.js";
+import { isOwnPr } from "./own.js";
 import { newSideLines } from "./diff.js";
 import { sendTreatment } from "./raised.js";
 import { withGrade } from "./severity.js";
@@ -10,6 +11,33 @@ export function eventForRecommendation(rec: Verdict["recommendation"]): ReviewEv
   return { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" }[
     rec
   ] as ReviewEvent;
+}
+
+/**
+ * Why Send refuses this event on this PR, or null when it may go.
+ *
+ * Your own PR takes a comment and nothing else: GitHub refuses an approve or a
+ * change request from a PR's author, and GitHub's error after the click is a
+ * worse place to learn that than here.
+ * A login nobody could fetch refuses nothing; GitHub is still the last word.
+ */
+export function ownPrRefusal(
+  pr: { author: string },
+  event: ReviewEvent,
+  login: string | null,
+): string | null {
+  if (event === "COMMENT" || !isOwnPr(pr, login)) return null;
+  const what = event === "APPROVE" ? "an approve" : "a change request";
+  return `this is your own PR, and GitHub takes no ${what} from its author — send it as a comment`;
+}
+
+/** What Send posts by default: the verdict's event, except on your own PR. */
+export function defaultSendEvent(
+  artifact: Pick<Artifact, "pr" | "verdict">,
+  login: string | null,
+): ReviewEvent {
+  if (isOwnPr(artifact.pr, login)) return "COMMENT";
+  return artifact.verdict ? eventForRecommendation(artifact.verdict.recommendation) : "COMMENT";
 }
 
 export interface InlineComment {
