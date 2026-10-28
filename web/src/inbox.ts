@@ -62,14 +62,6 @@ export function tabOf(r: ReviewListItem): "awaiting" | "drafted" | "sent" {
 export const isArchived = (r: ReviewListItem) => !!r.pr.state && r.pr.state !== "OPEN";
 
 /**
- * How much a review wants you, most first: a finished draft is the thing to
- * read; one nobody has drafted yet is a keypress away; a run in flight will
- * arrive on its own; a failed one needs a hand. Settled reviews sink, and a
- * sent one is history. Newest first inside each band.
- */
-const STATUS_ORDER = ["ready", "awaiting", "running", "failed", "reviewed", "skipped", "sent"];
-
-/**
  * When this row last moved, for the `upd` column and the order inside a band.
  *
  * A row nobody has drafted (`awaiting`) has nothing of cerber's in it: its
@@ -82,12 +74,14 @@ export function activityAt(r: ReviewListItem): string {
   return r.status === "awaiting" ? (r.pr.updatedAt ?? r.updatedAt) : r.updatedAt;
 }
 
+/**
+ * Most recent activity first, whatever the status. Ranking drafted rows above
+ * undrafted ones buried a PR that moved minutes ago under drafts from
+ * yesterday; the tabs already split the queue by status, and the `upd` column
+ * should read top-down.
+ */
 export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
-  return [...list].sort(
-    (a, b) =>
-      STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
-      activityAt(b).localeCompare(activityAt(a)),
-  );
+  return [...list].sort((a, b) => activityAt(b).localeCompare(activityAt(a)));
 }
 
 /** Statuses that mean you have dealt with this review, one way or another. */
