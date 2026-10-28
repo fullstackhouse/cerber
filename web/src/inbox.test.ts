@@ -519,23 +519,16 @@ describe("a review you handed to somebody else", () => {
 });
 
 describe("sortReviews", () => {
-  it("puts what wants you most on top, newest first inside a band", () => {
+  it("puts the most recent activity on top, whatever the status", () => {
+    const at = (h: number) => `2026-08-19T${String(h).padStart(2, "0")}:00:00.000Z`;
     const list = [
-      row({ key: "sent", status: "sent" }),
-      row({ key: "running", status: "running" }),
-      row({ key: "failed", status: "failed" }),
-      row({ key: "ready-old", status: "ready", updatedAt: "2026-08-01T12:00:00.000Z" }),
-      row({ key: "awaiting", status: "awaiting" }),
-      row({ key: "ready-new", status: "ready", updatedAt: "2026-08-19T12:00:00.000Z" }),
+      row({ key: "ready-old", status: "ready", updatedAt: at(1) }),
+      row({ key: "sent", status: "sent", updatedAt: at(5) }),
+      row({ key: "awaiting-new", status: "awaiting", updatedAt: at(2), pr: { ...row().pr, updatedAt: at(9) } }),
+      row({ key: "failed", status: "failed", updatedAt: at(3) }),
+      row({ key: "ready-new", status: "ready", updatedAt: at(7) }),
     ];
-    expect(sortReviews(list).map((r) => r.key)).toEqual([
-      "ready-new",
-      "ready-old",
-      "awaiting",
-      "running",
-      "failed",
-      "sent",
-    ]);
+    expect(sortReviews(list).map((r) => r.key)).toEqual(["awaiting-new", "ready-new", "sent", "failed", "ready-old"]);
   });
 });
 
@@ -667,10 +660,11 @@ describe("the queue strip's count of per-repo exceptions", () => {
 });
 
 describe("your own PRs in the queue", () => {
-  const theirsReady = row({ id: "acme/web#1", key: "theirs-ready", status: "ready" });
-  const theirsQueued = row({ id: "acme/web#2", key: "theirs-queued", status: "awaiting" });
-  const mineReady = row({ id: "acme/web#3", key: "mine-ready", status: "ready", own: true });
-  const mineQueued = row({ id: "acme/web#4", key: "mine-queued", status: "awaiting", own: true });
+  const at = (h: number) => `2026-08-19T${String(h).padStart(2, "0")}:00:00.000Z`;
+  const theirsReady = row({ id: "acme/web#1", key: "theirs-ready", status: "ready", updatedAt: at(4) });
+  const theirsQueued = row({ id: "acme/web#2", key: "theirs-queued", status: "awaiting", updatedAt: at(3) });
+  const mineReady = row({ id: "acme/web#3", key: "mine-ready", status: "ready", own: true, updatedAt: at(9) });
+  const mineQueued = row({ id: "acme/web#4", key: "mine-queued", status: "awaiting", own: true, updatedAt: at(8) });
   const list = [mineReady, theirsQueued, mineQueued, theirsReady];
 
   it("lists them after every PR awaiting you, in every live tab and on the walk", () => {

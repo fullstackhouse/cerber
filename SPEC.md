@@ -1914,9 +1914,8 @@ who has it now rather than with the whose-move label.
 
 ### 17.3 One Walkable Set
 
-A single definition — non-archived, non-settled, status-ordered
-(`ready, awaiting, running, failed, reviewed, skipped, sent`, newest first
-within a band — an `awaiting` row dated by the PR's own last activity
+A single definition — non-archived, non-settled, newest first whatever the
+status (an `awaiting` row dated by the PR's own last activity
 (`pr.updatedAt`), since its artifact's `updatedAt` is only when the poll found
 it; every other row by the review's), the user's own PRs last (§17.1) — MUST
 back the prev/next walk, the arrival bell and the favicon dot. These are one
