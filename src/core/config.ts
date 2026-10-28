@@ -4,6 +4,8 @@ import { z } from "zod";
 import { cerberHome } from "./state.js";
 import { TrustRuleError, parseTrustRule } from "./trust.js";
 
+export const MAX_INTERVAL_MINUTES = 1440;
+
 /**
  * `~/.cerber/config.json` — everything cerber lets you decide, in one file the
  * cockpit can write and you can still edit by hand. Absent means defaults, so
@@ -48,7 +50,8 @@ export const DaemonConfigSchema = z.object({
    * and permitted; this one only needs `serve` running, which is the point.
    */
   notify: z.boolean().default(true),
-  intervalMinutes: z.number().int().positive().default(5),
+  /** Capped at a day: past ~25 days Node's setTimeout overflows and fires at once. */
+  intervalMinutes: z.number().int().positive().max(MAX_INTERVAL_MINUTES).default(5),
   parallel: z.number().int().positive().default(3),
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
   repos: z.array(z.string()).default([]),

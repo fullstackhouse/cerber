@@ -6,7 +6,7 @@ import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
 import { anyAutoReview, capAutoReview } from "../core/autoreview.js";
-import { configPath, loadConfig, saveConfig } from "../core/config.js";
+import { MAX_INTERVAL_MINUTES, configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
@@ -639,7 +639,10 @@ program
         ? startDaemon({
             repos: opts.repo.length > 0 ? opts.repo : d.repos,
             intervalMs:
-              Math.max(1, opts.interval !== undefined ? Number(opts.interval) || d.intervalMinutes : d.intervalMinutes) *
+              Math.min(
+                MAX_INTERVAL_MINUTES,
+                Math.max(1, opts.interval !== undefined ? Number(opts.interval) || d.intervalMinutes : d.intervalMinutes),
+              ) *
               60_000,
             intervalFixed: opts.interval !== undefined,
             parallel: Math.max(1, opts.parallel !== undefined ? Number(opts.parallel) || d.parallel : d.parallel),

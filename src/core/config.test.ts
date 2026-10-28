@@ -44,6 +44,14 @@ describe("config", () => {
     await expect(loadConfig()).rejects.toThrow();
   });
 
+  it("refuses a poll interval past a day, which setTimeout would turn into non-stop polling", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"intervalMinutes": 1440}}');
+    expect((await loadConfig()).daemon.intervalMinutes).toBe(1440);
+    await fs.writeFile(configPath(), '{"daemon": {"intervalMinutes": 99999}}');
+    await expect(loadConfig()).rejects.toThrow(/intervalMinutes/);
+  });
+
   it("keeps an inbox knob a hand-edit flipped, defaulting the rest", async () => {
     await fs.mkdir(home, { recursive: true });
     await fs.writeFile(configPath(), '{"daemon": {"autoReview": false}}');

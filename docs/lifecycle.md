@@ -708,7 +708,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
 | `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
-| `daemon.intervalMinutes` | `5` | minutes between polls |
+| `daemon.intervalMinutes` | `5` | minutes between polls, at most 1440 (a day) |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
 | `daemon.ownPrMaxAgeDays` | `30` | your own PRs idle longer than this many days stay out of the inbox — an `updated:>=` qualifier on the author search, so review requests are never aged. A stub that goes stale is reaped like any the search stopped returning; a draft stays. `0`/`null` = no cut |

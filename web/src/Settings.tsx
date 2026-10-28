@@ -13,6 +13,9 @@ const EXAMPLES = [
   { rule: "!@acme/contractors", meaning: "deny — beats every rule above" },
 ];
 
+/** Mirrors the config schema's cap - past ~25 days setTimeout overflows. */
+const MAX_INTERVAL_MINUTES = 1440;
+
 /** Rule errors carry the guidance a person needs — show it, not "Error: ...". */
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -197,7 +200,7 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   // On blur/Enter rather than per keystroke: typing "15" would save "1" first.
   const saveInterval = () => {
     const minutes = Number(intervalDraft);
-    if (!Number.isInteger(minutes) || minutes < 1) {
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_INTERVAL_MINUTES) {
       setIntervalDraft(String(config.daemon.intervalMinutes));
     } else if (minutes !== config.daemon.intervalMinutes) {
       apply(updateDaemonConfig({ intervalMinutes: minutes }));
@@ -230,6 +233,7 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           type="number"
           className="interval-input"
           min={1}
+          max={MAX_INTERVAL_MINUTES}
           step={1}
           value={intervalDraft}
           disabled={busy || !config.daemon.poll || intervalFixed}
