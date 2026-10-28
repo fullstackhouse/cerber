@@ -40,6 +40,12 @@ export interface DaemonOptions {
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
   repos: string[];
   intervalMs: number;
+  /**
+   * True when `--interval` pinned `intervalMs` for this run. Otherwise the
+   * config's daemon.intervalMinutes is re-read every poll, and `reconfigure` applies
+   * a cockpit change to the timer already waiting.
+   */
+  intervalFixed: boolean;
   parallel: number;
   model?: string;
   /** False reviews the diff alone, with no local checkout. Defaults to on. */
@@ -94,6 +100,8 @@ export interface DaemonStatus {
   polling: boolean;
   repos: string[];
   intervalMs: number;
+  /** `--interval` pinned it, so the config's value is ignored for this run. */
+  intervalFixed: boolean;
   /** False when the config's daemon.poll toggle idles the loop. */
   pollEnabled: boolean;
   /**
@@ -400,11 +408,13 @@ const STATE_REFRESH_MIN_MS = 30 * 60_000;
 export function startDaemon(opts: DaemonOptions): DaemonHandle {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
+  let lastPollEndedAt = Date.now();
   const status: DaemonStatus = {
     enabled: true,
     polling: false,
     repos: opts.repos,
     intervalMs: opts.intervalMs,
+    intervalFixed: opts.intervalFixed,
     pollEnabled: true,
     // Claims nothing until a poll has read the config, so the cockpit's bell
     // keeps its own counsel for the few seconds that takes.
@@ -995,6 +1005,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    */
   function applyKnobs(config: Config, me: string | null = null) {
     const knobs = config.daemon;
+    if (!opts.intervalFixed) status.intervalMs = knobs.intervalMinutes * 60_000;
     const autoReview = capAutoReview(knobs, opts.autoReview);
     // Your own PRs are never drafted unasked, whatever auto-review says for
     // their repo: they are in the inbox for a self-review on demand. The same
@@ -1099,11 +1110,15 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     } finally {
       status.polls++;
       status.polling = false;
-      if (!stopped) {
-        status.nextPollAt = new Date(Date.now() + opts.intervalMs).toISOString();
-        timer = setTimeout(poll, opts.intervalMs);
-      }
+      lastPollEndedAt = Date.now();
+      if (!stopped) schedule(status.intervalMs);
     }
+  }
+
+  function schedule(delayMs: number): void {
+    if (timer) clearTimeout(timer);
+    status.nextPollAt = new Date(Date.now() + delayMs).toISOString();
+    timer = setTimeout(poll, delayMs);
   }
 
   async function handleAutoSend(artifact: Artifact): Promise<void> {
@@ -1159,7 +1174,13 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       cockpitUrl = url;
     },
     reconfigure: (config) => {
+      const before = status.intervalMs;
       applyKnobs(config);
+      // A new interval applies to the wait already under way, so 5 -> 1 doesn't
+      // sit out the old timer. Mid-poll the finally block schedules it anyway.
+      if (status.intervalMs !== before && !stopped && !status.polling) {
+        schedule(Math.max(0, lastPollEndedAt + status.intervalMs - Date.now()));
+      }
     },
     stop: () => {
       stopped = true;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, fetchReviews, updateAutoReviewRepo, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, fetchDaemonStatus, fetchReviews, updateAutoReviewRepo, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
 import { SendKey, useSendKey } from "./sendkey";
 import { useStickyChapters } from "./sticky-chapters";
@@ -12,6 +12,9 @@ const EXAMPLES = [
   { rule: "@teammate", meaning: "one person, by login" },
   { rule: "!@acme/contractors", meaning: "deny — beats every rule above" },
 ];
+
+/** Mirrors the config schema's cap - past ~25 days setTimeout overflows. */
+const MAX_INTERVAL_MINUTES = 1440;
 
 /** Rule errors carry the guidance a person needs — show it, not "Error: ...". */
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -164,10 +167,19 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [intervalDraft, setIntervalDraft] = useState("");
+  const [intervalFixed, setIntervalFixed] = useState(false);
 
   useEffect(() => {
     fetchConfig().then(setConfig).catch((e) => setError(message(e)));
+    fetchDaemonStatus()
+      .then((s) => setIntervalFixed(s.enabled && s.intervalFixed))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (config) setIntervalDraft(String(config.daemon.intervalMinutes));
+  }, [config]);
 
   const apply = (p: Promise<ConfigView>) => {
     setBusy(true);
@@ -184,6 +196,16 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   // flipped here. Unticking the machine's notification is a request for this
   // browser's, so the lock lifts with the click rather than on the next read.
   const machineAnnounces = daemonAnnounces && config.daemon.poll && config.daemon.notify;
+
+  // On blur/Enter rather than per keystroke: typing "15" would save "1" first.
+  const saveInterval = () => {
+    const minutes = Number(intervalDraft);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_INTERVAL_MINUTES) {
+      setIntervalDraft(String(config.daemon.intervalMinutes));
+    } else if (minutes !== config.daemon.intervalMinutes) {
+      apply(updateDaemonConfig({ intervalMinutes: minutes }));
+    }
+  };
 
   return (
     <div className="settings">
@@ -203,7 +225,25 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           disabled={busy}
           onChange={(e) => apply(updateDaemonConfig({ poll: e.target.checked }))}
         />{" "}
-        poll GitHub for PRs awaiting my review (every {config.daemon.intervalMinutes}m)
+        poll GitHub for PRs awaiting my review
+      </label>
+      <label className="inbox-toggle">
+        poll every
+        <input
+          type="number"
+          className="interval-input"
+          min={1}
+          max={MAX_INTERVAL_MINUTES}
+          step={1}
+          value={intervalDraft}
+          disabled={busy || !config.daemon.poll || intervalFixed}
+          onChange={(e) => setIntervalDraft(e.target.value)}
+          onBlur={saveInterval}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveInterval();
+          }}
+        />
+        minutes{intervalFixed && <span className="muted"> (set by --interval for this run)</span>}
       </label>
       <label className="inbox-toggle">
         <input
@@ -229,7 +269,7 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         (<code>ownPrMaxAgeDays</code>; 0 turns the cut off).
       </p>
       <p className="muted">
-        Interval, concurrency, a repo filter and that age cut live in <code>{config.path}</code>{" "}
+        Concurrency, a repo filter and that age cut live in <code>{config.path}</code>{" "}
         under <code>daemon</code> — hand-editable, like everything here.
       </p>
 

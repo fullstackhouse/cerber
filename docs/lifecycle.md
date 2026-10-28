@@ -694,10 +694,12 @@ dropped. Deleting a stub deletes its history with it; nothing else removes one.
 ## 7. Settings that change any of this
 
 `~/.cerber/config.json`, zod-validated, and mostly live. The poll re-reads it
-every tick and acts on `poll`, `autoReview` and `autoReviewRepos`, so the cockpit's toggles apply
-without a restart; `trust` is re-read by every `reviewPr` call, so a rule you
-add binds the next run. Only `intervalMinutes`, `parallel` and `repos` are
-captured by `startDaemon` and need a restart. Absent = defaults, which is a working state,
+every tick and acts on `poll`, `autoReview`, `autoReviewRepos` and
+`intervalMinutes`, so the cockpit's settings apply without a restart (a new
+interval from the cockpit also retimes the wait already under way; `--interval`
+pins it for the run); `trust` is re-read by every `reviewPr` call, so a rule you
+add binds the next run. Only `parallel` and `repos` are captured by
+`startDaemon` and need a restart. Absent = defaults, which is a working state,
 not an open one: polling and auto-review are on, `trust` is empty (every run
 read-only) and auto-send does nothing but log.
 
@@ -706,7 +708,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
 | `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
-| `daemon.intervalMinutes` | `5` | |
+| `daemon.intervalMinutes` | `5` | minutes between polls, at most 1440 (a day) |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
 | `daemon.ownPrMaxAgeDays` | `30` | your own PRs idle longer than this many days stay out of the inbox — an `updated:>=` qualifier on the author search, so review requests are never aged. A stub that goes stale is reaped like any the search stopped returning; a draft stays. `0`/`null` = no cut |

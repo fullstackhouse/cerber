@@ -336,6 +336,8 @@ export type DaemonStatus =
       polling: boolean;
       repos: string[];
       intervalMs: number;
+      /** `--interval` pinned it for this run; the setting is ignored. */
+      intervalFixed: boolean;
       /** False when the config's poll toggle idles the loop. */
       pollEnabled: boolean;
       /** The daemon taps this machine itself when a PR lands — see notify.ts. */
