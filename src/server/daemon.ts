@@ -1,6 +1,7 @@
 import { Artifact, FiledInfo, SCHEMA_VERSION, artifactId, artifactKey } from "../core/artifact.js";
 import { evaluateAutoSend } from "../core/autosend.js";
-import { loadConfig } from "../core/config.js";
+import { anyAutoReview, autoReviewFor, capAutoReview } from "../core/autoreview.js";
+import { Config, loadConfig } from "../core/config.js";
 import {
   DiscoveredPr,
   Reply,
@@ -13,11 +14,14 @@ import {
   fetchReviewRequests,
   lastMentionOfYou,
   lastWordOfYours,
+  ownPrUpdatedSince,
+  searchAuthoredByMe,
   searchAwaitingMe,
   stillRequested,
   submitReview,
 } from "../core/gh.js";
 import { withWriter } from "../core/history.js";
+import { isOwnPr } from "../core/own.js";
 import { isNews, pendingNews, notice, notify } from "../core/notify.js";
 import { buildReviewPayload, computeCalibration } from "../core/send.js";
 import {
@@ -38,7 +42,7 @@ export interface DaemonOptions {
   intervalMs: number;
   /**
    * True when `--interval` pinned `intervalMs` for this run. Otherwise the
-   * config's daemon.intervalMinutes is re-read every poll, and `retime` applies
+   * config's daemon.intervalMinutes is re-read every poll, and `reconfigure` applies
    * a cockpit change to the timer already waiting.
    */
   intervalFixed: boolean;
@@ -51,8 +55,10 @@ export interface DaemonOptions {
   /**
    * Draft an AI review for whatever lands in the queue. False discovers only:
    * awaiting rows appear, and the human clicks review when they want a draft.
-   * This is the per-run cap (--no-auto-review); the config's daemon.autoReview
-   * is consulted live on every poll, so the cockpit toggle needs no restart.
+   * This is the per-run cap (--no-auto-review), and it caps the per-repo
+   * exceptions too: false means this process starts no runs at all. The
+   * config's daemon.autoReview and autoReviewRepos are consulted live on every
+   * poll, so the cockpit toggles need no restart.
    */
   autoReview: boolean;
   /**
@@ -104,7 +110,10 @@ export interface DaemonStatus {
    * `web/src/notify.ts`.
    */
   notify: boolean;
+  /** The default for repos with no exception below. */
   autoReview: boolean;
+  /** Per-repo exceptions to `autoReview` (config's daemon.autoReviewRepos). */
+  autoReviewRepos: Record<string, boolean>;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
   polls: number;
@@ -138,17 +147,49 @@ export interface DaemonHandle {
    * its first poll is already running while the port is being bound.
    */
   cockpitAt: (url: string | null) => void;
-  /** A new interval from Settings, applied to the wait already under way. */
-  retime: (minutes: number) => void;
+  /**
+   * The config was just saved. Brings the knob-derived status up to date now
+   * rather than at the next poll, which can be minutes away: the cockpit's own
+   * bell stands down on `status.notify`, so a stale one leaves the browser
+   * switch locked for the rest of the interval after you untick the machine's.
+   */
+  reconfigure: (config: Config) => void;
+}
+
+/**
+ * Whether a row could be one of your own PRs: it is, or cerber cannot tell
+ * because gh would not say who you are.
+ */
+export const mightBeYours = (a: Artifact, me: string | null) => me === null || isOwnPr(a.pr, me);
+
+/**
+ * The poll's searches as one list: first occurrence wins, so the order the
+ * searches are passed in is the order of precedence.
+ */
+export function dedupeDiscovered(refs: DiscoveredPr[]): DiscoveredPr[] {
+  const seen = new Set<string>();
+  return refs.filter((r) => {
+    const id = artifactId(r);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /**
  * A pure discovery stub: enough artifact for the queue to show an awaiting row.
  * The AI run that follows (automatic or clicked) replaces it wholesale.
+ *
+ * `own` is a PR you opened yourself. It gets no `notified` ledger at all —
+ * absent, which is "nobody meant to announce this row" — because nobody is
+ * waiting on you for it: it is in the inbox so you can ask for a self-review
+ * when you want one, not to call you back to the cockpit. Both bells read the
+ * ledger, so this one omission keeps the machine's tap and the browser's quiet
+ * about it, now and after you ask for a draft (the run carries the ledger over).
  */
-export function stubArtifact(ref: DiscoveredPr): Artifact {
+export function stubArtifact(ref: DiscoveredPr, own = false): Artifact {
   const now = new Date().toISOString();
-  return {
+  const stub: Artifact = {
     schemaVersion: SCHEMA_VERSION,
     id: artifactId(ref),
     status: "awaiting",
@@ -167,6 +208,7 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
       headSha: "",
       state: "OPEN",
       isDraft: ref.isDraft,
+      updatedAt: ref.updatedAt,
       additions: 0,
       deletions: 0,
       changedFiles: 0,
@@ -180,7 +222,10 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     // Null, not absent: the poll found this PR, so it owes the machine a tap
     // for it — once there is something to tap you about (§9.8).
@@ -190,6 +235,8 @@ export function stubArtifact(ref: DiscoveredPr): Artifact {
     preChat: null,
     pendingChat: null,
   };
+  if (own) delete stub.notified;
+  return stub;
 }
 
 /**
@@ -373,6 +420,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // keeps its own counsel for the few seconds that takes.
     notify: false,
     autoReview: opts.autoReview,
+    autoReviewRepos: {},
     trustedRuns: false,
     polls: 0,
     errors: 0,
@@ -395,17 +443,43 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    *  artifact id. In-memory for the same reason: a restart just asks sooner. */
   const requestCheckedAt = new Map<string, number>();
 
-  async function discover(): Promise<DiscoveredPr[]> {
+  /**
+   * What GitHub has for you: the PRs awaiting your review, then your own open
+   * ones, as one deduplicated list — and whether the second search ran at all
+   * (`ownSearched`).
+   *
+   * Your own PRs are asked for only when cerber knows who you are (`me`). The
+   * whole of their special handling — never drafted, never announced, never
+   * approved — turns on recognising them, so a poll that could not tell would
+   * be better off not bringing them in at all than bringing them in as if
+   * somebody had asked. And that search is the optional half: when it fails,
+   * the PRs people are waiting on you for still come through, and the poll
+   * says what it could not see rather than failing whole. Which search found a
+   * PR decides nothing — a team you are on can be requested on your own PR,
+   * and `isOwnPr` reads the author either way.
+   */
+  async function discover(
+    me: string | null,
+    ownPrMaxAgeDays: number | null | undefined,
+  ): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
-    const seen = new Set<string>();
-    return (await Promise.all(filters.map((repo) => searchAwaitingMe(repo))))
-      .flat()
-      .filter((r) => {
-        const id = artifactId(r);
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
+    // Your own PRs only: a review request is never aged out. One that went
+    // stale leaves the search, and the reaper below drops its stub like any
+    // other the search stopped returning — a draft of yours stays put.
+    const since = ownPrUpdatedSince(ownPrMaxAgeDays);
+    const [awaiting, authored] = await Promise.all([
+      Promise.all(filters.map((repo) => searchAwaitingMe(repo))),
+      me === null
+        ? Promise.resolve(null)
+        : Promise.all(filters.map((repo) => searchAuthoredByMe(repo, since))).catch((err: unknown) => {
+            log(`could not search for your own PRs: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          }),
+    ]);
+    return {
+      refs: dedupeDiscovered([...awaiting.flat(), ...(authored ?? []).flat()]),
+      ownSearched: authored !== null,
+    };
   }
 
   /**
@@ -414,7 +488,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * request went away. Freshness decisions always come from local artifacts —
    * search results lag GitHub by minutes and never override them.
    */
-  async function syncQueue(refs: DiscoveredPr[]): Promise<{ discovered: DiscoveredPr[] }> {
+  async function syncQueue(refs: DiscoveredPr[], ownSearched: boolean): Promise<{ discovered: DiscoveredPr[] }> {
     const discovered: DiscoveredPr[] = [];
     /** Reopen checks spent this poll — the same cap the state refresh below obeys. */
     let reopenChecks = 0;
@@ -450,6 +524,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
      */
     async function reopenIfAskedAgain(artifact: Artifact): Promise<void> {
       if (settledAtOf(artifact) === null) return;
+      // Nobody can ask you to review your own PR, and a comment naming its
+      // author is the conversation of the PR rather than a request for a
+      // review — so a skip there stands until you undo it yourself.
+      if (isOwnPr(artifact.pr, await who())) return;
       const last = requestCheckedAt.get(artifact.id) ?? 0;
       if (reopenChecks >= STATE_REFRESH_CAP || Date.now() - last < STATE_REFRESH_MIN_MS) return;
       reopenChecks++;
@@ -496,6 +574,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       if (settledAtOf(artifact) === null) return;
       const me = await who();
       if (me === null) return;
+      if (isOwnPr(artifact.pr, me)) return;
       let ask: Ask | null;
       try {
         ask = await askedInWords(artifact, me);
@@ -522,8 +601,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       const saved = await updateArtifactByKey(artifactKey(artifact.id), (a) =>
         askedAgainAfterSettling(a, at)
           ? // `filed` goes with the status it explained: cerber's account of why
-            // this row was settled is not the story of a row that is back.
-            { ...a, status: reopenedStatus(a), settledAt: null, filed: null }
+            // this row was settled is not the story of a row that is back. So
+            // does `handoff`, and for a sharper reason: every line it prints
+            // says GitHub is asking somebody else and no longer asking you,
+            // which is the one fact a reopen has just disproved. Left behind it
+            // would also tell the next handoff your request was already
+            // withdrawn, and that one skips the withdrawal — so the row would
+            // claim you were taken off a PR you are still on.
+            { ...a, status: reopenedStatus(a), settledAt: null, filed: null, handoff: null }
           : a,
       );
       // The status is what says the write landed. `settledAt` cannot: a legacy
@@ -545,15 +630,27 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         // predate a draft→ready flip. Refresh from it — it costs nothing, it's
         // already in hand — or the queue keeps calling a ready PR a draft until
         // something happens to re-review it.
-        if (existing.pr.isDraft !== ref.isDraft) {
+        //
+        // The PR's last activity is refreshed only on a row nobody has drafted,
+        // the one place the queue reads it (`activityAt`). Every write bumps the
+        // artifact's own `updatedAt`, and on a drafted row that is the review's
+        // date: refreshing there would re-date every draft by the poll each time
+        // its PR saw a comment, which is the meaningless date this field exists
+        // to replace — and would race an open review's refresh besides.
+        const activity = existing.status === "awaiting" && existing.pr.updatedAt !== ref.updatedAt;
+        if (existing.pr.isDraft !== ref.isDraft || activity) {
           await updateArtifactByKey(artifactKey(existing.id), (a) => ({
             ...a,
-            pr: { ...a.pr, isDraft: ref.isDraft },
+            pr: {
+              ...a.pr,
+              isDraft: ref.isDraft,
+              updatedAt: a.status === "awaiting" ? ref.updatedAt : a.pr.updatedAt,
+            },
           }));
         }
         continue;
       }
-      await saveArtifact(stubArtifact(ref));
+      await saveArtifact(stubArtifact(ref, isOwnPr(ref, await who())));
       discovered.push(ref);
     }
 
@@ -585,6 +682,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       if (artifact.status !== "ready" || artifact.sent) return;
       const me = await who();
       if (me === null) return;
+      // Your own PR is never filed. Every reason below reads *you* acting on
+      // the PR as an answer to somebody's request, and on your own PR you act
+      // all the time — replying to its review threads posts a review of yours —
+      // with no request there to answer. It leaves the inbox when it merges or
+      // closes, or when you skip it.
+      if (isOwnPr(artifact.pr, me)) return;
 
       /** Re-reads from disk: a run or a send may have started in the seconds
        *  these reads took, and neither wants filing out from under it. */
@@ -666,10 +769,16 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           if (pr.state !== "OPEN") {
             await updateArtifactByKey(artifactKey(artifact.id), (a) => ({ ...a, pr }));
             log(`[${artifact.id}] ${pr.state.toLowerCase()} — archived`);
-          } else {
+          } else if (ownSearched || !mightBeYours(artifact, await who())) {
             await deleteArtifact(artifact.id);
             log(`[${artifact.id}] no longer awaiting your review — removed from the queue`);
           }
+          // Otherwise this poll could not look for your own PRs, so "not in
+          // the results" says nothing about a stub that may be yours: it
+          // stays, rather than being dropped and logged as gone only to
+          // return next poll. Everybody else's is reaped as before — unless
+          // gh cannot say who you are, when any stub may be yours and every
+          // one waits for a poll that can tell.
         } catch {
           // GitHub unreachable — leave the stub; next poll retries.
         }
@@ -748,9 +857,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * quiet week would announce that whole week at once — the same reason the
    * browser bell records what it stays quiet about.
    */
-  async function announce(autoReview: boolean, tell: boolean): Promise<void> {
+  async function announce(
+    drafts: (pr: { owner: string; repo: string; author: string }) => boolean,
+    tell: boolean,
+  ): Promise<void> {
     const owed = (await listArtifacts()).flatMap((a) => {
-      const news = pendingNews(a, autoReview);
+      const news = pendingNews(a, drafts(a.pr));
       return news ? [{ id: a.id, news }] : [];
     });
     // `cockpitUrl` is where a click lands, and it is read here rather than
@@ -887,6 +999,35 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     return { reviewed, skipped, failed };
   }
 
+  /**
+   * The status fields that follow the config, set from it. The poll calls this
+   * with what it just read, and `reconfigure` with what the cockpit just saved.
+   */
+  function applyKnobs(config: Config, me: string | null = null) {
+    const knobs = config.daemon;
+    if (!opts.intervalFixed) status.intervalMs = knobs.intervalMinutes * 60_000;
+    const autoReview = capAutoReview(knobs, opts.autoReview);
+    // Your own PRs are never drafted unasked, whatever auto-review says for
+    // their repo: they are in the inbox for a self-review on demand. The same
+    // predicate decides when a tap is due, which keeps them quiet there too.
+    const drafts = (pr: { owner: string; repo: string; author: string }) =>
+      !isOwnPr(pr, me) && autoReviewFor(autoReview, pr.owner, pr.repo);
+    status.pollEnabled = knobs.poll;
+    // What the cockpit's bell defers to: a loop that isn't polling announces
+    // nothing, whatever the notify toggle says.
+    const notifyOn = opts.notify && knobs.notify;
+    // Only true while all three hold, and the third is only knowable by
+    // having tried: a notifier that isn't there is not a bell the cockpit
+    // should be standing down for.
+    const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
+    status.notify = announcing();
+    status.autoReview = autoReview.autoReview;
+    status.autoReviewRepos = autoReview.autoReviewRepos;
+    // Recomputed too, so a trust rule added mid-run shows up in the strip.
+    status.trustedRuns = anyAutoReview(autoReview) && opts.trust !== false && config.trust.length > 0;
+    return { knobs, drafts, drafting: anyAutoReview(autoReview), notifyOn, announcing };
+  }
+
   /** Everything a poll writes is the poll's — including the reviews it starts,
    *  which stamp themselves as runs from inside this. */
   const poll = () => withWriter({ by: "daemon", cause: "poll" }, runPoll);
@@ -902,21 +1043,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // or the knobs), so a broken file skips the tick loudly instead of
       // proceeding on guessed defaults.
       const config = await loadConfig();
-      const knobs = config.daemon;
-      if (!opts.intervalFixed) status.intervalMs = knobs.intervalMinutes * 60_000;
-      const autoReview = opts.autoReview && knobs.autoReview;
-      status.pollEnabled = knobs.poll;
-      // What the cockpit's bell defers to: a loop that isn't polling announces
-      // nothing, whatever the notify toggle says.
-      const notifyOn = opts.notify && knobs.notify;
-      // Only true while all three hold, and the third is only knowable by
-      // having tried: a notifier that isn't there is not a bell the cockpit
-      // should be standing down for.
-      const announcing = () => knobs.poll && notifyOn && notifierWorks !== false;
-      status.notify = announcing();
-      status.autoReview = autoReview;
-      // Recomputed too, so a trust rule added mid-run shows up in the strip.
-      status.trustedRuns = autoReview && opts.trust !== false && config.trust.length > 0;
+      // Who you are, asked once per poll (and cached for the process): it is
+      // what tells your own PRs apart from the ones awaiting you. Null is "gh
+      // could not say", and then no own PR is brought in at all — see `discover`.
+      const me = await currentLogin().catch(() => null);
+      const { knobs, drafts, drafting, notifyOn, announcing } = applyKnobs(config, me);
 
       if (!knobs.poll) {
         // Deliberately off is not an outage — don't leave a stale error up, or
@@ -927,21 +1058,34 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         return;
       }
 
-      const refs = await discover();
+      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays);
+      // Your own PRs are synced into the queue with the rest, but nobody is
+      // asking you for them: they are not "awaiting" in anything the strip
+      // counts, and the cockpit's open-requests tab — "GitHub still lists you
+      // as a requested reviewer" — must never name one.
+      const asked = refs.filter((r) => !isOwnPr(r, me));
+      const yours = refs.length - asked.length;
+      const ownPart = yours > 0 ? `, ${yours} of your own` : "";
       status.lastPollError = null;
       // The same refs behind lastSummary's count, so the number the strip shows
       // and the rows the cockpit can name always come from one answer.
       // A failed poll leaves the last good list up; lastPollError says so.
-      status.awaiting = await classifyAll(refs);
-      const { discovered } = await syncQueue(refs);
+      status.awaiting = await classifyAll(asked);
+      const { discovered } = await syncQueue(refs, ownSearched);
 
-      if (autoReview) {
-        const { reviewed, skipped, failed } = await reviewAll(refs);
+      if (drafting) {
+        // A repo excepted from auto-review is discovered like any other — it
+        // is in the queue above — and only its run waits for the click. So is
+        // your own PR, in every repo.
+        const toDraft = asked.filter(drafts);
+        const onClick = asked.length - toDraft.length;
+        const { reviewed, skipped, failed } = await reviewAll(toDraft);
         status.lastSummary =
-          `${refs.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
-          `${failed > 0 ? `, ${failed} failed` : ""}`;
+          `${asked.length} awaiting; ${reviewed} reviewed, ${skipped} up to date` +
+          `${failed > 0 ? `, ${failed} failed` : ""}` +
+          `${onClick > 0 ? `, ${onClick} waiting for a click` : ""}${ownPart}`;
       } else {
-        status.lastSummary = `${refs.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""} (auto-review off)`;
+        status.lastSummary = `${asked.length} awaiting${discovered.length > 0 ? `, ${discovered.length} new` : ""}${ownPart} (auto-review off)`;
       }
 
       // After the drafting, not before it. The arrival is not the news when
@@ -951,7 +1095,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // for the draft — and for a PR nobody is drafting (auto-review off, or a
       // run that failed) it goes out here all the same. `isNews` is the rule,
       // and the cockpit's bell reads the same one.
-      await announce(autoReview, notifyOn);
+      await announce(drafts, notifyOn);
       // Recomputed on the spot rather than left to the next poll: that is
       // minutes away, and the cockpit would spend them deferring to a tap that
       // never came. Recomputed rather than only cleared, so a machine whose
@@ -978,7 +1122,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   }
 
   async function handleAutoSend(artifact: Artifact): Promise<void> {
-    const decision = evaluateAutoSend(artifact, opts.autoSendThreshold);
+    const decision = evaluateAutoSend(artifact, opts.autoSendThreshold, await currentLogin().catch(() => null));
     if (decision.eligible) status.autoSendCandidates++;
     const entryBase = {
       at: new Date().toISOString(),
@@ -1029,11 +1173,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     cockpitAt: (url) => {
       cockpitUrl = url;
     },
-    retime: (minutes) => {
-      if (opts.intervalFixed || stopped) return;
-      status.intervalMs = minutes * 60_000;
-      // Mid-poll the finally block schedules with the new value anyway.
-      if (!status.polling) schedule(Math.max(0, lastPollEndedAt + status.intervalMs - Date.now()));
+    reconfigure: (config) => {
+      const before = status.intervalMs;
+      applyKnobs(config);
+      // A new interval applies to the wait already under way, so 5 -> 1 doesn't
+      // sit out the old timer. Mid-poll the finally block schedules it anyway.
+      if (status.intervalMs !== before && !stopped && !status.polling) {
+        schedule(Math.max(0, lastPollEndedAt + status.intervalMs - Date.now()));
+      }
     },
     stop: () => {
       stopped = true;

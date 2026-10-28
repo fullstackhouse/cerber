@@ -5,7 +5,8 @@
 // walking the queue doesn't mean opening every review. These derivations are
 // shared with the detail view, whose ‹ › arrows walk the very same list.
 
-import { DaemonStatus, Filed, FiledReason, Reply, ReviewListItem } from "./types";
+import { autoReviewFor } from "../../src/core/autoreview";
+import { DaemonStatus, Filed, FiledReason, Handoff, Reply, ReviewListItem } from "./types";
 
 export type Tab = "inbox" | "awaiting" | "drafted" | "requests" | "settled" | "sent" | "archived";
 
@@ -39,7 +40,8 @@ export const TAB_META: Record<Tab, { label: string; title: string }> = {
   },
   settled: {
     label: "settled",
-    title: "You marked these reviewed or skipped. Nothing was sent to GitHub.",
+    title:
+      "You marked these reviewed or skipped, or handed them to somebody else. No review of yours was sent to GitHub.",
   },
   sent: { label: "sent", title: "Reviews that reached GitHub. Kept here as a record." },
   archived: { label: "archived", title: "PRs that have since been merged or closed." },
@@ -60,23 +62,51 @@ export function tabOf(r: ReviewListItem): "awaiting" | "drafted" | "sent" {
 export const isArchived = (r: ReviewListItem) => !!r.pr.state && r.pr.state !== "OPEN";
 
 /**
- * How much a review wants you, most first: a finished draft is the thing to
- * read; one nobody has drafted yet is a keypress away; a run in flight will
- * arrive on its own; a failed one needs a hand. Settled reviews sink, and a
- * sent one is history. Newest first inside each band.
+ * When this row last moved, for the `upd` column and the order inside a band.
+ *
+ * A row nobody has drafted (`awaiting`) has nothing of cerber's in it: its
+ * `updatedAt` is only the minute the poll found it, which is the same minute
+ * for every row found together — so every one read "3m" and the order meant
+ * nothing. There the PR's own last activity on GitHub is the fact worth
+ * reading. Every other row is dated by the review, which is what changed.
  */
-const STATUS_ORDER = ["ready", "awaiting", "running", "failed", "reviewed", "skipped", "sent"];
+export function activityAt(r: ReviewListItem): string {
+  return r.status === "awaiting" ? (r.pr.updatedAt ?? r.updatedAt) : r.updatedAt;
+}
 
+/**
+ * Most recent activity first, whatever the status. Ranking drafted rows above
+ * undrafted ones buried a PR that moved minutes ago under drafts from
+ * yesterday; the tabs already split the queue by status, and the `upd` column
+ * should read top-down.
+ */
 export function sortReviews(list: ReviewListItem[]): ReviewListItem[] {
-  return [...list].sort(
-    (a, b) =>
-      STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
-      b.updatedAt.localeCompare(a.updatedAt),
-  );
+  return [...list].sort((a, b) => activityAt(b).localeCompare(activityAt(a)));
 }
 
 /** Statuses that mean you have dealt with this review, one way or another. */
 export const SETTLED = ["sent", "reviewed", "skipped"];
+
+/** A PR you opened yourself (`own` on the row — the server knows your login). */
+export const isOwn = (r: ReviewListItem) => r.own === true;
+
+/**
+ * The same list with your own PRs moved after everybody else's, each half in
+ * the order it had.
+ *
+ * Your own PRs are in the inbox for a self-review whenever you want one; the
+ * rest are there because somebody is waiting on you. So the waiting comes
+ * first — in the table, under the cursor, and on the ‹ › walk — and yours
+ * follow as a group of their own (`startsOwnGroup`).
+ */
+export function ownLast(list: ReviewListItem[]): ReviewListItem[] {
+  return [...list.filter((r) => !isOwn(r)), ...list.filter(isOwn)];
+}
+
+/** Whether row `i` is the first of your own PRs — where the table draws the
+ *  "your PRs" heading. */
+export const startsOwnGroup = (rows: ReviewListItem[], i: number) =>
+  isOwn(rows[i]!) && (i === 0 || !isOwn(rows[i - 1]!));
 
 /**
  * The reviews the ‹ › arrows walk: open PRs that still want something from you.
@@ -84,7 +114,7 @@ export const SETTLED = ["sent", "reviewed", "skipped"];
  * either would be walking backwards.
  */
 export function walkable(list: ReviewListItem[]): ReviewListItem[] {
-  return sortReviews(list.filter((r) => !isArchived(r) && !SETTLED.includes(r.status)));
+  return ownLast(sortReviews(list.filter((r) => !isArchived(r) && !SETTLED.includes(r.status))));
 }
 
 /**
@@ -111,10 +141,12 @@ export function walkFrom(
  *
  * The queue lists what you have not dealt with locally; the daemon reports what
  * GitHub still asks you for. Those two stop matching the moment you skip a PR
- * or mark one reviewed without sending — cerber never writes to GitHub, so the
- * review request outlives your decision here. That is the state where the
- * cockpit used to say "nothing awaits your review" over the top of a poll that
- * had just counted two, and the work went missing.
+ * or mark one reviewed without sending: nothing in that decision reaches GitHub,
+ * so the review request outlives it. That is the state where the cockpit used to
+ * say "nothing awaits your review" over the top of a poll that had just counted
+ * two, and the work went missing. (Handing a review to somebody else is the one
+ * decision that does move the request — which is why it is also the one that
+ * empties this tab instead of filling it.)
  */
 export function hiddenAwaiting(list: ReviewListItem[], daemon: DaemonStatus | null): ReviewListItem[] {
   if (!daemon?.enabled || daemon.awaiting.length === 0) return [];
@@ -135,7 +167,9 @@ export const isHiddenAwaiting = (r: ReviewListItem, hidden: ReviewListItem[]) =>
  */
 export function bucket(all: ReviewListItem[], daemon: DaemonStatus | null): Record<Tab, ReviewListItem[]> {
   const open = all.filter((r) => !isArchived(r));
-  const live = sortReviews(open.filter((r) => !SETTLED.includes(r.status)));
+  // Your own PRs after the rest, in every live tab — the order the table
+  // draws them in, under their own heading.
+  const live = ownLast(sortReviews(open.filter((r) => !SETTLED.includes(r.status))));
   return {
     inbox: live,
     awaiting: live.filter((r) => tabOf(r) === "awaiting"),
@@ -217,6 +251,10 @@ const FILED_COPY: Record<
  */
 export function rowTag(r: ReviewListItem): string | null {
   if (isArchived(r)) return r.pr.state?.toLowerCase() ?? null;
+  // Above the status and above `filed`, because it is the only one of the three
+  // that says where the PR went. A row handed to somebody else is `skipped`,
+  // and "skipped" alone reads as work dropped rather than work passed on.
+  if (r.handoff) return `handed to @${r.handoff.to}`;
   // Filed by cerber, not by you: "reviewed" here would read as a click you
   // never made, on the one row whose whole point is that you did it elsewhere.
   if (r.filed) return FILED_COPY[r.filed.reason].tag;
@@ -319,9 +357,39 @@ export function filedTag(filed: NonNullable<ReviewListItem["filed"]>): {
   };
 }
 
-/** The open-requests tag for a row: what cerber sent, or whose move the poll says it is. */
+/**
+ * The same, for a row you handed to somebody else.
+ *
+ * First of all of them, because a handoff is the one thing here that *changed*
+ * the request this tab is about — it took yours off the PR. So a row still
+ * listed is the search lagging the swap by a poll, or somebody having asked you
+ * again since, and either way the thing to say is who has it now. Without this
+ * the row would be tagged "you haven't replied" at a PR you deliberately passed
+ * on, which is the one reading that would send you back into it.
+ */
+export function handoffTag(handoff: Handoff): { label: string; title: string } {
+  const when = new Date(handoff.at).toLocaleDateString();
+  return {
+    label: `handed to @${handoff.to}`,
+    title: handoff.withdrewYours
+      ? `You handed this to @${handoff.to} on ${when} and cerber took your own review request off ` +
+        `the PR. GitHub still lists one for you — most likely the last inbox poll ran before the ` +
+        `swap, or somebody has asked you again since.`
+      : `You handed this to @${handoff.to} on ${when}, but cerber could not take your own review ` +
+        `request off the PR — so GitHub is asking both of you. Remove yourself on GitHub if that ` +
+        `is not what you wanted.`,
+  };
+}
+
+/** The open-requests tag for a row: who has it now, what cerber sent, or whose move the poll says it is. */
 export const requestTag = (r: ReviewListItem, reply: Reply) =>
-  r.sent ? sentTag(r.sent) : r.filed ? filedTag(r.filed) : replyTag(reply);
+  r.handoff
+    ? handoffTag(r.handoff)
+    : r.sent
+      ? sentTag(r.sent)
+      : r.filed
+        ? filedTag(r.filed)
+        : replyTag(reply);
 
 /**
  * What to say instead of "nothing awaits your review" when something does.
@@ -384,6 +452,17 @@ export function verdictCell(r: ReviewListItem): { label: string; tone: Tone } {
   };
 }
 
+/**
+ * The queue's comment column. A dash means there is no draft to count yet; a
+ * draft with no comments reads "0", never a blank cell, which
+ * looked like a column that failed to render.
+ */
+export function commentsCell(r: ReviewListItem): string {
+  if (r.status === "running" || r.status === "awaiting" || r.status === "failed") return "—";
+  if (!r.verdict && !r.sent) return "—";
+  return String(r.commentCount);
+}
+
 /** What the run read, in the words the cockpit uses everywhere else. */
 export function readMode(run: { withSource?: boolean | null; trusted?: boolean | null }): string {
   if (run.trusted) return "ran the code";
@@ -403,6 +482,14 @@ function commentsPart(r: ReviewListItem): string {
   return parts.join(", ");
 }
 
+/** The repos that go the other way from the default, counted for the queue
+ *  strip: " · 2 repos on click". One that agrees with the default changes nothing. */
+export function exceptionsLabel(autoReview: boolean, repos: Record<string, boolean>): string {
+  const against = Object.values(repos).filter((on) => on !== autoReview).length;
+  if (against === 0) return "";
+  return ` · ${against} repo${against === 1 ? "" : "s"} ${autoReview ? "on click" : "auto"}`;
+}
+
 /**
  * Why this row reads the way it does — the strip under the table. `meta` is the
  * quiet line under the reasoning; the view joins it with " · ".
@@ -418,7 +505,30 @@ export function strip(
       meta: [`started ${ageLabel(r.updatedAt, now)} ago`, readMode(r)],
     };
   }
+  if (r.status === "awaiting" && isOwn(r)) {
+    return {
+      reasoning:
+        "Your own PR. Cerber never drafts these on its own — ask for a self-review when you want one. " +
+        "Send posts it as a comment: GitHub takes no approve or change request from a PR's author.",
+      meta: ["no run yet", "press r to review now"],
+    };
+  }
   if (r.status === "awaiting") {
+    // Said outright when the daemon is not going to draft this repo, rather
+    // than leaving the reader to wait for a run that is never coming.
+    if (
+      daemon?.enabled &&
+      daemon.pollEnabled &&
+      !autoReviewFor({ autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} }, r.pr.owner, r.pr.repo)
+    ) {
+      // Naming the repo only when an exception is why, so nobody goes looking
+      // for a per-repo setting they never made.
+      const off = daemon.autoReview ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}` : "Auto-review is off";
+      return {
+        reasoning: `Found by the inbox poll. ${off}, so it waits for you to ask for a draft.`,
+        meta: ["no run yet", "press r to review now"],
+      };
+    }
     return {
       reasoning:
         "Found by the inbox poll, not drafted yet — auto-review was off when it arrived, or it is still queued behind another run.",
@@ -433,28 +543,62 @@ export function strip(
   }
   if (r.sent) {
     return {
-      reasoning: `Sent to GitHub as ${EVENT_LABEL[r.sent.event] ?? r.sent.event} on ${new Date(
-        r.sent.at,
-      ).toLocaleDateString()}. Kept here as a record; the conversation can't continue.`,
-      meta: [r.sent.auto ? "auto-sent by the daemon" : "sent by you", readMode(r)],
+      reasoning:
+        `Sent to GitHub as ${EVENT_LABEL[r.sent.event] ?? r.sent.event} on ${new Date(
+          r.sent.at,
+        ).toLocaleDateString()}. Kept here as a record; the conversation can't continue, ` +
+        `though a re-review can draft against the current head.` +
+        // Where the PR went outranks how it was answered — the row's tag says
+        // so too. Without this the one row that did both reads like an
+        // ordinary send, and nothing in the strip mentions the handoff.
+        (r.handoff ? ` GitHub asks @${r.handoff.to} for it now.` : ""),
+      meta: [
+        ...(r.handoff ? [`you handed this to @${r.handoff.to}`] : []),
+        r.sent.auto ? "auto-sent by the daemon" : "sent by you",
+        readMode(r),
+      ],
     };
   }
 
   const meta = [readMode(r)];
-  // What you did with it, when that isn't "nothing yet".
-  if (r.filed) {
+  // What you did with it, when that isn't "nothing yet". A handoff goes first
+  // and stands in for the status, the way its tag does: the row is `skipped`,
+  // and "you skipped this" is the one thing that is not what happened.
+  if (r.handoff) {
+    meta.unshift(
+      `you handed this to @${r.handoff.to} on ${new Date(r.handoff.at).toLocaleDateString()}`,
+    );
+  } else if (r.filed) {
     meta.unshift(FILED_COPY[r.filed.reason].meta(new Date(filedOn(r.filed)).toLocaleDateString()));
   } else if (r.status === "reviewed") meta.unshift("you marked this reviewed");
-  if (r.status === "skipped") meta.unshift("you skipped this");
+  else if (r.status === "skipped") meta.unshift("you skipped this");
   if (r.costUsd != null) meta.push(`≈$${r.costUsd.toFixed(2)} at API rates`);
   meta.push(commentsPart(r));
+  // Your own PR is never auto-sent, and Send posts it as a comment whatever
+  // the verdict says — the one fact about this row the verdict cannot tell you.
+  if (isOwn(r)) meta.push("your PR — sends as a comment");
   // Auto-send is approve-only, so the bar is only news on an approve verdict.
-  if (daemon?.enabled && r.status === "ready" && r.verdict?.recommendation === "approve") {
+  else if (daemon?.enabled && r.status === "ready" && r.verdict?.recommendation === "approve") {
     meta.push(
       r.verdict.confidence >= daemon.autoSendThreshold
         ? `auto-send candidate at ${r.verdict.confidence}%`
         : `below the ${daemon.autoSendThreshold}% auto-send bar`,
     );
+  }
+  if (r.handoff) {
+    // A row can be handed off before anything was drafted — the queue offers it
+    // on an `awaiting` stub and on a failed run — so the promise about the
+    // draft is only made where there is one to make it about.
+    const drafted = r.commentCount > 0 || r.verdict != null;
+    return {
+      reasoning:
+        `GitHub asks @${r.handoff.to} for this review now` +
+        `${r.handoff.withdrewYours ? " and no longer asks you" : " — and still asks you, because your own request could not be taken off"}. ` +
+        (drafted
+          ? `The draft was never sent: it is still yours to read or send.`
+          : `Nothing was drafted here, and nothing was sent.`),
+      meta,
+    };
   }
   if (r.filed) return { reasoning: FILED_COPY[r.filed.reason].reasoning, meta };
   return { reasoning: r.verdict?.reasoning ?? "This review has a draft but no verdict.", meta };

@@ -16,6 +16,8 @@ export interface ReviewListItem {
     state?: "OPEN" | "CLOSED" | "MERGED";
     /** A draft still awaiting you: reviewable, but its author hasn't finished. */
     isDraft?: boolean;
+    /** When the PR itself last changed on GitHub. Absent from older servers and rows. */
+    updatedAt?: string;
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -37,6 +39,13 @@ export interface ReviewListItem {
    * must not silence the bell.
    */
   announceable?: boolean;
+  /**
+   * A PR you opened yourself. Listed under "your PRs", below the ones awaiting
+   * you; never drafted or announced unasked; sent as a comment only, because
+   * GitHub takes no approve or change request from a PR's author. Optional:
+   * a server too old to send it has no own PRs in its inbox.
+   */
+  own?: boolean;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;
@@ -44,6 +53,8 @@ export interface ReviewListItem {
   sent?: Artifact["sent"];
   /** Set when cerber filed this draft away itself — never on one you settled. */
   filed?: Filed | null;
+  /** Set when you gave this review to somebody else. */
+  handoff?: Handoff | null;
 }
 
 /** Why cerber filed a draft away — see `FiledInfoSchema` for the three causes. */
@@ -58,6 +69,21 @@ export interface Filed {
     url: string | null;
   } | null;
   reply: { at: string; url: string | null } | null;
+}
+
+/**
+ * You gave this review away — the mirror of `Filed`, and its opposite in the
+ * one way that matters: cerber noticed GitHub had moved past that draft, while
+ * this moved GitHub itself. The request is theirs now and no longer yours.
+ */
+export interface Handoff {
+  at: string;
+  /** The login GitHub now asks for. */
+  to: string;
+  /** False when cerber could not also take your own request off the PR. */
+  withdrewYours: boolean;
+  /** The note that went on the PR, if one did. */
+  note: { body: string; url: string | null } | null;
 }
 
 export interface Verdict {
@@ -97,6 +123,46 @@ export interface ReviewComment {
   originalLine?: number | null;
   /** The commented code is gone from the diff — it can't post inline. */
   drifted?: boolean;
+  /** Somebody else already raised this on the PR. */
+  alreadyRaised?: AlreadyRaised | null;
+}
+
+/** Where somebody else already made a point: an inline thread, or a review's body. */
+export type RaisedPlace =
+  | {
+      kind: "thread";
+      path: string;
+      line: number | null;
+      state: "open" | "resolved" | "outdated";
+      replyTo: string;
+    }
+  | { kind: "review" };
+
+/** Another reviewer already raised the same defect. Mirrors src/core/artifact.ts. */
+export interface AlreadyRaised {
+  remarkId: string;
+  by: string;
+  at: string;
+  url: string | null;
+  where: RaisedPlace;
+  /** Why the two are the same defect — and what this one adds, if anything. */
+  reason: string;
+  /** Post it anyway, or answer in their thread. Null: the default for the place. */
+  decision: "send" | "reply" | null;
+  /** The reply Send posted into their thread. */
+  replied: { at: string; url: string | null } | null;
+  /** Other remarks that raised the same thing, behind the one shown. */
+  others?: { remarkId: string; reason: string }[];
+}
+
+/** The last comparison of the draft with what others said on the PR. */
+export interface RaisedCheck {
+  at: string | null;
+  /** Set while a check runs. */
+  checkingSince: string | null;
+  remarks: string[];
+  findings: string[];
+  error: string | null;
 }
 
 /** What the user pointed at with "discuss this". */
@@ -129,9 +195,24 @@ export interface ChatTurn {
   revisions: Revision[];
   refused: { revision: Revision; reason: string }[];
   costUsd: number | null;
+  /** Sent while the previous message was still being answered. */
+  steer?: boolean;
+}
+
+/** A review posted to GitHub from this row. */
+export interface SentInfo {
+  at: string;
+  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  url: string | null;
+  auto?: boolean;
 }
 
 export interface Artifact {
+  /**
+   * Your own PR (§9.10) — sent only on `GET /api/reviews/:key`, never stored,
+   * and absent from every other response that returns an artifact.
+   */
+  own?: boolean;
   schemaVersion: number;
   id: string;
   status: string;
@@ -164,12 +245,16 @@ export interface Artifact {
     withSource?: boolean;
     trusted?: boolean;
   } | null;
-  sent: {
-    at: string;
-    event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
-    url: string | null;
-    auto?: boolean;
-  } | null;
+  sent: SentInfo | null;
+  /**
+   * Reviews posted from this row that a later re-review has replaced, oldest
+   * first. `sent` only ever describes the draft on the page; a re-review moves
+   * it here rather than dropping it, so the cockpit can still say what went to
+   * GitHub and when. Absent on artifacts written before this was kept.
+   */
+  priorSends?: SentInfo[];
+  /** Files marked as viewed: path → fingerprint of the patch when marked. */
+  viewed?: Record<string, string>;
   refresh?: {
     at: string;
     fromSha: string;
@@ -179,6 +264,10 @@ export interface Artifact {
   } | null;
   /** Set when cerber filed this draft away itself, and on the strength of what. */
   filed?: Filed | null;
+  /** Set when you handed this review to somebody else, and to whom. */
+  handoff?: Handoff | null;
+  /** The last check for findings somebody else already raised. */
+  raisedCheck?: RaisedCheck | null;
   /** The conversation about this review. Never sent to GitHub. */
   chat?: ChatTurn[];
   /** A turn being answered right now, or the one that failed. */
@@ -210,6 +299,8 @@ export interface PendingChat {
   startedAt: string;
   /** What the turn has been doing, in its own words. Grows while you wait. */
   progress: string[];
+  /** What you added while it worked. Absent on artifacts from before steering. */
+  steers?: string[];
   /** Why the turn failed. Null while it is still being answered. */
   error: string | null;
 }
@@ -218,6 +309,8 @@ export interface RefreshResult {
   stale: boolean;
   changed: boolean;
   prState?: "OPEN" | "CLOSED" | "MERGED";
+  /** The PR's head right now — the one fact a declined refresh can still report. */
+  headSha?: string;
   moved?: number;
   drifted?: number;
   artifact: Artifact;
@@ -249,7 +342,10 @@ export type DaemonStatus =
       pollEnabled: boolean;
       /** The daemon taps this machine itself when a PR lands — see notify.ts. */
       notify: boolean;
+      /** The default for repos with no exception in `autoReviewRepos`. */
       autoReview: boolean;
+      /** Per-repo exceptions to `autoReview`; absent from servers that predate them. */
+      autoReviewRepos?: Record<string, boolean>;
       /** Unattended reviews may run PR code: auto-review on + trust rules set. */
       trustedRuns: boolean;
       polls: number;
@@ -277,6 +373,8 @@ export interface SendPreview {
   body: string;
   comments: { path: string; line: number; side: "RIGHT"; body: string }[];
   folded: ReviewComment[];
+  replies: { commentId: string; replyTo: string; body: string }[];
+  held: ReviewComment[];
 }
 
 export interface TrustEntry {
@@ -289,13 +387,19 @@ export interface TrustEntry {
 export interface DaemonConfig {
   poll: boolean;
   autoReview: boolean;
+  /** owner/repo → true (draft it) or false (wait for a click), overriding `autoReview`. */
+  autoReviewRepos: Record<string, boolean>;
   notify: boolean;
   intervalMinutes: number;
   parallel: number;
   repos: string[];
+  /** Your own PRs idle longer than this many days stay out of the inbox; 0/null is off. */
+  ownPrMaxAgeDays?: number | null;
 }
 
 export interface ConfigView {
+  /** The running server's package version. */
+  version: string;
   path: string;
   trust: TrustEntry[];
   daemon: DaemonConfig;

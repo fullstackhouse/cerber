@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AiReviewSchema, CommentSchema, SCHEMA_VERSION } from "./artifact.js";
+import {
+  AiReviewSchema,
+  ArtifactSchema,
+  CommentSchema,
+  HandoffInfoSchema,
+  PrInfoSchema,
+  SCHEMA_VERSION,
+} from "./artifact.js";
 
 // Severity is additive on schema version 1: artifacts written before it
 // existed (and hand-edited ones that omit it) must keep parsing, and absent
@@ -49,5 +56,75 @@ describe("AiReviewSchema severity", () => {
   it("accepts an ungraded remark — a question is not a finding", () => {
     const ai = AiReviewSchema.parse(review({ path: "a.ts", line: 1, body: "why?" }));
     expect(ai.comments[0]!.severity).toBeUndefined();
+  });
+});
+
+// `handoff` is additive on schema version 1 too, and every fixture in the suite
+// now writes it explicitly because the parsed type requires it — which means
+// nothing else here exercises the case that actually matters: the thousands of
+// artifacts already on disk that have never heard of the field.
+describe("ArtifactSchema handoff", () => {
+  const minimal = {
+    schemaVersion: SCHEMA_VERSION,
+    id: "o/r#1",
+    status: "ready",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    pr: {
+      owner: "o",
+      repo: "r",
+      number: 1,
+      title: "t",
+      url: "https://github.com/o/r/pull/1",
+      author: "a",
+      baseRefName: "main",
+      headRefName: "f",
+      headSha: "abc",
+    },
+    diff: "",
+  };
+
+  it("reads an artifact written before the field existed", () => {
+    // If this ever throws, every review on disk stops loading at once — the
+    // queue, not one row.
+    expect(ArtifactSchema.parse(minimal).handoff).toBeNull();
+  });
+
+  it("gives the same artifact an empty list of prior sends", () => {
+    // Same shape of promise, same stakes: `priorSends` is read unguarded
+    // (`history.ts` compares its length on every save), and every fixture in
+    // this suite writes it, so this is the only place the artifacts already
+    // on disk are exercised at all.
+    expect(ArtifactSchema.parse(minimal).priorSends).toEqual([]);
+  });
+
+  it("fills in the halves a hand-edited record leaves out", () => {
+    // The file is user-editable, so the two fields that carry *meaning* about
+    // GitHub's state need defaults that read as the common case: you were taken
+    // off, and nothing was posted.
+    expect(HandoffInfoSchema.parse({ at: "2026-01-01T00:00:00Z", to: "maks" })).toEqual({
+      at: "2026-01-01T00:00:00Z",
+      to: "maks",
+      withdrewYours: true,
+      note: null,
+    });
+  });
+});
+
+describe("PrInfoSchema updatedAt", () => {
+  const pr = {
+    owner: "o",
+    repo: "r",
+    number: 1,
+    title: "t",
+    url: "u",
+    author: "a",
+    baseRefName: "main",
+    headRefName: "f",
+  };
+
+  it("is optional, so artifacts written before it still load, and kept when present", () => {
+    expect(PrInfoSchema.parse(pr).updatedAt).toBeUndefined();
+    expect(PrInfoSchema.parse({ ...pr, updatedAt: "2026-08-01T00:00:00Z" }).updatedAt).toBe("2026-08-01T00:00:00Z");
   });
 });

@@ -35,7 +35,10 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
     chat: [],
@@ -58,6 +61,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...over,
   };
 }
@@ -172,6 +176,19 @@ describe("describeChange", () => {
       ),
     ).toEqual(["status ready → sent", "sent to GitHub as approve, by auto-send"]);
 
+    // The claim at the top of a re-review: the row stops being "sent" without
+    // anything having been un-sent, which no other line on the list records.
+    const sent = { at: "2026-08-25T09:00:00Z", event: "COMMENT" as const, url: null, auto: false };
+    expect(
+      describeChange(
+        artifact({ status: "sent", sent }),
+        artifact({ status: "running", sent: null, priorSends: [sent] }),
+      ),
+    ).toEqual([
+      "status sent → running",
+      "a new draft took over from the review that was sent — what was sent stays on GitHub",
+    ]);
+
     expect(
       describeChange(
         before,
@@ -180,6 +197,32 @@ describe("describeChange", () => {
         }),
       ),
     ).toEqual(["filed under settled — nobody is asking for this review any more"]);
+
+    expect(
+      describeChange(
+        before,
+        artifact({
+          handoff: { at: "2026-08-25T09:00:00Z", to: "maks", withdrewYours: true, note: null },
+        }),
+      ),
+    ).toEqual(["handed to @maks — GitHub asks them for this review now"]);
+
+    // The half-done handoff: the request moved, your own could not be taken off.
+    expect(
+      describeChange(
+        before,
+        artifact({
+          handoff: {
+            at: "2026-08-25T09:00:00Z",
+            to: "maks",
+            withdrewYours: false,
+            note: { body: "over to you", url: null },
+          },
+        }),
+      ),
+    ).toEqual([
+      "handed to @maks — GitHub asks them for this review now, and still asks you too, with a note on the PR",
+    ]);
 
     expect(
       describeChange(
@@ -199,7 +242,7 @@ describe("describeChange", () => {
 
   it("ignores a running turn's narration — it says nothing about where the review got to", () => {
     const before = artifact({
-      pendingChat: { message: "why?", refs: [], startedAt: "t", progress: ["reading a.ts"], error: null },
+      pendingChat: { message: "why?", refs: [], startedAt: "t", progress: ["reading a.ts"], steers: [], error: null },
     });
     const after = artifact({
       pendingChat: {
@@ -207,6 +250,7 @@ describe("describeChange", () => {
         refs: [],
         startedAt: "t",
         progress: ["reading a.ts", "searching for foo", "thinking"],
+        steers: [],
         error: null,
       },
     });

@@ -194,8 +194,21 @@ export function describeChange(before: Artifact | null, after: Artifact): string
         `${after.sent.auto ? ", by auto-send" : ""}`,
     );
   }
+  // The one state change nothing else on this list would record: the row went
+  // from "this draft is on GitHub" back to "this draft has never been sent".
+  if (after.priorSends.length > (before?.priorSends.length ?? 0)) {
+    lines.push("a new draft took over from the review that was sent — what was sent stays on GitHub");
+  }
   if (after.filed && after.filed.at !== before?.filed?.at) {
     lines.push(`filed under settled — ${FILED_PHRASE[after.filed.reason] ?? after.filed.reason}`);
+  }
+  if (after.handoff && after.handoff.at !== before?.handoff?.at) {
+    const h = after.handoff;
+    lines.push(
+      `handed to @${h.to} — GitHub asks them for this review now` +
+        `${h.withdrewYours ? "" : ", and still asks you too"}` +
+        `${h.note ? ", with a note on the PR" : ""}`,
+    );
   }
   if (after.refresh && after.refresh.at !== before?.refresh?.at) {
     const r = after.refresh;

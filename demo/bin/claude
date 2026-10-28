@@ -3,8 +3,8 @@
 //
 // cerber spawns `claude -p --output-format stream-json --verbose` with the
 // prompt on stdin and reads newline-delimited events off stdout. This reads
-// the prompt, works out which of cerber's two prompts it is (a review, or a
-// chat turn about one), and replays the canned payload for that PR — with a
+// the prompt, works out which of cerber's prompts it is (a review, a chat turn
+// about one, or the comparison with what others already said), and replays the canned payload for that PR — with a
 // few narration events in front of it so the cockpit's live progress strip has
 // something real to show.
 //
@@ -14,7 +14,7 @@
 //
 // See ../README.md.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,6 +55,51 @@ function readStdin() {
   }
 }
 
+/**
+ * A chat turn is steerable: cerber sends the prompt as one stream-json user
+ * message, may send more while the turn runs, and closes stdin only once every
+ * message has been echoed back and a result is out. So: read the first message,
+ * echo each one that follows, and exit on EOF — reading to EOF up front would
+ * wait for a close that only comes after the answer.
+ */
+const streamed = argv.includes("--input-format") && argv[argv.indexOf("--input-format") + 1] === "stream-json";
+const steers = [];
+let inputClosed = false;
+function userText(line) {
+  try {
+    const content = JSON.parse(line)?.message?.content;
+    return typeof content === "string" ? content : "";
+  } catch {
+    return "";
+  }
+}
+function readFirstMessage() {
+  return new Promise((resolve) => {
+    let buffer = "";
+    let first = null;
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      buffer += chunk;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        emit({ type: "user", message: { role: "user", content: userText(line) } });
+        if (first === null) {
+          first = userText(line);
+          resolve(first);
+        } else steers.push(userText(line));
+      }
+    });
+    process.stdin.on("end", () => {
+      inputClosed = true;
+      if (first === null) resolve("");
+    });
+  });
+}
+const untilInputCloses = () =>
+  new Promise((resolve) => (inputClosed ? resolve() : process.stdin.on("end", resolve)));
+
 function text(body) {
   return { type: "assistant", message: { content: [{ type: "text", text: body }] } };
 }
@@ -83,8 +128,36 @@ function result(body, costUsd) {
   });
 }
 
-const prompt = readStdin();
+const prompt = streamed ? await readFirstMessage() : readStdin();
 if (!prompt.trim()) fail("no prompt arrived on stdin");
+
+// ----------------------------------------------- already raised by others
+
+// The comparison prompt names no PR — it is two lists of comments. Each fixture
+// PR that has one says which of its draft comments repeat which earlier one, by
+// place and author, since the ids in the prompt are minted per run.
+if (prompt.startsWith("You compare a code review's draft comments")) {
+  const section = (label) => {
+    const start = prompt.indexOf(`${label} (JSON):\n`);
+    if (start === -1) fail(`no "${label}" list in the comparison prompt`);
+    const from = start + label.length + " (JSON):\n".length;
+    return JSON.parse(prompt.slice(from, prompt.indexOf("\n\n", from)));
+  };
+  const drafts = section("Draft comments");
+  const earlier = section("Earlier comments by other reviewers");
+  const matches = [];
+  for (const dir of readdirSync(path.join(FIXTURES, "claude"))) {
+    const file = path.join(FIXTURES, "claude", dir, "raised.json");
+    if (!existsSync(file)) continue;
+    for (const pair of JSON.parse(readFileSync(file, "utf8")).pairs) {
+      const d = drafts.find((x) => x.at === pair.draftAt);
+      const e = earlier.find((x) => x.by === pair.earlierBy && x.where.startsWith(pair.earlierAt));
+      if (d && e) matches.push({ draft: d.id, earlier: e.id, reason: pair.reason });
+    }
+  }
+  result(JSON.stringify({ matches }), 0.004);
+  process.exit(0);
+}
 
 const repo = prompt.match(/^Repo: (\S+)\/(\S+)$/m);
 const number = prompt.match(/^PR #(\d+):/m);
@@ -142,10 +215,15 @@ const turn =
 if (!turn) fail(`no canned chat turn matches: ${JSON.stringify(message.slice(0, 200))}`);
 
 await narrate(turn.progress ?? []);
+// A steer can't change a canned answer, so the reply says it was heard — enough
+// to show where it lands in the cockpit.
+// The steer arrives wrapped in cerber's reminder; the user's words are its second paragraph.
+const heard = steers.map((m) => (m.split("\n\n")[1] ?? m).trim());
 result(
   JSON.stringify({
-    reply: turn.reply,
+    reply: heard.length ? `${turn.reply}\n\n(Noted while I worked: ${heard.map((h) => `“${h}”`).join(", ")}.)` : turn.reply,
     revisions: (turn.revisions ?? []).map(resolve),
   }),
   turn.costUsd ?? null,
 );
+if (streamed) await untilInputCloses();

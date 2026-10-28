@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Artifact, Comment, SCHEMA_VERSION } from "./artifact.js";
+import { sendTreatment } from "./raised.js";
 import { applyRevisions, mergeConcurrentEdits, restoreReview, snapshotReview } from "./revise.js";
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -15,6 +16,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...over,
   };
 }
@@ -52,7 +54,10 @@ function artifact(over: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
     chat: [],
@@ -156,6 +161,39 @@ describe("applyRevisions", () => {
     });
   });
 
+  describe("a finding somebody else already raised", () => {
+    const match = (over: Partial<NonNullable<Comment["alreadyRaised"]>> = {}) => ({
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null,
+      others: [],
+      ...over,
+    });
+
+    it("posts after a rewrite the user asked for, instead of being left out as a duplicate", () => {
+      const a = artifact({ comments: [comment({ alreadyRaised: match() })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "Reworded, and it breaks on the second run." },
+      ]);
+      expect(r.artifact.comments[0]!.alreadyRaised?.decision).toBe("send");
+      expect(sendTreatment(r.artifact.comments[0]!)).toBe("post");
+    });
+
+    it("leaves the decision alone when the turn only re-grades", () => {
+      const a = artifact({ comments: [comment({ alreadyRaised: match(), severity: "nit" })] });
+      const r = applyRevisions(a, [
+        { kind: "comment-edit", commentId: "c1", body: "AI wrote this.", severity: "blocker" },
+      ]);
+      expect(r.artifact.comments[0]!.severity).toBe("blocker");
+      expect(r.artifact.comments[0]!.alreadyRaised?.decision).toBeNull();
+    });
+  });
+
   it("applies several revisions in one turn, in order", () => {
     const r = applyRevisions(
       artifact(),
@@ -250,6 +288,101 @@ describe("mergeConcurrentEdits", () => {
     expect(merged.comments[0]!.body).toBe("The user's own rewrite.");
   });
 
+  it("lets the turn's rewrite decide a match that is still undecided on disk", () => {
+    // The match is the check's and comes from disk; the rewrite is still the
+    // user asking for these words, so the duplicate stops holding them back.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const undecided = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null, others: [],
+    };
+    const current = artifact({ comments: [comment({ id: "c1", alreadyRaised: undecided })] });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+    expect(merged.comments[0]!.alreadyRaised).toMatchObject({ remarkId: "T_1", decision: "send" });
+    expect(sendTreatment(merged.comments[0]!)).toBe("post");
+  });
+
+  it("re-decides nothing when a send landed while the turn ran", () => {
+    // A sent review is a record of what was posted; the rewrite rule is off
+    // there, as it is on the PATCH route and in the check's own fold.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const undecided = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: null,
+      replied: null, others: [],
+    };
+    const current = artifact({
+      status: "sent",
+      sent: { at: "2026-08-21T11:00:00.000Z", event: "COMMENT", url: null, auto: false },
+      comments: [comment({ id: "c1", alreadyRaised: undecided })],
+    });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.alreadyRaised?.decision).toBeNull();
+    // The turn's words still land — it is the decision that is off, not the edit.
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+  });
+
+  it("keeps a match the check found, and your decision on it, under the turn's rewrite", () => {
+    // The check folds onto the disk on its own; the turn's copy of the comment
+    // predates it, and taking the turn's body must not take its stale match.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const match = {
+      remarkId: "T_1",
+      by: "someone",
+      at: "2026-08-21T10:00:00.000Z",
+      url: null,
+      where: { kind: "thread" as const, path: "src/a.ts", line: 10, state: "open" as const, replyTo: "1" },
+      reason: "same defect",
+      decision: "reply" as const,
+      replied: null, others: [],
+    };
+    const raisedCheck = { at: "2026-08-21T10:01:00.000Z", checkingSince: null, remarks: ["T_1"], findings: ["c1"], error: null };
+    const current = artifact({ comments: [comment({ id: "c1", alreadyRaised: match })], raisedCheck });
+    const merged = mergeConcurrentEdits(b, after, current);
+    expect(merged.comments[0]!.body).toBe("The turn's rewrite.");
+    expect(merged.comments[0]!.alreadyRaised).toEqual(match);
+    expect(merged.raisedCheck).toEqual(raisedCheck);
+  });
+
+  it("does not hand a review back after you gave it away mid-turn", () => {
+    // A turn revises a draft; it never moves a review request. One that landed
+    // while the turn ran has already told GitHub somebody else is reviewing
+    // this, so restoring the pre-turn `null` would erase the only local record
+    // of it — on a row whose request has genuinely moved.
+    const b = before();
+    const { artifact: after } = applyRevisions(b, [
+      { kind: "comment-edit", commentId: "c1", body: "The turn's rewrite." },
+    ]);
+    const handed = { at: "2026-08-21T10:03:00.000Z", to: "maks", withdrewYours: true, note: null };
+    const merged = mergeConcurrentEdits(
+      b,
+      after,
+      artifact({ comments: [comment({ id: "c1" })], handoff: handed }),
+    );
+    expect(merged.handoff).toEqual(handed);
+  });
+
   it("takes the turn's rewrite when the user did not touch it", () => {
     const b = before();
     const { artifact: after } = applyRevisions(b, [
@@ -284,6 +417,12 @@ describe("mergeConcurrentEdits", () => {
     });
     const merged = mergeConcurrentEdits(b, b, current);
     expect(merged.comments.map((c) => c.id)).toEqual(["c1", "mine"]);
+  });
+
+  it("keeps a file the user marked as viewed while the turn was running", () => {
+    const b = before();
+    const viewed = { "src/a.ts": "0badf00d" };
+    expect(mergeConcurrentEdits(b, b, artifact({ viewed })).viewed).toEqual(viewed);
   });
 
   it("keeps a comment the turn added", () => {

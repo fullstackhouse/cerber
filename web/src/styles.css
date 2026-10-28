@@ -89,7 +89,7 @@
   --d2h-info-bg-color: light-dark(#f8fafd, rgba(56, 139, 253, 0.1));
   --d2h-info-border-color: light-dark(#d5e4f2, rgba(56, 139, 253, 0.4));
   --d2h-change-label-color: light-dark(#d0b44c, #d29922);
-  --d2h-moved-label-color: light-dark(#3572b0, #3572b0);
+  --d2h-moved-label-color: light-dark(#3572b0, #58a6ff);
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
@@ -312,6 +312,15 @@ button {
   border-color: var(--green-fill);
 }
 
+/* `.btn:hover` outranks the fill's class and would paint the text in --fg -
+   dark on green in light, washed out in dark. Keep the white text and shift
+   the fill instead, so the hover still shows. */
+.btn-keep-on:hover:not(:disabled) {
+  color: var(--on-fill);
+  background: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+  border-color: color-mix(in srgb, var(--green-fill) 88%, var(--fg));
+}
+
 .btn-drop-on {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 40%, transparent);
@@ -323,6 +332,14 @@ button {
   border-color: var(--fg);
   font-size: 11.5px;
   padding: 7px 14px;
+}
+
+/* `.btn:hover` outranks `.btn-dark` and would paint the text in --fg, which
+   is this button's own background. Keep the text and lighten the fill. */
+.btn-dark:hover:not(:disabled) {
+  color: var(--bg);
+  background: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  border-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
 }
 
 .btn-dark:disabled {
@@ -618,12 +635,28 @@ button {
   border-bottom: 1px solid var(--line-2);
 }
 
+/* The heading over your own PRs, below the ones awaiting you. Set like the
+   table head, so it reads as structure rather than as one more row. */
+.group-head {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 18px 10px 7px;
+  border-bottom: 1px solid var(--line-2);
+}
+
 .row {
   font-size: 12px;
   padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--line-3);
   border-left: 2px solid transparent;
+}
+
+/* Clear of the sticky strip when the keyboard scrolls a row into view. */
+.row {
+  scroll-margin-bottom: calc(var(--strip-h, 0px) + 8px);
 }
 
 .row:hover {
@@ -795,7 +828,7 @@ button {
   text-overflow: ellipsis;
 }
 .col-comments {
-  width: 26px;
+  width: 64px;
   flex-shrink: 0;
   text-align: right;
   color: var(--muted);
@@ -820,15 +853,86 @@ button {
   font-weight: 400;
 }
 
+/* Column labels explain themselves on hover, at once — over the word, not the
+   whole column, so the tip opens beside what you pointed at. The cells clip for
+   ellipsis in rows; the head's labels are short, so they let the tip out. */
+.table-head > span {
+  overflow: visible;
+}
+.head-cell {
+  position: relative;
+  cursor: help;
+}
+.head-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--fg-2);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* Centred under its word, except at the table's edges, where a centred tip
+   would spill past it: those line up with the edge they sit against. */
+.col-slug .head-tip {
+  left: -8px;
+  transform: none;
+}
+.col-verdict .head-tip,
+.col-age .head-tip {
+  left: auto;
+  right: -8px;
+  transform: none;
+}
+/* The arrow belongs to the label, not the tip, so it points at the word
+   whichever way the tip is anchored. */
+.head-cell:hover::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  z-index: 6;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: var(--bg);
+  border-left: 1px solid var(--line-2);
+  border-top: 1px solid var(--line-2);
+}
+.head-cell:hover .head-tip {
+  display: block;
+}
+
 /* The cursor row, explaining itself without leaving the list. */
+/* Sticky at the bottom of the viewport: with a long queue the table runs off
+   screen and the row you are pointing at would be explained somewhere you
+   cannot see. Sticky rather than fixed, so it keeps its place in the flow —
+   scrolled to the end it settles under the last row instead of covering it,
+   and the page needs no padding guessed from its height. Opaque, with a
+   shadow upward, so the rows sliding under it read as underneath. */
 .cursor-strip {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   gap: 18px;
   align-items: flex-start;
   border: 1px solid var(--line-2);
-  border-top: none;
-  border-radius: 0 0 4px 4px;
+  border-radius: 4px 4px 0 0;
   background: var(--surface);
+  box-shadow: 0 -6px 14px -10px light-dark(rgb(15 17 21 / 0.25), rgb(0 0 0 / 0.6));
   padding: 14px 16px;
 }
 
@@ -1222,6 +1326,15 @@ button {
   font-weight: 500;
 }
 
+.rail-item-done {
+  color: var(--fainter);
+}
+
+/* The chapter you are scrolled into. */
+.rail-item-here {
+  color: var(--accent);
+}
+
 .rail-group {
   margin-bottom: 2px;
 }
@@ -1358,7 +1471,9 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin-bottom: 10px;
-  overflow: hidden;
+  /* clip, not hidden: hidden makes the chapter a scroll container, and a
+     sticky title inside one never sticks. */
+  overflow: clip;
 }
 
 .chapter-head {
@@ -1368,6 +1483,55 @@ button {
   padding: 11px 16px;
   cursor: pointer;
   user-select: none;
+}
+
+.chapter-head-sticky {
+  position: sticky;
+  top: var(--top-h, 0px);
+  z-index: 4;
+  flex-wrap: wrap;
+  background: var(--surface);
+}
+
+.chapter-head-stuck {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Holds its room while the title isn't pinned, so the bar doesn't grow the
+   moment it sticks. */
+.chapter-about-idle {
+  visibility: hidden;
+}
+
+.chapter-head-about {
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+  cursor: auto;
+  user-select: text;
+}
+
+/* A file's header pins under its chapter's title. */
+.chapter-sticky {
+  --file-top: calc(var(--top-h, 0px) + var(--chapter-head-h, 0px));
+}
+
+.chapter-sticky .diff .d2h-file-header,
+.chapter-sticky .md-file-head {
+  position: sticky;
+  top: var(--file-top);
+  z-index: 3;
+}
+
+.chapter-sticky .d2h-file-wrapper,
+.chapter-sticky .md-file {
+  scroll-margin-top: var(--file-top);
+}
+
+/* A comment jumped to inside a pinned chapter must clear its title and its
+   file's header too. */
+.chapter-sticky .comment {
+  scroll-margin-top: calc(var(--file-top) + 60px);
 }
 
 .chapter-body {
@@ -1669,6 +1833,9 @@ button {
 .hljs-symbol {
   color: var(--syn-variable);
 }
+.hljs-subst {
+  color: var(--fg);
+}
 .hljs-comment,
 .hljs-code,
 .hljs-formula {
@@ -1806,6 +1973,11 @@ button {
   border-left-style: dashed;
 }
 
+/* What you added while the turn worked, under the question it steers. */
+.chat-steer {
+  margin-top: 8px;
+}
+
 .chat-turn-who {
   font-size: 10.5px;
   color: var(--faint);
@@ -1930,6 +2102,15 @@ button {
   flex-wrap: wrap;
 }
 
+/* One fact about the click, directly above the button that does it. Not in
+   the faint colour the rest of the panel's asides use: it is the thing here a
+   reader most needs, and the only one they cannot get from anywhere else. */
+.send-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
 .send-btn {
   display: inline-flex;
   align-items: center;
@@ -2028,6 +2209,149 @@ button {
   font-size: 11px;
 }
 
+/* ---- handing a review to somebody else ---- */
+
+/* The element carries the frame and no padding of its own: the padding is the
+   body's, so a click landing on the dialog itself is a click on the backdrop
+   and nothing else — which is what closes it. */
+.handoff-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+/* Written out rather than mixed from a token: `::backdrop` does not inherit
+   the custom properties of the dialog it belongs to in every browser that
+   supports the element, and a scrim that silently resolves to nothing is worse
+   than one that is not themed. A dark scrim is right over either theme. */
+.handoff-dialog::backdrop {
+  background: rgb(14 17 20 / 0.45);
+}
+
+.handoff-body {
+  padding: 16px 18px 18px;
+}
+
+.handoff-dialog .send-top {
+  margin-bottom: 12px;
+}
+
+.handoff-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* The `@` belongs to the login, so it sits against the box rather than in it —
+   typed or not, the value reads the same way. */
+.handoff-at {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+.handoff-login {
+  width: 15ch;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg);
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--sunken);
+}
+
+/* The box and the list it drops: the list is positioned against this, so the
+   dialog's own flow decides nothing about where it lands. */
+.handoff-combo {
+  position: relative;
+}
+
+.handoff-options {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 232px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+.handoff-options li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* One highlight, driven by the keyboard — the pointer moves it rather than
+   lighting a second row, so there is never a question which Enter would take. */
+.handoff-options li.on {
+  background: var(--sunken-2);
+}
+
+.handoff-option-login {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.handoff-options .faint {
+  font-size: 10.5px;
+}
+
+/* Sending the draft along with it: a switch, then what it would post. */
+.handoff-with-review {
+  margin: 12px 0 4px;
+}
+
+.handoff-with-review label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.handoff-with-review p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.handoff-with-review .body-preview {
+  margin-top: 8px;
+  max-height: 180px;
+  font-size: 11.5px;
+}
+
+.handoff-who-note {
+  margin: -4px 0 10px;
+  font-size: 11px;
+}
+
+/* What the button is about to do, in the words of the thing it does. */
+.handoff-says {
+  margin: 10px 0 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
 .sent-strip {
   display: flex;
   align-items: baseline;
@@ -2097,7 +2421,8 @@ button {
   border-radius: 4px;
   background: var(--surface);
   margin: 8px 0;
-  overflow: hidden;
+  /* clip, not hidden: hidden would keep its header from pinning. */
+  overflow: clip;
 }
 
 /* Same header the diff gives a file, so the page reads as one list of files
@@ -2191,6 +2516,39 @@ button {
 /* The offer to stop reading the diff, in the diff's own file header. */
 .d2h-file-header .md-read-toggle {
   margin-left: auto;
+}
+
+/* GitHub's "Viewed" box, at the right end of every file header. */
+.file-viewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.d2h-file-header .md-read-toggle + .file-viewed,
+.md-file-head .btn + .file-viewed {
+  margin-left: 8px;
+}
+
+/* A viewed file folds to its header until its diff changes; the header
+   opens it back up without unticking it. */
+.file-viewed-on:not(.file-peek) > :not(.d2h-file-header) {
+  display: none;
+}
+
+.file-viewed-on .d2h-file-header,
+.md-file-head-viewed {
+  cursor: pointer;
+}
+
+.file-viewed-on:not(.file-peek) .d2h-file-header,
+.md-file-head-folded {
+  opacity: 0.7;
 }
 
 /* A card's markdown sits flush with the card's own padding. A document's does
@@ -2321,6 +2679,12 @@ button {
   margin: 28px 0 8px;
 }
 
+.settings .settings-version {
+  margin-top: 40px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
 .settings code {
   font-family: var(--mono);
   font-size: 0.92em;
@@ -2349,6 +2713,15 @@ button {
   display: flex;
   gap: 8px;
   margin: 20px 0 12px;
+}
+
+.trust-add select {
+  font: inherit;
+  padding: 7px 10px;
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
 }
 
 .trust-add input {
@@ -2505,4 +2878,45 @@ button {
   color: var(--amber-ink);
   padding: 10px 12px;
   border-radius: 4px;
+}
+
+/* ---- already raised: another reviewer made this point first ---- */
+
+.raised {
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+  border-radius: 0 3px 3px 0;
+}
+
+.raised-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.raised-head a {
+  font-size: 10.5px;
+}
+
+.tag-raised {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+.raised-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 640px;
+}
+
+.raised-fate {
+  color: var(--fg);
 }

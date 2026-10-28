@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createReview, fetchDaemonStatus, fetchReviews, patchReview, rerunReview } from "./api";
 import { Icon, Key } from "./Icon";
 import {
@@ -6,14 +6,18 @@ import {
   INBOX_TABS,
   TAB_META,
   Tab,
+  activityAt,
   ageLabel,
   bucket,
+  commentsCell,
+  exceptionsLabel,
   hiddenAwaitingNote,
   isHiddenAwaiting,
   replyOf,
   requestTag,
   rowTag,
   shownTab,
+  startsOwnGroup,
   strip,
   verdictCell,
 } from "./inbox";
@@ -50,6 +54,7 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         )}
         <span>
           auto-review <b>{daemon.autoReview ? "on" : "off"}</b>
+          {exceptionsLabel(daemon.autoReview, daemon.autoReviewRepos ?? {})}
         </span>
         <span>
           auto-send <b>{daemon.autoSend === "on" ? "on" : "shadow"}</b> ≥{daemon.autoSendThreshold}%
@@ -84,6 +89,24 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A column label that explains itself on hover. Not a `title`: the browser's
+ * own tooltip waits a second, needs the pointer held still over an 11px label,
+ * and gave up often enough that the explanation read as missing.
+ */
+function HeadCell({ className, label, tip }: { className: string; label: string; tip: string }) {
+  return (
+    <span className={className}>
+      <span className="head-cell">
+        {label}
+        <span className="head-tip" role="tooltip">
+          {tip}
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -143,7 +166,7 @@ function Row({
         </span>
       )}
       {tag && <span className="tag tag-done">{tag}</span>}
-      <span className="col-comments">{r.commentCount || ""}</span>
+      <span className="col-comments">{commentsCell(r)}</span>
       <span className="col-size">
         {r.pr.changedFiles > 0 ? (
           <>
@@ -155,7 +178,12 @@ function Row({
         )}
       </span>
       <span className={`col-verdict tone-${v.tone}`}>{v.label}</span>
-      <span className="col-age">{ageLabel(r.updatedAt)}</span>
+      <span
+        className="col-age"
+        title={r.status === "awaiting" ? "When the PR last changed on GitHub" : "When this review last changed"}
+      >
+        {ageLabel(activityAt(r))}
+      </span>
     </div>
   );
 }
@@ -267,6 +295,11 @@ export function Queue() {
   // The cursor is a review, not a row number: the list re-sorts under it every
   // poll, and the strip below must keep explaining the same PR.
   const [cursor, setCursor] = useState<string | null>(null);
+  // Set when the keyboard moved the cursor, so the row it lands on is scrolled
+  // into view — clear of the sticky strip, whose height `--strip-h` carries.
+  // Not on hover: the pointer is already on the row it selected.
+  const keyMoved = useRef(false);
+  const stripEl = useRef<HTMLDivElement | null>(null);
 
   // Fetches outlive the component; never set state after unmount.
   const alive = useRef(true);
@@ -335,7 +368,10 @@ export function Queue() {
       const at = rows.findIndex((r) => r.key === selected?.key);
       const move = (delta: number) => {
         const next = rows[Math.min(rows.length - 1, Math.max(0, at + delta))];
-        if (next) setCursor(next.key);
+        if (next) {
+          keyMoved.current = true;
+          setCursor(next.key);
+        }
       };
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
@@ -345,7 +381,16 @@ export function Queue() {
         move(-1);
       } else if (e.key === "Enter" && selected) {
         openReview(selected.key);
-      } else if (e.key === "r" && selected && selected.status !== "sent" && selected.status !== "running") {
+        // Not on a sent row: `r` is one keystroke with no label and no undo,
+        // and there it would replace the local copy of a review that is
+        // already public. The button two lines below says what it does and
+        // stays available — see the re-review discussion in docs/lifecycle.md.
+      } else if (
+        e.key === "r" &&
+        selected &&
+        selected.status !== "running" &&
+        selected.status !== "sent"
+      ) {
         startReview(selected.key);
       }
     };
@@ -353,6 +398,27 @@ export function Queue() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selected?.key]);
+
+  useEffect(() => {
+    if (!keyMoved.current) return;
+    keyMoved.current = false;
+    document.querySelector(".row-on")?.scrollIntoView({ block: "nearest" });
+  }, [selected?.key]);
+
+  // The strip is sticky at the bottom, so a row scrolled "into view" must clear
+  // it: rows take their bottom scroll margin from its measured height.
+  useEffect(() => {
+    const el = stripEl.current;
+    if (!el) return;
+    const apply = () => document.documentElement.style.setProperty("--strip-h", `${el.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--strip-h");
+    };
+  }, [selected != null]);
 
   if (error && !reviews) return <p className="error">{error}</p>;
   if (!reviews) return <p className="muted pad">Loading…</p>;
@@ -424,13 +490,25 @@ export function Queue() {
 
           <div className="table-head">
             <span className="col-caret" />
-            <span className="col-slug">repo#pr</span>
-            <span className="col-author">author</span>
-            <span className="col-title">title</span>
-            <span className="col-comments">c</span>
-            <span className="col-size">size</span>
-            <span className="col-verdict">verdict</span>
-            <span className="col-age">upd</span>
+            <HeadCell className="col-slug" label="repo#pr" tip="Repository and pull request number" />
+            <HeadCell className="col-author" label="author" tip="Who opened the pull request" />
+            <HeadCell className="col-title" label="title" tip="Pull request title" />
+            <HeadCell
+              className="col-comments"
+              label="comments"
+              tip="Comments in the draft (— before one exists)"
+            />
+            <HeadCell className="col-size" label="size" tip="Files changed, lines added, lines removed" />
+            <HeadCell
+              className="col-verdict"
+              label="verdict"
+              tip="Recommendation, and how sure the review is"
+            />
+            <HeadCell
+              className="col-age"
+              label="upd"
+              tip="When this review last changed — or, on a PR nobody has drafted yet, when the PR itself last changed on GitHub"
+            />
           </div>
 
           {rows.length === 0 ? (
@@ -458,20 +536,34 @@ export function Queue() {
               )}
             </div>
           ) : (
-            rows.map((r) => (
-              <Row
-                key={r.key}
-                r={r}
-                selected={r.key === selected?.key}
-                onSelect={() => setCursor(r.key)}
-                onOpen={() => openReview(r.key)}
-                awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
-              />
+            rows.map((r, i) => (
+              <Fragment key={r.key}>
+                {/* Your own PRs follow the ones awaiting you, under a heading
+                    of their own: nobody is waiting on you for these. Only in
+                    the live tabs — the filed ones are records, in date order. */}
+                {INBOX_TABS.includes(tab) && startsOwnGroup(rows, i) && (
+                  <div
+                    className="group-head"
+                    role="heading"
+                    aria-level={2}
+                    title="PRs you opened. Never drafted on their own — press r for a self-review. Send posts it as a comment."
+                  >
+                    your PRs
+                  </div>
+                )}
+                <Row
+                  r={r}
+                  selected={r.key === selected?.key}
+                  onSelect={() => setCursor(r.key)}
+                  onOpen={() => openReview(r.key)}
+                  awaiting={isHiddenAwaiting(r, hidden) ? replyOf(r, daemon) : null}
+                />
+              </Fragment>
             ))
           )}
 
           {selected && detail && (
-            <div className="cursor-strip">
+            <div className="cursor-strip" ref={stripEl}>
               <div className="cursor-strip-body">
                 <div className="lab">
                   {selected.pr.owner}/{selected.pr.repo}#{selected.pr.number}
@@ -513,10 +605,13 @@ export function Queue() {
                   </button>
                   <button
                     className="btn"
-                    disabled={busy || selected.status === "running" || selected.status === "sent"}
+                    disabled={busy || selected.status === "running"}
+                    // Offered on a sent row too: what was sent stays on GitHub
+                    // and is kept here as a record, and a new draft is the only
+                    // answer to commits that landed after it.
                     title={
                       selected.status === "sent"
-                        ? "This review was sent — it is a record now."
+                        ? "Draft a review of the PR's current head. What you sent stays on GitHub."
                         : "Draft a review of the PR's current head."
                     }
                     onClick={() => startReview(selected.key)}

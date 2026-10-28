@@ -5,6 +5,7 @@
 // the body" before anything is posted, without a round trip per keystroke.
 
 import { newSideLines } from "../../src/core/diff";
+import { sendTreatment } from "../../src/core/raised";
 import { SEVERITY_BADGE } from "../../src/core/severity";
 import { Artifact, ReviewComment, Severity, Verdict } from "./types";
 
@@ -22,8 +23,14 @@ export const EVENT_TONE: Record<ReviewEvent, "approve" | "comment" | "changes"> 
   REQUEST_CHANGES: "changes",
 };
 
-/** The event a verdict asks for. The user can still choose another one. */
-export function eventForVerdict(verdict: Verdict | null | undefined): ReviewEvent {
+/**
+ * The event a verdict asks for — and the event Send posts, on anybody's PR but
+ * yours. On your own PR it is a comment whatever the verdict says: GitHub takes
+ * no approve or change request from a PR's author, and the server refuses both
+ * there too (`ownPrRefusal`).
+ */
+export function eventForVerdict(verdict: Verdict | null | undefined, own = false): ReviewEvent {
+  if (own) return "COMMENT";
   if (verdict?.recommendation === "approve") return "APPROVE";
   if (verdict?.recommendation === "request_changes") return "REQUEST_CHANGES";
   return "COMMENT";
@@ -63,18 +70,93 @@ export function rowLine(
 }
 
 /**
- * Mirrors buildReviewPayload: a comment posts inline when it can be anchored;
+ * Mirrors buildReviewPayload: a comment somebody else already raised is held
+ * back or answered in their thread (`sendTreatment`, the rule Send itself
+ * follows); of the rest, a comment posts inline when it can be anchored, and
  * everything else that isn't dropped folds into the review body.
  */
 export function splitComments(artifact: Artifact): {
   inline: ReviewComment[];
   folded: ReviewComment[];
   dropped: ReviewComment[];
+  replies: ReviewComment[];
+  held: ReviewComment[];
 } {
   const dropped = artifact.comments.filter((c) => c.status === "dropped");
-  const active = artifact.comments.filter((c) => c.status !== "dropped");
+  const live = artifact.comments.filter((c) => c.status !== "dropped");
+  const replies = live.filter((c) => sendTreatment(c) === "reply");
+  const held = live.filter((c) => sendTreatment(c) === "hold");
+  const active = live.filter((c) => sendTreatment(c) === "post");
   const inline = inlineComments(artifact.diff, active);
-  return { inline, folded: active.filter((c) => !inline.includes(c)), dropped };
+  return { inline, folded: active.filter((c) => !inline.includes(c)), dropped, replies, held };
+}
+
+/**
+ * Has a review from this row ever reached GitHub?
+ *
+ * `sent` alone cannot answer it: a re-review moves that record to
+ * `priorSends` and leaves the field null, so a guard reading `sent` would
+ * treat the second draft as the first. Every surface that could *post* —
+ * Send's own note, the handoff's "carry the draft" box — asks this one,
+ * because what matters to a reader is whether their name is already on a
+ * review of this PR, not which field happens to hold it.
+ */
+export function everSent(artifact: Artifact): boolean {
+  return artifact.sent != null || (artifact.priorSends ?? []).length > 0;
+}
+
+/** How many reviews this row has posted — the next Send would be this + 1. */
+export function sendCount(artifact: Artifact): number {
+  return (artifact.priorSends ?? []).length + (artifact.sent ? 1 : 0);
+}
+
+/**
+ * Has the PR moved past the review that was sent from this row?
+ *
+ * Asked of the two heads, never of the refresh's `stale` flag: that flag is
+ * computed against the artifact as it stood *before* the refresh wrote the
+ * new head, so it stays true for the rest of the page's life on a row that
+ * was pulled forward and then sent. Reading it would put "the PR moved on
+ * since you sent this review — now at X, sent at X" on screen seconds after
+ * the send, over a PR that has not moved at all, next to a button offering to
+ * replace the review just posted.
+ */
+export function sentAtOldHead(
+  artifact: Artifact,
+  freshness: { headSha?: string } | null,
+): boolean {
+  if (artifact.sent == null) return false;
+  const now = freshness?.headSha;
+  return now != null && artifact.pr.headSha !== "" && now !== artifact.pr.headSha;
+}
+
+/**
+ * What a comment somebody else already raised will do at Send, in the words
+ * the card uses. Null for a comment nobody else raised.
+ */
+export function raisedFate(comment: ReviewComment, sent: boolean): string | null {
+  const raised = comment.alreadyRaised;
+  if (!raised) return null;
+  if (comment.status === "dropped") return sent ? "dropped — not posted" : "dropped — never posts";
+  if (raised.replied) return "replied in their thread";
+  const treatment = sendTreatment(comment);
+  if (sent) {
+    return treatment === "reply"
+      ? "the reply in their thread did not post"
+      : treatment === "hold"
+        ? "left out of the review"
+        : "posted as a comment of its own";
+  }
+  if (treatment === "reply") return "replies in their thread when you send";
+  if (treatment === "hold") return "left out of Send";
+  return raised.decision === "send"
+    ? "posts as a comment of its own"
+    : "posts — their thread was resolved, and the problem is still here";
+}
+
+/** "open thread", "resolved thread", "review" — where they said it, in a word or two. */
+export function raisedWhere(raised: NonNullable<ReviewComment["alreadyRaised"]>): string {
+  return raised.where.kind === "thread" ? `${raised.where.state} thread` : "review";
 }
 
 /** "🚨 1 blocker · 🎨 2 nits" — live findings only; "" when nothing is graded. */
@@ -130,7 +212,16 @@ export function verdictMismatch(artifact: Artifact): string | null {
 
 /** "5 inline · 1 folded into the body" — what send is about to put on the PR. */
 export function payloadSummary(artifact: Artifact): string {
-  const { inline, folded } = splitComments(artifact);
+  const { inline, folded, replies, held } = splitComments(artifact);
+  // Said whichever body posts: neither kind of comment is in the body.
+  const raised = [
+    replies.length > 0 ? `${replies.length} ${replies.length === 1 ? "reply" : "replies"} in another reviewer's thread` : "",
+    held.length > 0 ? `${held.length} already raised, left out` : "",
+  ].filter(Boolean);
+  return [composedSummary(artifact, inline, folded), ...raised].join(" · ");
+}
+
+function composedSummary(artifact: Artifact, inline: ReviewComment[], folded: ReviewComment[]): string {
   // A hand-written body carries whatever the user left in it. "2 folded into
   // the body" is a claim about the composed one, and repeating it over a body
   // they may have cut those notes out of would be a lie in the one place the

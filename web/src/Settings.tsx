@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, fetchDaemonStatus, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, fetchDaemonStatus, fetchReviews, updateAutoReviewRepo, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
+import { SendKey, useSendKey } from "./sendkey";
+import { useStickyChapters } from "./sticky-chapters";
 import { ThemeChoice, useTheme } from "./theme";
-import { ConfigView } from "./types";
+import { ConfigView, DaemonConfig } from "./types";
 
 const EXAMPLES = [
   { rule: "@acme/*", meaning: "anyone in the acme org" },
@@ -29,9 +31,135 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
   { choice: "dark", label: "dark" },
 ];
 
+const SEND_KEYS: { choice: SendKey; label: string }[] = [
+  { choice: "mod-enter", label: "⌘↵ sends a chat message, Enter starts a new line" },
+  { choice: "enter", label: "Enter sends a chat message, Shift+Enter starts a new line" },
+];
+
+const REPO = /^[\w.-]+\/[\w.-]+$/;
+
+/** How an exception reads, by which way it turns the default. */
+const modeLabel = (auto: boolean) => (auto ? "drafts automatically" : "waits for a click");
+
+/**
+ * Per-repo exceptions to the auto-review switch (`daemon.autoReviewRepos`).
+ * A new exception starts as the opposite of the default, since one that agrees
+ * with it changes nothing. The repos already in the queue are offered as you
+ * type, because that is where the one you want to except came from.
+ */
+function AutoReviewExceptions({
+  daemon,
+  busy,
+  save,
+}: {
+  daemon: DaemonConfig;
+  busy: boolean;
+  save: (repo: string, on: boolean | null) => void;
+}) {
+  const [repo, setRepo] = useState("");
+  const [auto, setAuto] = useState(!daemon.autoReview);
+  const [known, setKnown] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetchReviews()
+      .then((list) => setKnown([...new Set(list.map((r) => `${r.pr.owner}/${r.pr.repo}`))].sort()))
+      .catch(() => {});
+  }, []);
+  // The default flipped under it: keep offering the useful direction.
+  useEffect(() => setAuto(!daemon.autoReview), [daemon.autoReview]);
+
+  const entries = Object.entries(daemon.autoReviewRepos).sort(([a], [b]) => a.localeCompare(b));
+  const name = repo.trim();
+  const valid = REPO.test(name);
+
+  // Repos already excepted, in any spelling, aren't offered again.
+  const listed = new Set(entries.map(([k]) => k.toLowerCase()));
+
+  // The server replaces any other spelling of the same repo, since the match
+  // ignores case — one repo per write, merged into the file as it is now.
+  const add = () => {
+    if (busy || !valid) return;
+    save(name, auto);
+    setRepo("");
+  };
+
+  return (
+    <>
+      <h2>Per-repo exceptions</h2>
+      <p className="muted">
+        Every repo not listed here follows the switch above. List a busy repo to keep it to the
+        click, or, with the switch off, one repo you still want drafted.
+      </p>
+      <div className="trust-add">
+        <input
+          value={repo}
+          aria-label="Repository"
+          placeholder="owner/repo"
+          list="auto-review-repos"
+          disabled={busy}
+          onChange={(e) => setRepo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <datalist id="auto-review-repos">
+          {known
+            .filter((k) => !listed.has(k.toLowerCase()))
+            .map((k) => (
+              <option key={k} value={k} />
+            ))}
+        </datalist>
+        <select
+          aria-label="What the poll does for this repo"
+          value={auto ? "auto" : "click"}
+          disabled={busy}
+          onChange={(e) => setAuto(e.target.value === "auto")}
+        >
+          <option value="click">{modeLabel(false)}</option>
+          <option value="auto">{modeLabel(true)}</option>
+        </select>
+        <button className="btn" disabled={busy || !valid} onClick={add}>
+          add
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="muted">
+          No exceptions — every repo {daemon.autoReview ? "is drafted automatically" : "waits for a click"}.
+        </p>
+      ) : (
+        <table className="trust-table">
+          <tbody>
+            {entries.map(([key, on]) => (
+              <tr key={key}>
+                <td>
+                  <code>{key}</code>
+                </td>
+                <td className="muted">
+                  {modeLabel(on)}
+                  {on === daemon.autoReview && " — same as the default, so it changes nothing"}
+                </td>
+                <td className="trust-actions">
+                  <button className="btn" disabled={busy} onClick={() => save(key, !on)}>
+                    {on ? "wait for a click" : "draft automatically"}
+                  </button>{" "}
+                  <button className="btn" disabled={busy} onClick={() => save(key, null)}>
+                    remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
 export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [notify, toggleNotify] = useNotifyState();
   const [theme, setTheme] = useTheme();
+  const [stickyChapters, setStickyChapters] = useStickyChapters();
+  const [sendKey, setSendKey] = useSendKey();
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +188,11 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
 
   if (error && !config) return <p className="error">{error}</p>;
   if (!config) return <p className="muted">Loading…</p>;
+
+  // The daemon's word arrives on the bell's own poll, seconds behind a switch
+  // flipped here. Unticking the machine's notification is a request for this
+  // browser's, so the lock lifts with the click rather than on the next read.
+  const machineAnnounces = daemonAnnounces && config.daemon.poll && config.daemon.notify;
 
   // On blur/Enter rather than per keystroke: typing "15" would save "1" first.
   const saveInterval = () => {
@@ -117,9 +250,23 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         />{" "}
         draft a review automatically (off: awaiting PRs wait for a click)
       </label>
+      {config.daemon.poll && (
+        <AutoReviewExceptions
+          daemon={config.daemon}
+          busy={busy}
+          save={(repo, on) => apply(updateAutoReviewRepo(repo, on))}
+        />
+      )}
       <p className="muted">
-        Concurrency and a repo filter live in <code>{config.path}</code> under{" "}
-        <code>daemon</code> — hand-editable, like everything here.
+        Your own open PRs come in too, under <b>your PRs</b>, for a self-review when you ask —
+        {config.daemon.ownPrMaxAgeDays
+          ? ` except ones idle for more than ${config.daemon.ownPrMaxAgeDays} days`
+          : " all of them, however long idle"}{" "}
+        (<code>ownPrMaxAgeDays</code>; 0 turns the cut off).
+      </p>
+      <p className="muted">
+        Concurrency, a repo filter and that age cut live in <code>{config.path}</code>{" "}
+        under <code>daemon</code> — hand-editable, like everything here.
       </p>
 
       <h1>Notifications</h1>
@@ -156,14 +303,14 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           type="checkbox"
           checked={notify === "on"}
           disabled={
-            notify === "unsupported" || notify === "blocked" || daemonAnnounces
+            notify === "unsupported" || notify === "blocked" || machineAnnounces
           }
           onChange={toggleNotify}
         />{" "}
-        {daemonAnnounces ? "let this browser announce them instead" : NOTIFY_LABEL[notify]}
+        {machineAnnounces ? "let this browser announce them instead" : NOTIFY_LABEL[notify]}
       </label>
       <p className="muted">
-        {daemonAnnounces ? (
+        {machineAnnounces ? (
           <>
             Standing down while the machine's own notification is on — two popups for one PR is
             one too many. Untick the machine one above and this browser takes over: it names the
@@ -181,21 +328,54 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         )}
       </p>
 
-      <h1>Appearance</h1>
-      {THEMES.map(({ choice, label }) => (
+      <h1 id="appearance">Appearance</h1>
+      <div role="radiogroup" aria-labelledby="appearance">
+        {THEMES.map(({ choice, label }) => (
+          <label key={choice} className="inbox-toggle">
+            <input
+              type="radio"
+              name="theme"
+              checked={theme === choice}
+              onChange={() => setTheme(choice)}
+            />{" "}
+            {label}
+          </label>
+        ))}
+      </div>
+      <p className="muted">
+        Per-browser, like the notification switch: it's about this screen, not your reviews, so it
+        lives here rather than in <code>{config.path}</code>.
+      </p>
+
+      <h1>Review page</h1>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={stickyChapters}
+          onChange={(e) => setStickyChapters(e.target.checked)}
+        />{" "}
+        keep chapter titles and file headers pinned while scrolling
+      </label>
+      <p className="muted">
+        Ten files into a chapter you still see which one you're in, and the pinned title can open
+        the chapter's explanation. Deep in a long file its name and Viewed box stay in reach.
+        Per-browser, like the theme.
+      </p>
+      {SEND_KEYS.map(({ choice, label }) => (
         <label key={choice} className="inbox-toggle">
           <input
             type="radio"
-            name="theme"
-            checked={theme === choice}
-            onChange={() => setTheme(choice)}
+            name="send-key"
+            checked={sendKey === choice}
+            onChange={() => setSendKey(choice)}
           />{" "}
           {label}
         </label>
       ))}
       <p className="muted">
-        Per-browser, like the notification switch: it's about this screen, not your reviews, so it
-        lives here rather than in <code>{config.path}</code>.
+        In the conversation with the reviewer. ⌘↵ sends under either choice, and the other boxes —
+        comments, the review body, a handoff note — always take ⌘↵, since what goes in them runs to
+        several lines. Per-browser, like the theme.
       </p>
 
       <h1>Trusted PRs</h1>
@@ -291,6 +471,8 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         The daemon reviews unattended, so with rules set it runs matching PRs' code with nobody
         watching — start it with <code>--no-trust</code> to prevent that.
       </p>
+
+      <p className="muted settings-version">cerber {config.version}</p>
     </div>
   );
 }

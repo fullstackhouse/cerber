@@ -45,6 +45,13 @@ export const fetchDaemonStatus = () => request<DaemonStatus>("/api/daemon");
 export const fetchReview = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}`);
 
+/** Mark a file as viewed at this version of its patch, or `null` to unmark. */
+export const setViewed = (key: string, path: string, fingerprint: string | null) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/viewed`, {
+    method: "PUT",
+    body: JSON.stringify({ path, fingerprint }),
+  });
+
 export const patchReview = (
   key: string,
   body: {
@@ -59,7 +66,16 @@ export const patchReview = (
     body: JSON.stringify(body),
   });
 
-export const patchComment = (key: string, id: string, body: { body?: string; status?: string }) =>
+export const patchComment = (
+  key: string,
+  id: string,
+  body: {
+    body?: string;
+    status?: string;
+    /** About a finding somebody else already raised: post it anyway, reply in their thread, or null for the default. */
+    raisedDecision?: "send" | "reply" | null;
+  },
+) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/comments/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -123,6 +139,17 @@ export const startChatTurn = (
     body: JSON.stringify(body),
   });
 
+/**
+ * Add to the turn being answered — "not that, look at the migration" — without
+ * waiting for it to finish. Refused (409) once the turn can no longer take it;
+ * send it as the next message then.
+ */
+export const steerChatTurn = (key: string, message: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/steer`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+
 /** Clear a turn that failed. Refused while one is still being answered. */
 export const dismissPendingChat = (key: string) =>
   request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/chat/pending`, { method: "DELETE" });
@@ -137,11 +164,58 @@ export const resetReviewToPreChat = (key: string) =>
 export const fetchSendPreview = (key: string, event: string) =>
   request<SendPreview>(`/api/reviews/${encodeURIComponent(key)}/send-preview?event=${event}`);
 
+/**
+ * Send the review. Resolves with the sent row and, separately, any replies in
+ * other reviewers' threads that did not post — by then the review is up, so a
+ * failed reply is a thing to say, not a reason to send again.
+ */
 export const sendReview = (key: string, event: string) =>
-  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/send`, {
+  request<Artifact & { replyError: string | null }>(`/api/reviews/${encodeURIComponent(key)}/send`, {
     method: "POST",
     body: JSON.stringify({ event, confirm: true }),
   });
+
+/**
+ * Compare the draft with what other reviewers already said on the PR. Starts a
+ * check and returns at once with `raisedCheck.checkingSince` set; poll the
+ * review until it clears.
+ */
+export const checkRaised = (key: string) =>
+  request<Artifact>(`/api/reviews/${encodeURIComponent(key)}/raised`, { method: "POST" });
+
+/**
+ * Who this review could be handed to, for the dialog's suggestions. Read-only,
+ * and the name box works without it — so a caller treats a rejection as a line
+ * to show rather than a reason to stop.
+ */
+export const fetchHandoffCandidates = (key: string) =>
+  request<{ logins: string[] }>(`/api/reviews/${encodeURIComponent(key)}/reviewers`);
+
+/**
+ * Give this review to somebody else: GitHub's review request moves to them, the
+ * note (when there is one) goes up as a plain comment, and the row settles here.
+ *
+ * `postReview` sends the draft along with it as a COMMENT review — the ordinary
+ * send path, asked for from here.
+ *
+ * The one mutating route that does not resolve with a bare artifact: it resolves
+ * with the row as it now stands and, separately, whatever went wrong with the
+ * review and the note — because by then the request has already moved,
+ * so either failing is a thing to say rather than a reason to call this one.
+ */
+export const handOffReview = (
+  key: string,
+  body: { to: string; note: string; postReview: boolean },
+) =>
+  request<{
+    artifact: Artifact;
+    noteError: string | null;
+    sendError: string | null;
+    replyError: string | null;
+  }>(
+    `/api/reviews/${encodeURIComponent(key)}/handoff`,
+    { method: "POST", body: JSON.stringify({ ...body, confirm: true }) },
+  );
 
 export const exportUrl = (key: string) => `/api/reviews/${encodeURIComponent(key)}/export`;
 
@@ -152,6 +226,13 @@ export const updateTrustRule = (rule: string, remove = false) =>
   request<ConfigView>("/api/config/trust", {
     method: "POST",
     body: JSON.stringify({ rule, remove }),
+  });
+
+/** Set (`true`/`false`) or remove (`null`) one per-repo auto-review exception. */
+export const updateAutoReviewRepo = (repo: string, on: boolean | null) =>
+  request<ConfigView>("/api/config/auto-review-repo", {
+    method: "POST",
+    body: JSON.stringify({ repo, on }),
   });
 
 /** Flip the inbox knobs. The daemon picks the change up on its next poll. */

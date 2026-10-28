@@ -10,10 +10,12 @@ comments, and a verdict with a confidence score. You read it in a local web
 cockpit, keep or rewrite or drop each comment, then press Send when you agree
 with it.
 
-**Nothing reaches GitHub until you explicitly say so.** Cerber's only GitHub
-write is the Send button (plus opt-in daemon auto-send you turn on yourself) —
-reviewing is 100% local and read-only. Reviews go out under your own account,
-as your review, because you decided each line of it should.
+**Nothing reaches GitHub until you explicitly say so.** Reviewing is 100% local
+and read-only; three things can write, each one a click you make — the Send
+button, opt-in daemon auto-send you turn on yourself, and handing a review to
+somebody else. A review only ever goes out under your own account because you
+decided it should: Send posts the one you vouched for, and a handoff posts the
+draft only if you ticked the box to send it along, always as a comment.
 
 That gate is the whole point, and the reason this is not another review bot:
 
@@ -22,6 +24,9 @@ That gate is the whole point, and the reason this is not another review bot:
 > one without a human deciding it should.
 
 Named after Cerberus, the gatekeeper: cerber guards what gets merged.
+
+Why it exists, and the four things I tried first:
+[AI drafts the review. I decide what gets sent.](https://www.fullstack.house/blog/cerber?utm_source=github&utm_medium=readme)
 
 **The whole loop in seventeen seconds** — five PRs already drafted when you sit
 down, the one that isn't an approval, straight to its blocker, arguing with the
@@ -47,9 +52,10 @@ requests.*
 
 ## Quick start
 
-Requires Node 20+, an authenticated [`gh`](https://cli.github.com/), `git`, and
+Requires Node 22+, an authenticated [`gh`](https://cli.github.com/), `git`, and
 a logged-in [`claude`](https://claude.com/claude-code) CLI. No API keys, no
-config, no database.
+config, no database. The cockpit wants a browser from 2024 on (Chrome/Edge 123,
+Safari 17.5, Firefox 120).
 
 **Claude Code is a hard requirement, and a paid one.** Cerber drafts reviews by
 running `claude` as you: it rides your existing Claude Code login and draws on
@@ -80,12 +86,15 @@ npx @fullstackhouse/cerber list
 Sending stays a human click. Tame it with `--no-auto-review` (list awaiting
 PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip those
 switches in the cockpit's Settings, which persist in `~/.cerber/config.json`
-and apply on the next poll.
+and apply on the next poll. Settings also takes per-repo exceptions
+(`daemon.autoReviewRepos`): keep a busy repo to the click while the rest are
+drafted, or draft one repo with auto-review otherwise off.
 
 ## Contents
 
 - [What a review looks like](#what-a-review-looks-like) — what Claude writes and how you walk it
 - [The inbox](#the-inbox) — what the queue shows, what settles a row, the notifications
+- [Handing a review to somebody else](#handing-a-review-to-somebody-else)
 - [It reviews the code, not just the diff](#it-reviews-the-code-not-just-the-diff)
 - [Trusted PRs: reviews that can run things](#trusted-prs-reviews-that-can-run-things)
 - [When the PR moves under you](#when-the-pr-moves-under-you)
@@ -148,11 +157,24 @@ ones you marked reviewed or skipped, merged and closed PRs — each tab appearin
 only while it holds something. PRs in archived repos are never picked up at
 all, since the repo is read-only and a review could never be sent.
 
+### Your own PRs
+
+Your own open PRs are in the inbox too, under **your PRs** below the ones
+awaiting you — GitHub never asks you to review them, so they would otherwise
+need their URL pasted every time. Cerber never drafts one on its own and never
+taps you about one: press `r` when you want a self-review. Send posts it as a
+comment, since GitHub takes no approve or change request from a PR's author,
+and auto-send leaves it alone. Skip one to hide it; it leaves for good once it
+merges or closes. PRs of yours idle for more than 30 days stay out
+(`daemon.ownPrMaxAgeDays`; 0 turns that off).
+
 ### Settled means you settled it
 
 Settling a review is your decision, not GitHub's: skip a PR, or mark one
 reviewed without sending, and GitHub still holds its review request open,
-because nothing cerber does here reaches it. Those rows stay marked where they
+because nothing in that decision reaches it. (The one decision that does reach
+it is [handing the review to somebody else](#handing-a-review-to-somebody-else),
+which moves the request rather than leaving it behind.) Those rows stay marked where they
 sit, counted on the tab they went into, and named in place of the empty
 inbox — cerber never tells you nothing awaits you while its own poll says
 otherwise. It is a report, not a nag: what you decided here stands, and the
@@ -191,7 +213,7 @@ into one popup when several land at once. Ready means *there is something to
 read*: cerber drafts the review itself, so the tap waits for the draft and says
 what it found — "widgets#7 draft ready · requests changes · 2 blockers" — rather
 than walking you back to a row that says "no run yet". A PR nobody is going to
-draft (auto-review off, or a run that failed) is announced as it arrives, since
+draft (auto-review off for its repo, or a run that failed) is announced as it arrives, since
 that is all the news there will be — and if a retry drafts it after all, that is
 new news and you are told. Nothing else is: a PR whose draft you have been told
 about stays quiet however its next re-review ends. The tap comes from the poll, so it reaches
@@ -226,6 +248,55 @@ The tab itself says it too, without asking anyone: while the inbox holds
 anything, the favicon wears a red dot, and it goes away when the last review is
 dealt with. No permission, no switch — just the paw with a mark on it, so a
 glance at the tab strip answers "is there anything for me?".
+
+## Handing a review to somebody else
+
+Some reviews are not yours. Wrong part of the stack, wrong week, somebody else
+wrote half of it — and the honest answer is a name, not a skip. **Hand off** is
+in the send panel next to *mark reviewed* and *skip*. It opens with the people
+who can take it already listed — whoever this repo assigns work to, with anyone
+you have handed to before at the top — so in the ordinary case you pick a name
+rather than typing one. Then:
+
+- they are added as a requested reviewer and you are taken off,
+- a short note goes on the PR saying so — prefilled with their name so they get
+  the notification, editable, and clearable if you would rather say nothing,
+- the drafted review goes up with it, if you tick the box for it (below),
+- the row is filed under settled here, tagged `handed to @them` — or under
+  sent, if you sent the review with it.
+
+That is the whole of it, and it is the one thing on the queue that genuinely
+*finishes* a review request instead of just filing it: a skip leaves GitHub
+asking you forever, and this does not. If they run cerber too, their next poll
+picks the PR up and drafts a review for them — nothing has to be sent anywhere
+for that to work.
+
+**You can send the draft with it.** Tick *also post the review* and what Claude
+found goes up at the same time — the same body and the same inline comments the
+Send button would post, so the next reviewer and the author start from something
+rather than nothing.
+
+It posts as a **comment**, never an approval or a change request. You are handing
+the judgement over, so making it on the way out would be odd. The findings keep
+their grades, so a blocker still reads as a blocker — what that means for the
+merge is now the next reviewer's call.
+
+That box starts unticked, and it is the one thing here that isn't on by default.
+You can hand off a PR you never opened, where the draft is whatever the overnight
+poll wrote, and publishing that under your name is the thing the Send button
+exists to prevent. Ticking it shows you the body first. Leave it alone and the
+draft just stays here, openable and still sendable.
+
+If GitHub refuses the swap — they are not a collaborator, or you cannot request
+reviews on that repo — nothing happens at all: no note on the PR, no change
+here. And if it moves them on but cannot take you off, the row says that too,
+rather than claiming you are done with it.
+
+The list is a convenience, not a gate: it is GitHub's assignable-users list, not
+its rule for who may review, so you can always type a login it doesn't mention —
+and on a repo cerber can't read that list for, the box says so and still works.
+
+Handing to a team isn't supported — a room being asked is not somebody taking it.
 
 ## It reviews the code, not just the diff
 
@@ -371,8 +442,31 @@ cockpit (or `cerber review <pr> --force`).
 > starts and they do not come back, on success or on failure. This is a
 > decision, not a bug ([`docs/lifecycle.md`](docs/lifecycle.md)): the run owns
 > the draft. If you have written comments you want to keep, send the review or
-> copy them out first. Your *decisions* do survive — a send, a `reviewed` or
-> `skipped` you set, and the chat transcript are all kept.
+> copy them out first. Your *decisions* do survive — a `reviewed` or `skipped`
+> you set and the chat transcript are kept, and a send is kept as a record of
+> what went to GitHub (see the next section).
+
+### Re-reviewing one you already sent
+
+Sending freezes the draft — it is the record of what GitHub has, so nothing
+can edit it afterwards. What you can do is replace it. The same **Re-review at
+head** button works on a sent review, and on a PR whose author has pushed
+since it is the only thing that does: the review you sent answers a commit
+that is gone, and cerber will not rewrite a review that is already public.
+
+The run drafts against the current head and hands you an ordinary unsent
+review again — editable, arguable, sendable. What you sent is kept beside it:
+a note above the draft says what you posted and when, with a link, and the
+line over the Send button says the next click would be review 2. **Nothing on
+GitHub changes** — a second review sits beside the first; cerber never edits
+or withdraws what it posted.
+
+The poll does this on its own, too, for a sent review whose PR moved on and
+whose author has asked you for another look. The two things that can reach
+GitHub without you both stand down on a row like that: auto-send will not
+approve a PR you have already reviewed yourself, and a handoff stops offering
+to carry the draft — it is a new draft, but sending it would still be your
+second review on that PR.
 
 ## Arguing with the review before you send it
 
@@ -430,7 +524,8 @@ the exchange went anywhere near GitHub.
 Nothing in the conversation reaches GitHub. Send still builds its payload from
 the summary, comments and verdict alone, and is still one deliberate click. A
 review that has already been sent can't be argued with: that artifact is the
-record of what GitHub has.
+record of what GitHub has — re-review it first, and the new draft is open to
+the conversation like any other.
 
 ## Every row remembers what happened to it
 

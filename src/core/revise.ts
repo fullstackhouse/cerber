@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Artifact, Refusal, Revision, ReviewSnapshot } from "./artifact.js";
+import { rewriteFinding } from "./raised.js";
 
 /**
  * Applying a chat turn's edits to the review it is about.
@@ -70,9 +71,19 @@ export function mergeConcurrentEdits(
     return then.body !== now.body || then.status !== now.status || then.severity !== now.severity;
   };
 
-  const merged = current.comments.map((now) =>
-    userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now,
-  );
+  const merged = current.comments.map((now) => {
+    const chosen = userTouched(now.id, now) ? now : fromTurn.get(now.id) ?? now;
+    if (chosen === now) return now;
+    // Who else raised a comment is the check's to say, not the turn's: a check
+    // that landed while the turn ran — and a decision made about it — is only
+    // on disk, and the turn's copy predates both.
+    const onDisk = { ...chosen, body: now.body, alreadyRaised: now.alreadyRaised };
+    // The rewrite the turn made still decides an undecided match, as any
+    // rewrite does — measured against the body on disk, so a turn that changed
+    // nothing decides nothing. Never on a sent review: that is a record of what
+    // was posted, and nothing on it is re-decided, here or anywhere else.
+    return current.sent ? { ...onDisk, body: chosen.body } : rewriteFinding(onDisk, chosen.body);
+  });
   // Comments the turn itself added are not in `current` yet. Only those: a
   // comment present in both `before` and `after` but missing from `current` is
   // one the user deleted while the turn ran, and pushing it back would undo
@@ -97,6 +108,15 @@ export function mergeConcurrentEdits(
     // Nor does a turn announce anything: the ledger is the poll's, and a turn
     // takes minutes, which is long enough for a poll to have stamped it.
     notified: current.notified,
+    // Ticked while the turn ran, and never the turn's to touch.
+    viewed: current.viewed,
+    // Nor does it compare the draft with what others said; that check folds
+    // onto the disk on its own.
+    raisedCheck: current.raisedCheck,
+    // Nor does it hand a review to anybody. A handoff that landed while the
+    // turn ran has already moved the request on GitHub, so restoring the
+    // pre-turn `null` would erase the only local record of where the PR went.
+    handoff: current.handoff,
   };
 }
 
@@ -175,8 +195,10 @@ export function applyRevisions(
           comments: next.comments.map((c) =>
             c.id === revision.commentId
               ? {
-                  ...c,
-                  body: revision.body,
+                  // A rewrite the user asked for decides a duplicate nobody
+                  // had decided about: what posts is their words now, not the
+                  // ones the check compared (`rewriteFinding`).
+                  ...rewriteFinding(c, revision.body),
                   // Omitted = the turn is not re-grading; null = "not a finding".
                   severity: revision.severity === undefined ? c.severity : revision.severity,
                 }
@@ -223,6 +245,7 @@ export function applyRevisions(
               editedByUser: false,
               originalLine: null,
               drifted: false,
+              alreadyRaised: null,
             },
           ],
         };

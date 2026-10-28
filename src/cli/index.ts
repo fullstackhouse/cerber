@@ -1,16 +1,26 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { createRequire } from "node:module";
+import { version } from "../core/version.js";
 import readline from "node:readline/promises";
 import { artifactId, artifactKey } from "../core/artifact.js";
 import { listCheckouts, removeCheckout } from "../core/checkout.js";
 import { toMarkdown } from "../core/export.js";
+import { anyAutoReview, capAutoReview } from "../core/autoreview.js";
 import { configPath, loadConfig, saveConfig } from "../core/config.js";
 import { formatBlockers, isBlocking, preflight } from "../core/preflight.js";
 import { withWriter } from "../core/history.js";
 import { TrustRuleError, describeRule, explainRule, parseTrustRule } from "../core/trust.js";
-import { PrRef, parsePrRef, searchAwaitingMe, submitReview } from "../core/gh.js";
-import { ReviewEvent, buildReviewPayload, computeCalibration, eventForRecommendation } from "../core/send.js";
+import { PrRef, currentLogin, parsePrRef, postReplies, searchAwaitingMe, submitReview } from "../core/gh.js";
+import {
+  ReviewEvent,
+  buildReviewPayload,
+  computeCalibration,
+  defaultSendEvent,
+  describeReplyFailures,
+  eventForRecommendation,
+  ownPrRefusal,
+  recordReplies,
+} from "../core/send.js";
 import {
   cerberHome,
   listArtifacts,
@@ -25,13 +35,6 @@ import { startDaemon } from "../server/daemon.js";
 import { cockpitUrl, startServer } from "../server/index.js";
 
 const program = new Command();
-
-/**
- * The published version, read from the manifest rather than typed here — a
- * hand-maintained copy drifted to 0.5.0 while 0.30.0 shipped, and `--version`
- * is the first thing anyone runs to decide whether a project is alive.
- */
-const { version } = createRequire(import.meta.url)("../../package.json") as { version: string };
 
 /**
  * Stop before the work starts when a tool cerber shells out to is missing or
@@ -259,21 +262,63 @@ program
       process.exit(1);
     }
 
-    const event = (
-      opts.event ??
-      (artifact.verdict ? eventForRecommendation(artifact.verdict.recommendation) : "COMMENT")
-    ).toUpperCase() as ReviewEvent;
+    // The same wait the cockpit makes. A check run by `serve` leaves the status
+    // `ready`, so the guard above cannot see it — and sending now would post
+    // the duplicates it is about to find.
+    if (artifact.raisedCheck?.checkingSince) {
+      console.error(
+        `cerber is checking which findings of ${id} other reviewers already raised — send once it finishes. ` +
+          `If nothing is running, restart \`cerber serve\`, which clears a check that died mid-flight.`,
+      );
+      process.exit(1);
+    }
+
+    // Your own PR defaults to a comment, the one event GitHub takes from its
+    // author — the same rule the cockpit's send button follows.
+    const me = await currentLogin().catch(() => null);
+    const event = (opts.event ?? defaultSendEvent(artifact, me)).toUpperCase() as ReviewEvent;
     if (!["APPROVE", "COMMENT", "REQUEST_CHANGES"].includes(event)) {
       console.error(`Invalid event: ${event}`);
+      process.exit(1);
+    }
+    const refusal = ownPrRefusal(artifact.pr, event, me);
+    if (refusal) {
+      console.error(`Not sent: ${refusal}.`);
       process.exit(1);
     }
 
     const payload = buildReviewPayload(artifact, event);
     console.log(`About to send to ${artifact.pr.url}:`);
+    // Said before anything else about the payload: on a PR you have already
+    // reviewed, "what is in this review" is the second question. The cockpit's
+    // send panel says the same thing in the same place (SPEC §8.3).
+    const posted = artifact.priorSends;
+    if (posted.length > 0) {
+      const last = posted[posted.length - 1]!;
+      const when = new Date(last.at).toLocaleDateString();
+      console.log(
+        `  ⚠ you already sent ${posted.length === 1 ? "a review" : `${posted.length} reviews`}` +
+          ` on this PR${posted.length === 1 ? "" : ", the last"} on ${when}` +
+          ` as ${last.event.toLowerCase().replace("_", " ")}${last.url ? ` (${last.url})` : ""}.` +
+          ` This would be review ${posted.length + 1}; it sits beside them, replacing nothing.`,
+      );
+    }
     console.log(`  event: ${event}`);
     console.log(`  inline comments: ${payload.comments.length}`);
     if (payload.folded.length > 0) {
       console.log(`  comments folded into body (no diff anchor): ${payload.folded.length}`);
+    }
+    if (payload.replies.length > 0) {
+      console.log(`  replies in another reviewer's thread: ${payload.replies.length}`);
+    }
+    if (payload.held.length > 0) {
+      console.log(
+        `  left out — already raised by another reviewer: ${payload.held.length}` +
+          ` (decide in the cockpit to post or reply instead)`,
+      );
+    }
+    if (artifact.raisedCheck?.error) {
+      console.log(`  ⚠ could not check what others already raised: ${artifact.raisedCheck.error}`);
     }
     console.log(`  body: ${payload.body.length} chars\n`);
 
@@ -300,6 +345,15 @@ program
       calibration: computeCalibration(a, event),
     }));
     console.log(`✔ Review sent${url ? `: ${url}` : "."}`);
+    const outcomes = await postReplies(ref, payload.replies);
+    await updateArtifactByKey(artifactKey(id), (a) => recordReplies(a, outcomes));
+    const replyError = describeReplyFailures(outcomes);
+    if (replyError) {
+      console.error(`✖ ${replyError}`);
+      process.exitCode = 1;
+    } else if (outcomes.length > 0) {
+      console.log(`✔ ${outcomes.length} ${outcomes.length === 1 ? "reply" : "replies"} posted in existing threads.`);
+    }
   });
 
 program
@@ -491,7 +545,10 @@ program
   .option("-H, --host <host>", "host to bind (0.0.0.0 for VPS — requires --token)", "127.0.0.1")
   .option("-t, --token <token>", "require this token on every request (env: CERBER_TOKEN)")
   .option("--no-poll", "don't poll GitHub for PRs awaiting your review (also disables auto-review)")
-  .option("--no-auto-review", "list awaiting PRs but don't review them until you click review")
+  .option(
+    "--no-auto-review",
+    "list awaiting PRs but don't review them until you click review (per-repo exceptions included)",
+  )
   .option("--no-notify", "don't notify this machine when a review is ready for you")
   .option("-d, --daemon", "(deprecated no-op — polling and auto-review are now the default)")
   .option("-i, --interval <minutes>", "poll interval (default: config daemon.intervalMinutes, 5)")
@@ -562,7 +619,8 @@ program
 
       // Trust means "run this PR's code". A human clicking review accepted that
       // per PR; auto-review does it unattended, on whatever lands in the queue.
-      if (opts.poll && d.poll && opts.autoReview && d.autoReview && opts.trust && config.trust.length > 0) {
+      const drafting = anyAutoReview(capAutoReview(d, opts.autoReview));
+      if (opts.poll && d.poll && drafting && opts.trust && config.trust.length > 0) {
         console.log(
           `⚠ ${config.trust.length} trust rule(s) in ${configPath()}: unattended reviews will run commands from ` +
             `matching PRs, with nobody watching. Pass --no-trust to keep every review read-only, ` +

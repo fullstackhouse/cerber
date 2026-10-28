@@ -22,20 +22,49 @@ describe("config", () => {
   const DEFAULT_DAEMON = {
     poll: true,
     autoReview: true,
+    autoReviewRepos: {},
     notify: true,
     intervalMinutes: 5,
     parallel: 3,
     repos: [],
+    ownPrMaxAgeDays: 30,
   };
 
   it("trusts nobody and runs the full inbox when there is no config at all", async () => {
     expect(await loadConfig()).toEqual({ trust: [], daemon: DEFAULT_DAEMON });
   });
 
+  it("leaves your own PRs past 30 days out by default, and takes 0 or null for off", async () => {
+    await fs.mkdir(home, { recursive: true });
+    for (const off of [0, null]) {
+      await fs.writeFile(configPath(), JSON.stringify({ daemon: { ownPrMaxAgeDays: off } }));
+      expect((await loadConfig()).daemon.ownPrMaxAgeDays).toBe(off);
+    }
+    await fs.writeFile(configPath(), '{"daemon": {"ownPrMaxAgeDays": -1}}');
+    await expect(loadConfig()).rejects.toThrow();
+  });
+
   it("keeps an inbox knob a hand-edit flipped, defaulting the rest", async () => {
     await fs.mkdir(home, { recursive: true });
     await fs.writeFile(configPath(), '{"daemon": {"autoReview": false}}');
     expect((await loadConfig()).daemon).toEqual({ ...DEFAULT_DAEMON, autoReview: false });
+  });
+
+  it("keeps per-repo auto-review exceptions", async () => {
+    await saveConfig({ daemon: { autoReviewRepos: { "acme/infra": false, "acme/web": true } } });
+    expect((await loadConfig()).daemon.autoReviewRepos).toEqual({ "acme/infra": false, "acme/web": true });
+  });
+
+  it("refuses an auto-review exception that is not owner/repo", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"autoReviewRepos": {"acme": false}}}');
+    await expect(loadConfig()).rejects.toThrow(/autoReviewRepos.acme: expected owner\/repo/);
+  });
+
+  it("refuses two spellings of one repo, since the match ignores case", async () => {
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(configPath(), '{"daemon": {"autoReviewRepos": {"Acme/Web": true, "acme/web": false}}}');
+    await expect(loadConfig()).rejects.toThrow(/autoReviewRepos.acme\/web: same repo as Acme\/Web/);
   });
 
   it("round-trips what the cockpit writes", async () => {

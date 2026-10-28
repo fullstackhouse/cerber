@@ -3,7 +3,7 @@
 //
 // cerber shells out to `gh` for everything it knows about GitHub, so putting
 // this first on PATH makes the whole product run for real against fixture
-// data — including its one write, which lands in a file instead of on GitHub.
+// data — including its writes, which land in files instead of on GitHub.
 //
 // Every argv shape cerber actually uses is handled below. Anything else exits
 // non-zero with the exact argv it was given: a stub that answered "" to an
@@ -144,8 +144,33 @@ if (argv[0] === "search" && argv[1] === "prs") {
 // ----------------------------------------------------------------- gh api
 
 if (argv[0] === "api") {
-  // THE ONLY WRITE. Record it; never leave the machine.
+  // THE WRITES. Record them; never leave the machine.
   const method = flag("--method");
+
+  /** Write one record per GitHub write into the scratch home, and say where. */
+  function record(kind, owner, repo, number, payload) {
+    const home = process.env.CERBER_HOME;
+    if (!home) unsupported(`CERBER_HOME is unset — refusing to record a ${kind} outside the scratch home`);
+    const dir = path.join(home, kind);
+    mkdirSync(dir, { recursive: true });
+    const at = new Date().toISOString();
+    const file = path.join(dir, `${keyOf(owner, repo, number)}-${at.replace(/[:.]/g, "-")}.json`);
+    writeFileSync(file, JSON.stringify({ at, ...payload }, null, 2) + "\n");
+    process.stderr.write(`demo gh stub: recorded the ${kind} at ${file}\n`);
+    return at;
+  }
+
+  /** `-f` is repeatable, so `flag()` (first match wins) cannot read a list. */
+  const fields = (name) => {
+    const found = [];
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "-f" && String(argv[i + 1] ?? "").startsWith(`${name}=`)) {
+        found.push(argv[i + 1].slice(name.length + 1));
+      }
+    }
+    return found;
+  };
+
   const reviewsWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(a));
   if (method === "POST" && reviewsWrite) {
     const [, owner, repo, , number] = reviewsWrite.split("/");
@@ -156,17 +181,11 @@ if (argv[0] === "api") {
     } catch {
       unsupported("send payload on stdin was not JSON");
     }
-    const home = process.env.CERBER_HOME;
-    if (!home) unsupported("CERBER_HOME is unset — refusing to record a send outside the scratch home");
-    const dir = path.join(home, "sent");
-    mkdirSync(dir, { recursive: true });
-    const at = new Date().toISOString();
-    const file = path.join(dir, `${keyOf(owner, repo, number)}-${at.replace(/[:.]/g, "-")}.json`);
-    writeFileSync(
-      file,
-      JSON.stringify({ at, endpoint: reviewsWrite, method: "POST", payload: parsed }, null, 2) + "\n",
-    );
-    process.stderr.write(`demo gh stub: recorded the review payload at ${file}\n`);
+    const at = record("sent", owner, repo, number, {
+      endpoint: reviewsWrite,
+      method: "POST",
+      payload: parsed,
+    });
     const id = 900000000 + Number(number);
     out(
       JSON.stringify({
@@ -175,6 +194,62 @@ if (argv[0] === "api") {
         html_url: `https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview-${id}`,
         submitted_at: at,
         body: parsed.body,
+      }),
+    );
+    process.exit(0);
+  }
+
+  // A handoff's half: the review request moving to somebody else, and off you.
+  const reviewers = argv.find((a) =>
+    /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/requested_reviewers$/.test(a),
+  );
+  if ((method === "POST" || method === "DELETE") && reviewers) {
+    const [, owner, repo, , number] = reviewers.split("/");
+    record("handoffs", owner, repo, number, {
+      endpoint: reviewers,
+      method,
+      reviewers: fields("reviewers[]"),
+    });
+    out(JSON.stringify({ number: Number(number) }));
+    process.exit(0);
+  }
+
+  // A handoff's other half: the note. Before the read below, which matches the
+  // same endpoint and would hand a write the fixture's existing comments back.
+  const commentWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(a));
+  if (method === "POST" && commentWrite) {
+    const [, owner, repo, , number] = commentWrite.split("/");
+    const body = fields("body")[0] ?? "";
+    const at = record("comments", owner, repo, number, {
+      endpoint: commentWrite,
+      method,
+      body,
+    });
+    const id = 800000000 + Number(number);
+    out(
+      JSON.stringify({
+        id,
+        html_url: `https://github.com/${owner}/${repo}/pull/${number}#issuecomment-${id}`,
+        created_at: at,
+        body,
+      }),
+    );
+    process.exit(0);
+  }
+
+  // A Send's reply in somebody else's thread, for a finding they raised first.
+  const replyWrite = argv.find((a) => /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/comments\/\d+\/replies$/.test(a));
+  if (method === "POST" && replyWrite) {
+    const [, owner, repo, , number, , commentId] = replyWrite.split("/");
+    const body = fields("body")[0] ?? "";
+    const at = record("replies", owner, repo, number, { endpoint: replyWrite, method, inReplyTo: commentId, body });
+    const id = 700000000 + Number(number);
+    out(
+      JSON.stringify({
+        id,
+        html_url: `https://github.com/${owner}/${repo}/pull/${number}#discussion_r${id}`,
+        created_at: at,
+        body,
       }),
     );
     process.exit(0);
@@ -198,6 +273,20 @@ if (argv[0] === "api") {
     const owner = named("owner");
     const repo = named("repo");
     const n = Number(named("number"));
+    const query = fields("query")[0] ?? "";
+    // What others already said on the PR: its review threads and review bodies.
+    // A PR without the fixture is one nobody else has reviewed.
+    if (query.includes("reviewThreads")) {
+      const file = path.join(prDir(owner, repo, n), "prior-remarks.json");
+      const { threads, reviews } = existsSync(file) ? readJson(file) : { threads: [], reviews: [] };
+      out(
+        JSON.stringify({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: threads }, reviews: { nodes: reviews } } } },
+        }),
+      );
+      process.exit(0);
+    }
+    if (!query.includes("REVIEW_REQUESTED_EVENT")) unsupported("unhandled graphql query");
     const nodes = readJson(path.join(prDir(owner, repo, n), "review-request-events.json"));
     out(
       JSON.stringify({
@@ -214,6 +303,27 @@ if (argv[0] === "api") {
   if (endpoint?.startsWith("orgs/")) {
     process.stderr.write(`gh: Not Found (HTTP 404)\n`);
     process.exit(1);
+  }
+
+  // Who the repo takes reviews from, behind the handoff's suggestions. One cast
+  // for every fixture repo: a demo org has one set of people in it. Answers the
+  // logins rather than the rows, because the real call asks `gh` for exactly
+  // that with `--jq`, and a stub that answered a different shape would be
+  // testing the parser against something nothing ever sends it.
+  if (endpoint?.match(/^repos\/[^/]+\/[^/]+\/assignees/)) {
+    // A read, and only a read. `gh api` quietly switches the method to POST as
+    // soon as a `-f`/`-F` field is present, and real GitHub answers that with a
+    // 404 — which showed up in the dialog as "this repo has nobody in it".
+    // A stub that answered anyway is a stub that hides the next one.
+    if (method && method !== "GET") unsupported(`assignees is a read; got --method ${method}`);
+    const people = readJson(path.join(FIXTURES, "people.json"));
+    out(
+      people
+        .filter((p) => p.type !== "Bot")
+        .map((p) => p.login)
+        .join("\n"),
+    );
+    process.exit(0);
   }
 
   const comments = endpoint?.match(/^repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/comments/);

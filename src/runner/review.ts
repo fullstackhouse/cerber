@@ -10,15 +10,16 @@ import {
 } from "../core/artifact.js";
 import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
-import { mergeRunResult, userOwnsStatus } from "../core/refresh.js";
+import { mergeRunResult, supersede, userOwnsStatus } from "../core/refresh.js";
 import { loadArtifact, noteHistory, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { withWriter } from "../core/history.js";
 import { loadConfig } from "../core/config.js";
 import { decideTrust, membershipQueries, parseTrustRules } from "../core/trust.js";
-import { ClaudeEvent, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
+import { ClaudeEvent, OFF_TOOLS, READ_TOOLS, extractJson, runClaude, unauthenticatedEnv } from "./claude.js";
 import { describeEvent } from "./progress.js";
 import { ReviewInProgressError, beginReview, endReview, isReviewRunning } from "./inflight.js";
 import { buildReviewPrompt, buildRetryPrompt } from "./prompt.js";
+import { checkForRaised } from "./raised.js";
 
 export interface ReviewOptions {
   model?: string;
@@ -41,9 +42,6 @@ export interface ReviewOptions {
   trigger?: "daemon" | "user";
 }
 
-/** All an untrusted reviewer needs from a checkout — everything else stays off. */
-const READ_TOOLS = ["Read", "Grep", "Glob"];
-const OFF_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Task", "WebFetch", "WebSearch"];
 /** A trusted reviewer may run things. It still may not rewrite the PR. */
 const TRUSTED_TOOLS = [...READ_TOOLS, "Bash", "WebFetch", "WebSearch"];
 const TRUSTED_OFF_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -235,6 +233,9 @@ async function performReview(
     // `existing` was loaded minutes ago, and a poll may have announced the row
     // since.
     notified: existing?.notified,
+    // Reading progress is the user's, like the chat. A file this run finds
+    // changed unticks itself through its fingerprint.
+    viewed: existing?.viewed,
     pr,
     diff,
     summary: "",
@@ -256,10 +257,19 @@ async function performReview(
       trigger: opts.trigger ?? "user",
       reviewedSha: null,
     },
+    // Both filled in at the claim below, from the row as it stands then: a
+    // send this run supersedes moves to `priorSends` rather than vanishing.
     sent: null,
+    priorSends: [],
     refresh: null,
+    // A new draft has new findings, compared afresh once the run has written them.
+    raisedCheck: null,
     filed: null,
+    handoff: null,
     settledAt: null,
+    // Carried at the claim, not reset: it describes a review that really was
+    // sent, and `cerber stats` is the only reader. Dropping it here
+    // would quietly delete one data point every time a sent PR is re-reviewed.
     calibration: null,
     // The conversation is the user's writing, so a re-review keeps it — the
     // chat prompt replays the transcript, which is what makes it survive the
@@ -284,9 +294,24 @@ async function performReview(
   // (the guard above only lets a forced re-review that far), and claiming it is
   // how the reopen happens at all. A settle that appeared since is the one this
   // must not touch.
+  //
+  // A send is the one decision the claim takes *over* rather than leaves
+  // alone, because the only way to reopen a sent row is to replace the draft
+  // that was sent. It is not discarded: `supersede` files it under
+  // `priorSends`, so the cockpit can still say what went to GitHub and when,
+  // and the send panel knows the next click would post a second review.
+  // Read from `current` rather than `existing`, which is minutes old.
   const decided = existing ? userOwnsStatus(existing) : false;
   const claimed = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
-    !decided && userOwnsStatus(current) ? current : { ...artifact, notified: current.notified },
+    !decided && userOwnsStatus(current)
+      ? current
+      : {
+          ...artifact,
+          notified: current.notified,
+          viewed: current.viewed,
+          priorSends: supersede(current),
+          calibration: current.calibration,
+        },
   );
   const held = claimed !== null && !decided && userOwnsStatus(claimed);
   if (!held) {
@@ -330,6 +355,7 @@ async function performReview(
         editedByUser: false,
         originalLine: null,
         drifted: false,
+        alreadyRaised: null,
       })),
       verdict: review.ai.verdict,
       run: {
@@ -368,6 +394,11 @@ async function performReview(
     if (!saved) await saveArtifact(artifact);
     throw err;
   }
+
+  // After the review and never inside it: the run writes its findings blind to
+  // what others said on the PR, and this compares them afterwards. It cannot
+  // fail the run — a check that could not finish says so on the artifact.
+  artifact = (await checkForRaised(artifact, { log }))(artifact);
 
   const merged = await updateArtifactByKey(artifactKey(artifact.id), (current) =>
     mergeRunResult(artifact, current),

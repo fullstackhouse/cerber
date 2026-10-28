@@ -62,6 +62,7 @@ CERBER_DEMO_STEP_MS=0 cerber review \
 echo
 echo "→ cockpit on http://127.0.0.1:${PORT} — five reviews in the inbox tab."
 echo "  Send is wired: it writes the payload to \$CERBER_HOME/sent/ instead of GitHub."
+echo "  So is hand off: \$CERBER_HOME/handoffs/ and \$CERBER_HOME/comments/."
 echo
 
 # --no-poll: nothing here should reach for GitHub on a timer. The queue is

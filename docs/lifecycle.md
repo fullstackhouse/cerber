@@ -27,7 +27,7 @@ Four things write the artifact, and most questions in this document are really
 | **the poll** | `src/server/daemon.ts` | create stubs, archive, file, reopen a settled row someone asked you about again, delete stubs, start drafts — and, with `--auto-send`, submit and mark `sent` |
 | **startup** | `reconcileRunning`, `src/core/state.ts` | on boot, turn a leftover `running` into `failed` and error a pending chat turn |
 | **the runner** | `src/runner/review.ts`, `chat.ts` | fill in summary / chapters / comments / verdict |
-| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
+| **you** | the cockpit → `src/server/index.ts` | edit, mark reviewed/skipped, hand off, send, re-review, chat — and, just by opening a review, the automatic refresh that rewrites `pr`, `diff`, the comment anchors and `refresh` |
 | **you** | the CLI → `src/cli/index.ts` | `review` (`--force` re-reviews) and `send`. That is all it writes — `export` only renders, `history` only reads, `prune` only clears checkouts, and there is no edit, mark or chat |
 
 There is no database and no migration step. The file is hand-editable; readers
@@ -50,7 +50,7 @@ time.
 | `reviewed` | **you** are done with it — or the poll filed it (see §5) | you, or poll |
 | `skipped` | **you** decided not to review it | you |
 | `sent` | the review reached GitHub | the cockpit's Send, `cerber send`, or auto-send |
-| `failed` | the run errored | the runner; the cockpit's create/re-review catch handlers, for a failure before the runner owns the artifact; or restart reconciliation |
+| `failed` | the run errored | the runner; the cockpit's create/re-review catch handlers, for a failure before the runner owns the artifact — except on a row that still carries its `sent` record, which goes back to `sent`, the draft on it being untouched; or restart reconciliation |
 
 Two derived groupings drive most behaviour:
 
@@ -85,19 +85,27 @@ on `pendingChat` instead. Nothing restricts it to a finished draft either —
 
 **What starts a run** — i.e. what enters `running`. The two forcing paths
 ignore the freshness guard in §4; everything else obeys it. The re-review
-button is refused on `sent`, and on a run the *same process* is already
-running — the `409` comes from `isReviewRunning`, an in-memory claim
+button is refused only on a run the *same process* is already running — the
+`409` comes from `isReviewRunning`, an in-memory claim
 (`src/runner/inflight.ts`), not from the persisted status, so a `cerber review`
 going in another terminal is invisible to it:
 
 ```
 (nothing)           ──you paste a URL, or `cerber review`──► running
-awaiting            ──the poll, when auto-review is on────► running
+awaiting            ──the poll, if auto-review is on for its repo──► running
 ready | sent        ──the poll, once the head has moved───► running
 failed              ──the poll, next time round───────────► running
-any but `sent`      ──the cockpit's re-review button──────► running
+anything            ──the cockpit's re-review button──────► running
 anything            ──`cerber review --force`─────────────► running
 ```
+
+A `sent` row is included on purpose, and it is the only way back into one: the
+review on GitHub answers the commit it was written for, and when the author
+pushes past that there is nothing else the cockpit could offer. What was sent
+is not lost — the claim at the top of the run moves it to `priorSends`
+(`supersede`, `src/core/refresh.ts`) and the row becomes an ordinary unsent
+draft, with the cockpit saying what was posted, when, and that the next Send
+would be a second review. See "the draft that was sent" below.
 
 **What a run becomes:**
 
@@ -112,9 +120,15 @@ does not:
 
 ```
 any unsent row ──you mark it────────────────► reviewed | skipped  (+ `settledAt`)
+any row ───────────you hand it to somebody──► skipped  (+ `handoff`, `settledAt`)
 ready ──the poll finds GitHub moved past it─► reviewed  (+ `filed`, `settledAt`)
 ready ──Send / `cerber send` / auto-send────► sent
 ```
+
+A handoff on a row that was already `sent` is the one that settles nothing: the
+send is the stronger fact and already took the row out of the queue, so the
+status stays and only `handoff` is written. See "Handing it to somebody else"
+below.
 
 And the one way back out of settled without you pressing anything:
 
@@ -140,15 +154,20 @@ Notes on the edges that surprise people:
   that has just legitimately begun.
 - **`failed` is retried automatically** — it is neither settled nor
   head-sensitive, so the freshness guard below lets it through every time. Only
-  by the poll, and only on its terms: `reviewAll` runs solely when auto-review
-  is on and solely over PRs the awaiting search returned, so a failed artifact
+  by the poll, and only on its terms: `reviewAll` runs solely over PRs the awaiting search returned
+  whose repo auto-review is on for (`autoReviewFor`, `src/core/autoreview.ts`), so a failed artifact
   GitHub has stopped asking about is never picked up *on its own*. You can
-  always start one yourself — both forcing paths take any unsent status.
+  always start one yourself — both forcing paths take any status at all,
+  `sent` included.
 - **Nothing *reaches GitHub* except by a deliberate human act — the cockpit's
-  Send button or `cerber send` — or by opt-in auto-send.** That is the one hard
-  rule of the product. The status field is held to it as well:
-  `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two that
-  are your decision, so nothing but the send path can write `sent`.
+  Send button, `cerber send`, or a handoff — or by opt-in auto-send.** That is
+  the one hard rule of the product, and Send is the only one of those that
+  speaks as a *review*: a handoff moves the request and posts a plain comment,
+  and auto-send cannot hand off at all. The status field is held to the same
+  line: `PATCH /api/reviews/:key` takes only `reviewed` and `skipped`, the two
+  that are your decision, so only the send path and a handoff
+  asked to carry the draft can write `sent`, and nothing but `POST …/handoff`
+  can write `handoff`.
 - **Neither will send a draft a run is rewriting.** The cockpit answers `409`,
   refusing on the artifact's status *and* on this process's own claim;
   `cerber send` prints the reason and exits non-zero, and goes on the status
@@ -200,12 +219,22 @@ if the run fails. This is a decision rather than an oversight, and it is stated
 here rather than left to be discovered: if you have written comments you want
 to keep, send the review or copy them out before pressing re-review.
 
+The same goes for what you decided about findings another reviewer already
+raised (`alreadyRaised`, `src/core/raised.ts`): a re-review writes new findings,
+compares them afresh against what is on the PR by then, and every match comes
+back undecided — left out of Send unless its thread was resolved.
+
 What a re-review does *not* touch are the decisions you have made
 (`mergeRunResult`, `src/core/refresh.ts`). The run's result is folded onto
 whatever the artifact says now rather than written over it, so a send stands, a
 `reviewed` or `skipped` you set while the run was going stands — with the fresh
-draft underneath it, which is what the row shows if you change your mind — and
-the chat transcript is kept. Only the draft itself is the run's to replace.
+draft underneath it, which is what the row shows if you change your mind — a
+handoff stands, because by then GitHub has already been told somebody else is
+reviewing this, and the chat transcript and the files you marked as viewed are
+kept. Only the draft itself is the
+run's to replace. A chat turn's fold (`mergeConcurrentEdits`, `src/core/revise.ts`)
+keeps the handoff for the same reason — and the handoff refuses to start while a
+turn is being answered, which is what spares the rest of that fold the question.
 
 ### Re-review vs refresh — different things
 
@@ -214,11 +243,51 @@ the chat transcript is kept. Only the draft itself is the run's to replace.
 | Costs | a PR fetch, plus a diff fetch only if the head moved | a full AI run |
 | Changes | `diff`, `pr`, comment line anchors | everything the AI writes |
 | Runs when | **you open a review** (automatic, `web/src/Detail.tsx`) | you press the button |
-| Does nothing on | a `sent` **record**, `status: running`, or an unchanged head — a `200` with `changed: false`, not an error | a `sent` **record**, or a run already in flight — these *are* errors (`409`) |
+| Does nothing on | a `sent` **record**, `status: running`, or an unchanged head — a `200` with `changed: false`, not an error | a run already in flight — that *is* an error (`409`) |
 
 The re-review endpoint passes `force: true`, so an unchanged head is no
 obstacle to it — the guard in §4 is what the *poll* and a plain `cerber review`
 obey, not the button.
+
+Refresh and re-review part company on a sent row. Refresh declines it: moving
+the anchors of comments that are already posted would change nothing on GitHub
+and everything on the page. Re-review takes it, because replacing the draft is
+the only way back into a review that went out at a commit the PR has left.
+
+### The draft that was sent
+
+`sent` means one thing throughout cerber: *the draft on this page is the one
+that went to GitHub*. Every guard reads it that way, the send path's "already
+sent" refusal most of all. So a re-review cannot leave it standing over a draft
+nobody has sent — and must not simply drop it, which is what used to happen:
+the review stayed on the PR while cerber forgot it existed, and the cockpit
+would then offer a second one as if it were the first.
+
+The claim at the top of a run moves it instead (`supersede`, `src/core/refresh.ts`):
+
+- `sent` → `null`, so the row is an ordinary unsent draft again, editable,
+  chattable and sendable.
+- the record → `priorSends`, oldest first, URL included.
+- `calibration` is kept: it describes a review that really was sent, and
+  `cerber stats` is its only reader.
+- the history gets a line of its own, since no other one records a row leaving
+  `sent` without anything being un-sent.
+
+What the cockpit then shows: a note above the draft naming what was posted and
+when, linked; a line over the Send button saying this would be review *n*; and,
+once it is sent again, the count on the sent strip. **GitHub is never touched
+by any of this** — a second Send posts a second review beside the first, and
+nothing ever edits or withdraws the first.
+
+The two paths that could post without you both stand down on such a row, and
+read `priorSends` to do it: **auto-send** refuses it outright (a PR you have
+reviewed yourself is the last place to post unattended), and a **handoff** no
+longer offers to carry the draft — the draft is new, but posting it would be
+the second review on that PR under your name.
+
+A send that lands *while* a run is in flight is the opposite case and is left
+exactly alone (`mergeRunResult`): it describes the draft being handed over, the
+status stays `sent`, and nothing is archived.
 
 Refresh keeps comments *postable* against current code (`anchor.ts` matches
 line **text**, not position). It forms no opinion about the new head: the
@@ -261,8 +330,19 @@ settling here reaches nothing on GitHub; a sent row can land here too, when a
 review was submitted and someone then asked you for another one. Without it the cockpit would say "nothing
 awaits you" over a poll that had just counted two.
 
-**Sort order** (`STATUS_ORDER`): `ready`, `awaiting`, `running`, `failed`,
-`reviewed`, `skipped`, `sent` — newest first inside each band. The `‹ ›` arrows
+A handoff is the one decision that *empties* this tab instead of filling it,
+because it takes your request off the PR rather than leaving it behind. A handed
+row still showing up here means the poll ran before the swap, or that somebody
+has asked you again since — so its tag names who has it now
+(`handoffTag`, ahead of `sent` and `filed`), which is also the only reading that
+does not send you back into a PR you deliberately passed on.
+
+**Sort order** (`sortReviews`): newest first, whatever the status — the tabs
+already split by status, and a band per status buried a PR that moved minutes
+ago under yesterday's drafts. "Newest" is `activityAt`: an `awaiting` row nobody has drafted is dated by the PR's own last
+activity on GitHub (`pr.updatedAt`, refreshed from every poll's search result),
+because its artifact's `updatedAt` is only when the poll found it; every other
+row by the review. The `upd` column shows the same date. The `‹ ›` arrows
 walk `walkable()`: open, unsettled rows only. That list is fetched once, when
 the review opens — finishing one must not renumber the walk under you — so a
 review you settle *during* the walk (skipped, marked reviewed, or sent) is
@@ -271,6 +351,38 @@ dropped from the snapshot in the browser instead (`walkFrom`, used by
 back into the PR you just skipped. The review you have open keeps its place
 whatever you did to it, because it is what the arrows and the "n of m" count
 read their position from, and a send leaves you standing on it.
+
+### Your own PRs
+
+GitHub never asks you to review your own PR — it will not let anyone request a
+review from the author — so the awaiting search finds one only when a team you
+are on was requested. The poll runs
+the same search a second time with `author:@me` (`searchAuthoredByMe`,
+`src/core/gh.ts`) and brings your open PRs in for a self-review **when you ask
+for one**. "Yours" is `pr.author` matching your login (`isOwnPr`,
+`src/core/own.ts`); nothing on the artifact records it. On such a row:
+
+- the poll never drafts it, whatever auto-review says for the repo, and never
+  announces it — its stub has no `notified` ledger (`stubArtifact`), so both
+  bells leave it alone, before and after you ask for a draft;
+- it is never filed (replying to your own PR's threads posts reviews of yours,
+  which is not you answering a request) and never reopened (a comment naming
+  the author is the PR's conversation, not an ask). Skip it to hide it; it
+  stays skipped;
+- yours is a fact about the PR, not about which search found it: a team
+  request on your own PR changes none of this;
+- it is listed after everything else in the live tabs, under a **your PRs**
+  heading, and the arrows walk it last (`ownLast`, `web/src/inbox.ts`). An
+  undrafted one does not light the favicon dot;
+- Send posts a comment and nothing else — GitHub refuses an approve or a change
+  request from the author — and auto-send never fires (`ownPrRefusal`,
+  `src/core/send.ts`; `evaluateAutoSend`);
+- it is not on the daemon's awaiting list, so it never shows under **open
+  requests**.
+
+It leaves the way every PR does: merged or closed, it drops out of the search
+and is archived. `cerber review --awaiting-me` still runs the awaiting search
+alone.
 
 ### Things that remove a row without you touching it
 
@@ -281,9 +393,12 @@ read their position from, and a send leaves you standing on it.
 | GitHub moved past a finished draft | status → `reviewed`, `filed` set | `fileIfSettledElsewhere` |
 | Auto-send is on and the draft qualified | status → `sent` (the **sent** tab) | `handleAutoSend` |
 
+(Handing a review to somebody else removes a row too, but that is you touching
+it — see below.)
+
 And the one that *adds* a row back: somebody asking for you again after you
 settled — the re-request button, or your name in a comment → status →
-`ready`/`awaiting`, `settledAt` and `filed` cleared (`reopenIfAskedAgain`,
+`ready`/`awaiting`, `settledAt`, `filed` and `handoff` cleared (`reopenIfAskedAgain`,
 `reopenIfAskedInWords`; see "Asked again" below).
 
 A **pure stub** is `awaiting`, with no comments and **`run === null`** — it
@@ -344,7 +459,8 @@ People ask in two ways, and both count:
 
 Conditions, all of them: the row is `reviewed` or `skipped`, it was never sent,
 and the ask is newer than `settledAt`. Then the row goes back to `ready` — or
-`awaiting` if it has no finished draft to show — `settledAt` and `filed` are
+`awaiting` if it has no finished draft to show — `settledAt`, `filed` and
+`handoff` are
 cleared, and the ordinary rules take it from there: the freshness guard in §4
 re-drafts it if the head has moved since the run read it, and leaves the
 existing draft alone if it has not.
@@ -369,6 +485,100 @@ can prove the decision came after — cerber's own `filed.at`, or `run.finishedA
 the cost of being wrong is one row coming back once; the alternative is that
 every row settled before this shipped stays unreachable forever.
 
+### Handing it to somebody else
+
+The way out that is not a decision about the *review* but about who does it.
+`POST /api/reviews/:key/handoff` (`src/server/index.ts`), from the **hand off**
+button in the cockpit's send panel, which opens a modal dialog: the page behind
+it is a review you are deciding not to read, and a GitHub write being composed
+should have the keys to itself.
+
+Up to three things reach GitHub, in this order and for this reason:
+
+1. **The request moves** (`handOffReview`, `src/core/gh.ts`) — they are asked,
+   then you are taken off. Asking first means a refusal (not a collaborator, no
+   permission to request reviews) leaves the PR exactly as it was, with you still
+   on the hook and nothing to undo; the reverse order could drop the request on
+   the floor and leave nobody looking at the PR. Nothing is written here and no
+   note is posted if this fails.
+2. **The draft, if you ticked it** (`submitReview`, through `buildReviewPayload`
+   — §"The draft" below).
+3. **The note goes up** (`postIssueComment`) — a plain comment in the
+   conversation, prefilled with the person's name so they are notified, editable,
+   and clearable: an empty note posts nothing and the request still moves. It is
+   an *issue* comment on purpose. A `pulls/…/reviews` POST with a COMMENT event
+   reads the same in the thread and *is* a review everywhere that counts one —
+   which is a thing the handoff may do, deliberately and on request, but never by
+   accident in place of a note.
+
+Taking your own request off is allowed to fail on its own, because by then the
+other person is asked either way: the row records `withdrewYours: false` and
+says, in the cockpit and in the open-requests tag, that GitHub is asking both of
+you. So are the two posts: a failure in either is reported next to the row rather
+than rolled back into a lie about where the PR is. Only step 1 failing stops
+everything, because only step 1 has nothing behind it yet.
+
+### The draft
+
+A handoff can carry it. Tick **also post the review** and the draft goes up
+through the ordinary send path — `buildReviewPayload` composes it exactly as the
+send panel would, `bodyOverride` and all, and `submitReview` posts it. One way
+to build a review, one way to post one, reached from a second place.
+
+It posts as a **comment**. Always, whatever the draft's verdict says: handing a
+PR over hands the judgement over with it, so approving or requesting changes on
+the way out would be cerber ruling on a review it is giving away. The grades stay
+on the findings, where they were a fact about each one rather than a verdict —
+so `🚨 blocker` still reaches the author, and what it *means* for the merge is
+the next reviewer's call. The `calibration` record keeps both halves: what the
+AI recommended, and the COMMENT that actually went.
+
+It is **off unless you tick it**, and that is the one place a handoff does not
+follow "on by default with a switch". A handoff is reachable from a row you
+never opened, where the draft is whatever the poll wrote overnight; defaulting
+that to "publish under your name" is exactly what the send path exists to
+prevent. Ticking it shows you the body it would post, which is the reading. A
+row already `sent` is not offered it at all.
+
+Locally the row follows what actually reached GitHub:
+
+| | status | `settledAt` |
+| --- | --- | --- |
+| the review posted | `sent` (+ `sent`, `calibration`) | left alone |
+| already sent before | unchanged | unchanged |
+| neither | `skipped` | stamped |
+
+`handoff` is written in all three, and `filed` cleared in the first and last —
+your own decision cannot sit under cerber's account of why the row was filed. A
+row already `sent` keeps its status because overwriting it would leave one
+claiming no review was ever sent. And a second handoff passes `from: null`,
+skipping a withdrawal GitHub would refuse because the first one already
+happened.
+
+`handoff` outranks both the status and `filed` wherever the queue tags a row
+(`rowTag`, `requestTag`, `web/src/inbox.ts`): "skipped" alone reads as work
+dropped, where this is work passed on.
+
+**Who it suggests.** The name field is a combobox over two lists merged into one
+(`candidates`, `web/src/handoff.ts`): the people you have handed to before, then
+whoever this repo will take. The first is local — `localStorage`, beside the
+theme pin and the bell's announced-keys, a convenience about this screen rather
+than a fact about reviews, so `config.json` keeps out of it. The second is
+`GET /api/reviews/:key/reviewers` → `fetchAssignableUsers` → `gh api
+repos/…/assignees`, which needs only read access, where the obvious
+`collaborators` needs push — exactly what a reviewer on somebody else's repo
+does not have. Bots are dropped, and so are you and the PR's author, because
+GitHub refuses both as reviewers.
+
+None of it is authoritative and nothing treats it as such: GitHub's rule for who
+may be *requested* is its own. The field is free text, a login the list never
+mentions can still be handed to, and a repo whose people cannot be read says so
+in one line and leaves the handoff working.
+
+Not supported, and refused in words rather than half-done: handing a review to a
+team. `@org/team` reaches GitHub through a different field, and "take your own
+request off" means nothing beside a room being asked.
+
 ### "Whose move is it"
 
 Independent of status. Each poll reads the PR conversation per awaiting PR
@@ -385,7 +595,10 @@ A run writes the artifact more than once on purpose — an interrupted run must
 leave something behind:
 
 1. **On start** — `running`, with a `run` block (`startedAt`, `withSource`,
-   `trusted`, `trigger`).
+   `trusted`, `trigger`). This write is also the claim: a `sent` record on the
+   row moves to `priorSends` here, because from this moment the draft it
+   describes is being replaced (`supersede`, and "the draft that was sent" in
+   §4).
 2. **`trigger`** is `daemon` or `user` on anything written since the field
    existed, and `null` on older artifacts. It is what lets filing spare a
    second opinion you deliberately asked for — and the two guards read a `null`
@@ -425,6 +638,9 @@ Written by other paths:
   whatever the artifact says now (`mergeConcurrentEdits`) and appends a
   `ChatTurn`. `preChat` is the one snapshot taken before the first turn.
 - Send writes `sent` and `calibration` (what the AI proposed vs what you sent).
+  A later re-review moves `sent` to `priorSends` and keeps `calibration`, which
+  describes a review that really was sent and is what `cerber stats`
+  counts.
 - Refresh writes `refresh` (`fromSha`, `toSha`, `moved`, `drifted`).
 
 **No HTTP request is ever held open for an AI run.** A review and a chat turn
@@ -478,11 +694,12 @@ dropped. Deleting a stub deletes its history with it; nothing else removes one.
 ## 7. Settings that change any of this
 
 `~/.cerber/config.json`, zod-validated, and mostly live. The poll re-reads it
-every tick and acts on `poll`, `autoReview` and `intervalMinutes`, so the
-cockpit's settings apply without a restart (a new interval from the cockpit also
-retimes the wait already under way; `--interval` pins it for the run); `trust`
-is re-read by every `reviewPr` call, so a rule you add binds the next run. Only
-`parallel` and `repos` are captured by `startDaemon` and need a restart. Absent = defaults, which is a working state,
+every tick and acts on `poll`, `autoReview`, `autoReviewRepos` and
+`intervalMinutes`, so the cockpit's settings apply without a restart (a new
+interval from the cockpit also retimes the wait already under way; `--interval`
+pins it for the run); `trust` is re-read by every `reviewPr` call, so a rule you
+add binds the next run. Only `parallel` and `repos` are captured by
+`startDaemon` and need a restart. Absent = defaults, which is a working state,
 not an open one: polling and auto-review are on, `trust` is empty (every run
 read-only) and auto-send does nothing but log.
 
@@ -490,13 +707,16 @@ read-only) and auto-send does nothing but log.
 | --- | --- | --- |
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
+| `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
 | `daemon.intervalMinutes` | `5` | minutes between polls |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
+| `daemon.ownPrMaxAgeDays` | `30` | your own PRs idle longer than this many days stay out of the inbox — an `updated:>=` qualifier on the author search, so review requests are never aged. A stub that goes stale is reaped like any the search stopped returning; a draft stays. `0`/`null` = no cut |
 | `trust` | `[]` | whose PRs may run commands: `@login`, `@org/team`, `@org/*`, and `!`-prefixed denials (`!@org/team`) that carve an exception out of a broader grant. Denials win |
 
 CLI flags cap the config, never raise it — `--no-poll`, `--no-auto-review`,
-`--no-trust`. `--no-source` is the exception: it sets the default a run starts
+`--no-trust`. `--no-auto-review` caps `autoReviewRepos` too, so a repo set to
+`true` does not draft under it. `--no-source` is the exception: it sets the default a run starts
 from, and the re-review endpoint's `?source=` overrides it either way, so the
 cockpit's button can ask for a source-backed run on a server started without
 one.
@@ -504,7 +724,10 @@ one.
 **Auto-send** is deliberately narrow (`src/core/autosend.ts`): only `ready`,
 only an `approve` verdict, only with **zero** standing blocker findings, only
 at or above `--auto-send-threshold` (default 90, clamped to 50–100), never a
-re-send. Without `--auto-send` the daemon still evaluates in **shadow mode**
+re-send — including a PR you have already sent a review on and re-reviewed
+since, where the record lives in `priorSends` rather than `sent` (§4, "the
+draft that was sent") and the second review is yours to send.
+Without `--auto-send` the daemon still evaluates in **shadow mode**
 and logs what it *would* have sent; the flag is what makes it actually send.
 Either way the decision — including the declines and why — appends to
 `autosend.ndjson`. It is evaluated per *run*, not per draft: `handleAutoSend`

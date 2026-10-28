@@ -1,42 +1,77 @@
 import { html } from "diff2html";
-import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
-import { diffLineCounts, patchForFiles, splitDiffByFile, unclaimedFiles } from "../../src/core/diff";
+import {
+  diffLineCounts,
+  fileFingerprint,
+  patchForFiles,
+  splitDiffByFile,
+  unclaimedFiles,
+} from "../../src/core/diff";
 import { withGrade } from "../../src/core/severity";
 import {
   addComment,
+  checkRaised,
   deleteComment,
   dismissPendingChat,
   exportUrl,
   fetchReview,
   fetchReviews,
+  fetchHandoffCandidates,
   fetchSendPreview,
+  handOffReview,
   patchComment,
   patchReview,
   refreshReview,
   rerunReview,
   resetReviewToPreChat,
   sendReview,
+  setViewed,
   startChatTurn,
+  steerChatTurn,
 } from "./api";
+import {
+  asLogin,
+  candidates,
+  isLogin,
+  matchCandidates,
+  recentHandoffs,
+  rememberHandoff,
+} from "./handoff";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
 import { MdBlock, MdDocument, isMarkdownPath, readMarkdown } from "./mdblocks";
 import { walkFrom } from "./inbox";
+import { useStickyChapters } from "./sticky-chapters";
 import {
   EVENT_LABEL,
   EVENT_TONE,
   ReviewEvent,
+  everSent,
   eventForVerdict,
   inlineComments,
   payloadSummary,
+  raisedFate,
+  raisedWhere,
   rowLine,
+  sendCount,
+  sentAtOldHead,
   severitySummary,
   splitComments,
   verdictBasis,
   verdictMismatch,
 } from "./review";
+import { isSend, useSendKey } from "./sendkey";
 import {
   Artifact,
   Chapter,
@@ -48,6 +83,7 @@ import {
   ReviewComment,
   ReviewListItem,
   SendPreview,
+  SentInfo,
   Verdict,
 } from "./types";
 
@@ -110,6 +146,54 @@ function insertRow(row: Element, className: string): { tr: HTMLElement; holder: 
   tr.appendChild(td);
   row.after(tr);
   return { tr, holder };
+}
+
+/** Which files the reader has viewed, and which of those they opened back up. */
+interface ViewedState {
+  viewed: Set<string>;
+  peeked: Set<string>;
+  onToggleViewed: (path: string) => void;
+  onTogglePeek: (path: string) => void;
+}
+
+/**
+ * Tick each file's box and fold the viewed ones, straight on diff2html's DOM —
+ * toggling a file must not rebuild the diff under the reader.
+ */
+function applyViewed(root: HTMLElement, viewed: Set<string>, peeked: Set<string>): void {
+  root.querySelectorAll<HTMLElement>(".d2h-file-wrapper").forEach((wrapper) => {
+    const path = wrapper.dataset.path;
+    if (!path) return;
+    const on = viewed.has(path);
+    wrapper.classList.toggle("file-viewed-on", on);
+    wrapper.classList.toggle("file-peek", on && peeked.has(path));
+    const box = wrapper.querySelector<HTMLInputElement>("input[data-viewed-path]");
+    if (box) box.checked = on;
+  });
+}
+
+/**
+ * Folding a file while its header is pinned would leave you somewhere in the
+ * files after it, so land back on its header.
+ */
+function keepFileInView(file: HTMLElement | null, head: HTMLElement | null): void {
+  if (!file || !head) return;
+  // The file's top above the header's sticky line means the header is pinned.
+  if (file.getBoundingClientRect().top < parseFloat(getComputedStyle(head).top)) {
+    requestAnimationFrame(() => file.scrollIntoView({ block: "start" }));
+  }
+}
+
+/** The "Viewed" box a file header carries, as GitHub has it. */
+function viewedBox(path: string): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "file-viewed";
+  label.title = "Mark as viewed — folds the file until its diff changes";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.dataset.viewedPath = path;
+  label.append(box, " Viewed");
+  return label;
 }
 
 /**
@@ -214,6 +298,7 @@ function DiffGroup({
   onAddLineComment,
   onAskAboutLine,
   onRead,
+  viewedState,
 }: {
   patch: string;
   comments: ReviewComment[];
@@ -225,6 +310,7 @@ function DiffGroup({
   onAskAboutLine: (pick: LinePick, message: string) => void;
   /** Read this markdown file as a document instead of as a diff. */
   onRead: (path: string) => void;
+  viewedState: ViewedState;
 }) {
   const rendered = useMemo(
     () =>
@@ -260,6 +346,8 @@ function DiffGroup({
   // diff underneath the reader.
   const onReadRef = useRef(onRead);
   onReadRef.current = onRead;
+  const viewedRef = useRef(viewedState);
+  viewedRef.current = viewedState;
   const [slots, setSlots] = useState<{ id: string; el: HTMLElement }[]>([]);
   /** One per file, for the comments that are about the file and not a line. */
   const [fileSlots, setFileSlots] = useState<{ path: string; el: HTMLElement }[]>([]);
@@ -303,8 +391,10 @@ function DiffGroup({
           button.title = "Render this markdown instead of showing it line by line";
           wrapper.querySelector(".d2h-file-header")?.appendChild(button);
         }
+        wrapper.querySelector(".d2h-file-header")?.appendChild(viewedBox(path));
       }
     });
+    applyViewed(root, viewedRef.current.viewed, viewedRef.current.peeked);
 
     const placed: { id: string; el: HTMLElement }[] = [];
     // When several comments target the same line, insert each after the last.
@@ -327,9 +417,26 @@ function DiffGroup({
     // Registered before the read-only exit: a sent review takes no comments,
     // but it is still something to read, so its markdown still swaps.
     const onClick = (e: MouseEvent) => {
-      const toggle = (e.target as HTMLElement).closest<HTMLElement>(".md-read-toggle");
+      const target = e.target as HTMLElement;
+      const toggle = target.closest<HTMLElement>(".md-read-toggle");
       if (toggle?.dataset.readPath) {
         onReadRef.current(toggle.dataset.readPath);
+        return;
+      }
+      // The label's own click is re-fired on the box; only the box's counts.
+      const wrapper = target.closest<HTMLElement>(".d2h-file-wrapper");
+      if (target instanceof HTMLInputElement && target.dataset.viewedPath) {
+        // Already flipped by the click: checked now means it is about to fold.
+        if (target.checked) keepFileInView(wrapper, wrapper?.querySelector(".d2h-file-header") ?? null);
+        viewedRef.current.onToggleViewed(target.dataset.viewedPath);
+        return;
+      }
+      if (target.closest(".file-viewed")) return;
+      // A folded file opens from its header, without losing its tick.
+      const folded = target.closest(".d2h-file-header")?.closest<HTMLElement>(".file-viewed-on");
+      if (folded?.dataset.path) {
+        keepFileInView(wrapper, wrapper?.querySelector(".d2h-file-header") ?? null);
+        viewedRef.current.onTogglePeek(folded.dataset.path);
         return;
       }
       const button = (e.target as HTMLElement).closest<HTMLElement>(".line-add");
@@ -390,6 +497,14 @@ function DiffGroup({
     // effect renders, and re-running on every poll would flicker the diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rendered, anchors, paths, readable, readOnly]);
+
+  const viewedKey = paths.filter((p) => viewedState.viewed.has(p)).join("\n");
+  const peekedKey = paths.filter((p) => viewedState.peeked.has(p)).join("\n");
+  useEffect(() => {
+    if (ref.current) applyViewed(ref.current, viewedState.viewed, viewedState.peeked);
+    // The keys are the part of the sets this diff draws.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewedKey, peekedKey]);
 
   // Park the composer under the picked row. Separate from the render above so
   // that opening and closing it doesn't rebuild the whole diff.
@@ -524,6 +639,7 @@ function MarkdownFile({
   onAddLineComment,
   onAskAboutLine,
   onShowDiff,
+  viewedState,
 }: {
   path: string;
   doc: MdDocument;
@@ -534,8 +650,13 @@ function MarkdownFile({
   onAddLineComment: (pick: LinePick, body: string) => void;
   onAskAboutLine: (pick: LinePick, message: string) => void;
   onShowDiff: () => void;
+  viewedState: ViewedState;
 }) {
   const [pick, setPick] = useState<LinePick | null>(null);
+  const fileEl = useRef<HTMLDivElement | null>(null);
+  const headEl = useRef<HTMLDivElement | null>(null);
+  const viewed = viewedState.viewed.has(path);
+  const folded = viewed && !viewedState.peeked.has(path);
 
   // Every comment lands under the block that holds its line — or, for a line
   // that is blank in the source, under the block it follows. None is dropped:
@@ -560,8 +681,17 @@ function MarkdownFile({
   }, [doc, comments]);
 
   return (
-    <div className="md-file">
-      <div className="md-file-head">
+    <div className="md-file" ref={fileEl}>
+      <div
+        ref={headEl}
+        className={`md-file-head${viewed ? " md-file-head-viewed" : ""}${folded ? " md-file-head-folded" : ""}`}
+        onClick={(e) => {
+          if (viewed && !(e.target as HTMLElement).closest("button, label")) {
+            keepFileInView(fileEl.current, headEl.current);
+            viewedState.onTogglePeek(path);
+          }
+        }}
+      >
         <Icon name="file" />
         <span className="md-file-name">{path}</span>
         {doc.isNew ? (
@@ -575,13 +705,24 @@ function MarkdownFile({
         <button className="btn btn-sm" onClick={onShowDiff} title="Back to the line-by-line diff">
           show the diff
         </button>
+        <label className="file-viewed" title="Mark as viewed — folds the file until its diff changes">
+          <input
+            type="checkbox"
+            checked={viewed}
+            onChange={() => {
+              if (!viewed) keepFileInView(fileEl.current, headEl.current);
+              viewedState.onToggleViewed(path);
+            }}
+          />{" "}
+          Viewed
+        </label>
       </div>
       {/* About the file rather than a block of it — under the header, where
           the diff view puts the same thing. */}
-      {placed.rest.length > 0 && (
+      {!folded && placed.rest.length > 0 && (
         <div className="file-comments">{placed.rest.map(renderComment)}</div>
       )}
-      {doc.items.map((item, i) => (
+      {!folded && doc.items.map((item, i) => (
         <Fragment key={i}>
           {item.kind === "gap" ? (
             <div className="md-gap" title="These lines are in the file but not in the diff.">
@@ -637,6 +778,7 @@ function DiffBlock({
   chatBusy,
   onAddLineComment,
   onAskAboutLine,
+  viewedState,
 }: {
   patch: string;
   comments: ReviewComment[];
@@ -645,6 +787,7 @@ function DiffBlock({
   chatBusy: boolean;
   onAddLineComment: (pick: LinePick, body: string) => void;
   onAskAboutLine: (pick: LinePick, message: string) => void;
+  viewedState: ViewedState;
 }) {
   const files = useMemo(() => (patch.trim() ? splitDiffByFile(patch) : []), [patch]);
   const docs = useMemo(
@@ -700,6 +843,7 @@ function DiffBlock({
               onAddLineComment={onAddLineComment}
               onAskAboutLine={onAskAboutLine}
               onShowDiff={() => setChoice((c) => ({ ...c, [path]: false }))}
+              viewedState={viewedState}
             />
           );
         }
@@ -714,6 +858,7 @@ function DiffBlock({
             onAddLineComment={onAddLineComment}
             onAskAboutLine={onAskAboutLine}
             onRead={(path) => setChoice((c) => ({ ...c, [path]: true }))}
+            viewedState={viewedState}
           />
         );
       })}
@@ -721,6 +866,135 @@ function DiffBlock({
           to sit in, and dropping it would lose it from the page entirely. */}
       {commentsOn((p) => !paths.has(p)).map(renderComment)}
     </>
+  );
+}
+
+/**
+ * The rail's line about what others already said: how many of the findings
+ * somebody else raised first, and what Send does with them — or that the check
+ * is running, or could not run. Said even when it found nothing, once it has
+ * looked, because silence would read the same as never having checked.
+ */
+function RaisedFacts({
+  check,
+  raised,
+  held,
+  replies,
+}: {
+  check: Artifact["raisedCheck"] | null;
+  raised: number;
+  held: number;
+  replies: number;
+}) {
+  if (!check) return null;
+  const fate = [held > 0 && `${held} left out`, replies > 0 && `${replies} as replies`].filter(Boolean);
+  // The counts stand whatever the latest check did: the matches from before
+  // it are still on the comments, still deciding what Send posts.
+  const counts =
+    raised > 0 ? (
+      <div className="warn" title="Findings another reviewer already raised on the PR — each card says who, and what Send does with it.">
+        {raised} already raised{fate.length > 0 ? ` · ${fate.join(" · ")}` : ""}
+      </div>
+    ) : null;
+  if (check.checkingSince) {
+    return (
+      <>
+        {counts}
+        <div className="faint">checking what others already raised…</div>
+      </>
+    );
+  }
+  if (check.error) {
+    return (
+      <>
+        {counts}
+        <div className="warn" title={check.error}>
+          couldn't check what others already raised
+        </div>
+      </>
+    );
+  }
+  if (counts) return counts;
+  return check.remarks.length > 0 ? <div className="faint">none already raised by others</div> : null;
+}
+
+/** What a comment card can change about its comment. */
+type CommentPatch = { body?: string; status?: string; raisedDecision?: "send" | "reply" | null };
+
+/**
+ * Somebody else already raised this finding on the PR — who, where, and what
+ * Send will do about it.
+ *
+ * The comparison is cerber's, so the reason is shown with it: it is a model's
+ * judgement that two comments are about one defect, and the user decides on
+ * it rather than taking it on faith. Drop sits on the card already, with every
+ * other comment's; the two decisions only this card has are the ones here.
+ */
+function RaisedNote({
+  comment,
+  readOnly,
+  onDecide,
+}: {
+  comment: ReviewComment;
+  readOnly: boolean;
+  onDecide: (decision: "send" | "reply" | null) => void;
+}) {
+  const raised = comment.alreadyRaised;
+  if (!raised) return null;
+  const fate = raisedFate(comment, readOnly);
+  const canReply = raised.where.kind === "thread";
+  const live = !readOnly && comment.status !== "dropped";
+  return (
+    <div className="raised">
+      <div className="raised-head">
+        <span className="tag tag-raised">
+          <Icon name="comment" />
+          already raised by @{raised.by} · {raisedWhere(raised)}
+        </span>
+        {raised.url && (
+          <a href={raised.url} target="_blank" rel="noreferrer" className="faint">
+            see it on GitHub <Icon name="external" />
+          </a>
+        )}
+        <span className="grow" />
+        {live && (
+          <>
+            {canReply && (
+              <button
+                className={`btn btn-sm${raised.decision === "reply" ? " btn-keep-on" : ""}`}
+                title="Send posts this as a reply in their thread instead of a new comment — for when it adds something"
+                onClick={() => onDecide(raised.decision === "reply" ? null : "reply")}
+              >
+                reply in their thread
+              </button>
+            )}
+            <button
+              className={`btn btn-sm${raised.decision === "send" ? " btn-keep-on" : ""}`}
+              title="Send posts it as a comment of its own all the same"
+              onClick={() => onDecide(raised.decision === "send" ? null : "send")}
+            >
+              send anyway
+            </button>
+          </>
+        )}
+      </div>
+      <p className="raised-reason">
+        {raised.reason}
+        {fate && (
+          <span className="raised-fate">
+            {" — "}
+            {raised.replied?.url ? (
+              <a href={raised.replied.url} target="_blank" rel="noreferrer">
+                {fate}
+              </a>
+            ) : (
+              fate
+            )}
+            .
+          </span>
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -733,7 +1007,7 @@ function CommentCard({
   flash,
 }: {
   comment: ReviewComment;
-  onUpdate: (patch: { body?: string; status?: string }) => void;
+  onUpdate: (patch: CommentPatch) => void;
   onDelete: () => void;
   onDiscuss?: () => void;
   readOnly: boolean;
@@ -844,6 +1118,11 @@ function CommentCard({
             </>
           ))}
       </div>
+      <RaisedNote
+        comment={comment}
+        readOnly={readOnly}
+        onDecide={(raisedDecision) => onUpdate({ raisedDecision })}
+      />
       {editing ? (
         <>
           <textarea
@@ -959,6 +1238,9 @@ function ChapterSection({
   readOnly,
   anchorRef,
   flash,
+  viewedState,
+  sticky,
+  stuck,
 }: {
   chapter: Chapter;
   n: number;
@@ -969,7 +1251,7 @@ function ChapterSection({
   heavy: number | null;
   onToggle: () => void;
   flash: string | null;
-  onUpdateComment: (id: string, patch: { body?: string; status?: string }) => void;
+  onUpdateComment: (id: string, patch: CommentPatch) => void;
   onDeleteComment: (id: string) => void;
   onAddComment: (c: { path: string; line: number | null; body: string; chapterId: string | null }) => void;
   onDiscuss?: (ref: ChatRef) => void;
@@ -978,8 +1260,42 @@ function ChapterSection({
   chatBusy: boolean;
   readOnly: boolean;
   anchorRef: (el: HTMLElement | null) => void;
+  viewedState: ViewedState;
+  /** The title stays pinned while the chapter scrolls under it. */
+  sticky: boolean;
+  /** The title is pinned right now — the chapter's top has scrolled past. */
+  stuck: boolean;
 }) {
+  const [about, setAbout] = useState(false);
+  useEffect(() => {
+    if (!stuck) setAbout(false);
+  }, [stuck]);
+  const pinned = sticky && stuck && open;
+  const sectionEl = useRef<HTMLElement | null>(null);
+  const headEl = useRef<HTMLElement | null>(null);
+  // File headers pin under the title, which grows as it wraps or opens its
+  // explanation.
+  useEffect(() => {
+    const section = sectionEl.current;
+    const head = headEl.current;
+    if (!sticky || !section || !head) return;
+    const apply = () => section.style.setProperty("--chapter-head-h", `${head.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(head);
+    return () => {
+      observer.disconnect();
+      section.style.removeProperty("--chapter-head-h");
+    };
+  }, [sticky]);
+  // Folding a pinned chapter removes everything above the fold line you had
+  // scrolled past, so without this you'd land somewhere in a later chapter.
+  const toggle = () => {
+    onToggle();
+    if (pinned) requestAnimationFrame(() => sectionEl.current?.scrollIntoView({ block: "start" }));
+  };
   const patch = useMemo(() => patchForFiles(diff, chapter.files), [diff, chapter.files]);
+  const viewedCount = chapter.files.filter((f) => viewedState.viewed.has(f)).length;
   // Comments that can be anchored render inline under the line they point at
   // (like GitHub). One that can't still belongs to its file — a comment on a
   // line the PR removed, or about the file as a whole — so it goes to the diff
@@ -1003,8 +1319,18 @@ function ChapterSection({
   );
 
   return (
-    <section className="chapter" ref={anchorRef}>
-      <header className="chapter-head" onClick={onToggle}>
+    <section
+      className={`chapter${sticky ? " chapter-sticky" : ""}`}
+      ref={(el) => {
+        sectionEl.current = el;
+        anchorRef(el);
+      }}
+    >
+      <header
+        ref={headEl}
+        className={`chapter-head${sticky ? " chapter-head-sticky" : ""}${pinned ? " chapter-head-stuck" : ""}`}
+        onClick={toggle}
+      >
         <span className="faint">{open ? "▾" : "▸"}</span>
         <h3>
           {n} · {chapter.title}
@@ -1014,6 +1340,7 @@ function ChapterSection({
           {comments.length > 0
             ? ` · ${comments.length} comment${comments.length === 1 ? "" : "s"}`
             : " · no comments"}
+          {viewedCount > 0 && ` · ${viewedCount}/${chapter.files.length} viewed`}
           {heavy != null && !open && (
             <span title="Drawing this many lines at once would leave the page too slow to scroll. Open it if you want it — nothing else on the page is affected.">
               {` · ${heavy.toLocaleString()} lines to draw, folded to keep the page quick`}
@@ -1021,6 +1348,18 @@ function ChapterSection({
           )}
         </span>
         <span className="grow" />
+        {sticky && open && (
+          <button
+            className={`btn btn-sm${pinned ? "" : " chapter-about-idle"}`}
+            aria-expanded={about}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAbout((a) => !a);
+            }}
+          >
+            {about ? "hide explanation" : "what this chapter is about"}
+          </button>
+        )}
         {onDiscuss && (
           <button
             className="btn btn-sm"
@@ -1032,6 +1371,11 @@ function ChapterSection({
             <Icon name="comment" />
             discuss
           </button>
+        )}
+        {pinned && about && (
+          <div className="chapter-head-about" onClick={(e) => e.stopPropagation()}>
+            <Markdown className="prose" text={chapter.explanation} />
+          </div>
         )}
       </header>
       {open && (
@@ -1056,6 +1400,7 @@ function ChapterSection({
               })
             }
             onAskAboutLine={onAskAboutLine}
+            viewedState={viewedState}
           />
           {!readOnly && chapter.files.length > 0 && (
             <AddComment files={chapter.files} chapterId={chapter.id} onAdd={onAddComment} />
@@ -1109,7 +1454,9 @@ function describeRef(ref: ChatRef, artifact: Artifact): string {
 function ChatTurnView({ turn, artifact }: { turn: ChatTurn; artifact: Artifact }) {
   return (
     <div className={`chat-turn chat-turn-${turn.role}`}>
-      <div className="chat-turn-who">{turn.role === "user" ? "You" : "Reviewer"}</div>
+      <div className="chat-turn-who">
+        {turn.role === "user" ? (turn.steer ? "You, while it worked" : "You") : "Reviewer"}
+      </div>
       {turn.refs.length > 0 && (
         <div className="chat-refs">
           {turn.refs.map((r, i) => (
@@ -1166,6 +1513,7 @@ function ChatPanel({
   const [draft, setDraft] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sendKey] = useSendKey();
   const chat = artifact.chat ?? [];
   const pending = artifact.pendingChat ?? null;
   // A turn runs detached, so "busy" outlives the request that started it: it
@@ -1186,11 +1534,33 @@ function ChatPanel({
       .finally(() => setStarting(false));
   };
 
-  const send = () =>
-    start(draft.trim(), refs, () => {
+  // Sending while a turn runs steers it: the message goes into the live run
+  // rather than waiting minutes for an answer to the question you've moved past.
+  const steer = (message: string) => {
+    setStarting(true);
+    setError(null);
+    steerChatTurn(reviewKey, message)
+      .then((a) => {
+        onArtifact(a);
+        setDraft("");
+        inputRef.current?.focus();
+      })
+      .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setStarting(false));
+  };
+
+  const send = () => {
+    const message = draft.trim();
+    if (!message || starting) return;
+    if (inFlight) return steer(message);
+    start(message, refs, () => {
       setDraft("");
       onClearRefs();
+      // A click on the button took focus with it; the next message starts
+      // in the box either way, not with a click back into it.
+      inputRef.current?.focus();
     });
+  };
 
   return (
     <section className="card chat-panel" ref={anchorRef}>
@@ -1220,13 +1590,23 @@ function ChatPanel({
                   </div>
                 )}
                 <Markdown className="chat-turn-body prose" text={pending.message} />
+                {(pending.steers ?? []).map((m, i) => (
+                  <div key={i} className="chat-steer">
+                    <div className="chat-turn-who">You, while it worked</div>
+                    <Markdown className="chat-turn-body prose" text={m} />
+                  </div>
+                ))}
                 {pending.error ? (
                   <div className="chat-failed">
                     ✕ this turn didn't finish — {pending.error}
                     {!readOnly && (
                       <>
                         {" "}
-                        <button className="btn btn-sm" onClick={() => start(pending.message, pending.refs)}>
+                        <button
+                          className="btn btn-sm"
+                          // What it was steered with is part of the question.
+                          onClick={() => start([pending.message, ...(pending.steers ?? [])].join("\n\n"), pending.refs)}
+                        >
                           ask again
                         </button>{" "}
                         <button
@@ -1287,23 +1667,42 @@ function ChatPanel({
               value={draft}
               // Only the send is blocked while a turn runs — composing the next
               // message during the minutes it takes is exactly what you want to do.
-              disabled={starting}
+              // Read-only rather than disabled for the moment the send is on the
+              // wire: a disabled box drops focus, and the next message would
+              // start with a click back into it.
+              readOnly={starting}
               placeholder={
-                chat.length === 0
-                  ? "the summary restates the author's claims — say what you actually verified"
-                  : "say more…"
+                inFlight
+                  ? "steer it — it reads this before its next step"
+                  : chat.length === 0
+                    ? "the summary restates the author's claims — say what you actually verified"
+                    : "say more…"
               }
               onChange={(e) => setDraft(e.target.value)}
+              title={
+                sendKey === "enter"
+                  ? "Enter sends · Shift+Enter for a new line"
+                  : "⌘↵ sends · Enter for a new line"
+              }
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+                if (!isSend(sendKey, { ...e, isComposing: e.nativeEvent.isComposing })) return;
+                // Swallowed even when the send is a no-op (empty, or one
+                // already going): a newline instead would read as it failing.
+                e.preventDefault();
+                send();
               }}
             />
             <MarkdownPreview className="chat-turn-body" text={draft} />
             <div className="chat-actions">
-              <button className="btn btn-dark" onClick={send} disabled={busy || draft.trim() === ""}>
+              <button
+                className="btn btn-dark"
+                onClick={send}
+                disabled={starting || draft.trim() === ""}
+                title={inFlight ? "Add this to the turn it's working on" : undefined}
+              >
                 <Icon name="send" />
-                {inFlight ? "waiting for the answer…" : starting ? "sending…" : "send message"}
-                <Key>⌘↵</Key>
+                {starting ? "sending…" : inFlight ? "steer" : "send message"}
+                <Key>{sendKey === "enter" ? "↵" : "⌘↵"}</Key>
               </button>
               <span className="grow" />
               {artifact.preChat && (
@@ -1443,6 +1842,422 @@ function BodyEditor({
   );
 }
 
+/** What the note says unless you write your own: who has it, and that it moved. */
+const suggestedNote = (login: string) =>
+  login ? `@${login} — handing this review over to you.` : "";
+
+/**
+ * Give this review to somebody else.
+ *
+ * Two things leave this machine when the button is pressed — GitHub's review
+ * request moves to them, and the note goes up as a plain comment — and a third
+ * does if the box for it is ticked: the draft, as a COMMENT review. The dialog
+ * names each before any of them happens, and shows the body of the third, which
+ * is what ticking the box is for.
+ *
+ * A real `<dialog>`, opened modally. The page behind it is a review you are
+ * deciding *not* to read, so it should stop taking the keys — and the element
+ * does that, the focus trap, the backdrop and Escape without any of it being
+ * written here. Escape is held back while the writes are in flight, because
+ * closing then would hide a GitHub write that is still happening.
+ */
+function HandoffDialog({
+  artifact,
+  reviewKey,
+  onConfirm,
+  onCancel,
+}: {
+  artifact: Artifact;
+  reviewKey: string;
+  /** Resolves once the handoff landed; rejects with the reason it did not. */
+  onConfirm: (to: string, note: string, postReview: boolean) => Promise<unknown>;
+  onCancel: () => void;
+}) {
+  // Read once, on open: this very handoff re-sorts the list, and a set of
+  // suggestions that reshuffled under the cursor would move the name you were
+  // about to click.
+  const [recent] = useState(recentHandoffs);
+  const [to, setTo] = useState("");
+  const [note, setNote] = useState("");
+  // Once you have typed in the note it is yours, and changing the name must not
+  // overwrite it. Until then it follows the name, so the ordinary case — pick a
+  // person, hand it over — needs nothing typed at all.
+  const [ownNote, setOwnNote] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Who the repo will let you put on a PR. Null while it is being fetched, and
+  // on a repo cerber could not list — the two look the same here on purpose,
+  // because the box works the same either way.
+  const [people, setPeople] = useState<string[] | null>(null);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
+  // Send the draft along with it. Off to begin with, and deliberately: a
+  // handoff is reachable from a row you never opened, where the draft is
+  // whatever the poll wrote. Ticking it is the reading, and the body it posts
+  // is on screen before the button is.
+  const [withReview, setWithReview] = useState(false);
+  const [preview, setPreview] = useState<SendPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  // Which suggestion the keyboard is on; -1 is none, and means Enter confirms
+  // rather than picks.
+  const [active, setActive] = useState(-1);
+  const box = useGrowToFit(note);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const login = asLogin(to);
+  const ready = isLogin(login);
+  // Something worth passing on, that nobody has passed on yet — and a send a
+  // re-review superseded still counts as having passed it on. That review is
+  // on the PR under your name, so a handoff carrying this draft would be the
+  // second one, which is the thing this test exists to prevent.
+  const hasDraft = artifact.summary !== "" || artifact.comments.length > 0;
+  const draftToOffer = !everSent(artifact) && hasDraft;
+  // A box that silently is not there reads as a draft not worth offering. On a
+  // row whose send was superseded the draft is real and the reason is not
+  // obvious, so it is said rather than left to be inferred.
+  const draftWithheld = everSent(artifact) && artifact.sent == null && hasDraft;
+
+  // What the draft would post. Fetched when it is asked for and not before —
+  // the common handoff posts nothing, and composing a body for it would be work
+  // for a string nobody reads.
+  //
+  // Keyed on what the body is *made of*, not on the artifact object, which a
+  // poll replaces every few seconds: the send panel does the same, for the same
+  // reason. Without it a chat turn landing after the preview loaded would leave
+  // the box showing one body while the button posts another.
+  const bodySource = withReview
+    ? JSON.stringify([
+        artifact.bodyOverride,
+        artifact.summary,
+        artifact.chapters.map((ch) => [ch.title, ch.explanation]),
+        artifact.comments.map((c) => [
+          c.path,
+          c.line,
+          c.body,
+          c.severity,
+          c.status,
+          c.drifted,
+          c.alreadyRaised?.decision,
+          c.alreadyRaised?.where,
+        ]),
+      ])
+    : "";
+
+  useEffect(() => {
+    if (!withReview) return;
+    let stale = false;
+    setPreviewError(null);
+    // Cleared before the refetch, not replaced after it: the button reads
+    // `bodyShown`, so leaving the old body up would arm it over a preview that
+    // no longer matches what would post — the one thing this box exists to
+    // guarantee against.
+    setPreview(null);
+    fetchSendPreview(reviewKey, "COMMENT")
+      .then((p) => !stale && setPreview(p))
+      .catch((e) => {
+        // Said, not swallowed. Reported as null it rendered as "building the
+        // body…" for ever, over a live button — so the one thing ticking the
+        // box is supposed to buy you, seeing what posts, could silently fail
+        // and the review would go up unread.
+        if (stale) return;
+        setPreview(null);
+        setPreviewError(String(e?.message ?? e));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [withReview, reviewKey, bodySource]);
+
+  // Whether the body about to be posted is actually on screen. Nothing to show
+  // and nothing to post are the same thing here; a tick with no preview is not.
+  const bodyShown = !withReview || preview != null;
+
+  // The list scrolls, so moving the highlight has to move the view with it —
+  // otherwise ArrowDown past the visible rows arms Enter on a name nobody can
+  // see. `nearest` so it only scrolls when it has to.
+  useEffect(() => {
+    if (active < 0) return;
+    document.getElementById(`handoff-option-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  const all = useMemo(() => candidates(people ?? [], recent), [people, recent]);
+  const shown = useMemo(() => matchCandidates(all, to), [all, to]);
+
+  // The repo's list is a convenience, so its failure is a line under the box
+  // rather than anything that stops you: the name is free text, and the one
+  // list that cannot fail — the people you have handed to before — is local.
+  useEffect(() => {
+    let stale = false;
+    fetchHandoffCandidates(reviewKey)
+      .then((r) => !stale && setPeople(r.logins))
+      .catch((e) => !stale && setPeopleError(String(e?.message ?? e)));
+    return () => {
+      stale = true;
+    };
+  }, [reviewKey]);
+
+  const pickLogin = (typed: string) => {
+    setTo(typed);
+    if (!ownNote) setNote(suggestedNote(asLogin(typed)));
+  };
+
+  /** Take a suggestion: it fills the box and closes the list, nothing more. */
+  const choose = (chosen: string) => {
+    pickLogin(chosen);
+    setListOpen(false);
+    setActive(-1);
+  };
+
+  // `showModal` rather than the `open` attribute: only the former puts the
+  // dialog in the top layer, and only the top layer gets the backdrop, the
+  // focus trap and Escape. Once, on mount — React unmounting it closes it.
+  //
+  // A *layout* effect, and that is load-bearing: a `<dialog>` that has not been
+  // shown is `display: none`, where every box inside it measures zero. The note
+  // grows itself to fit its text from a passive effect, and passive effects all
+  // run after layout ones — so showing the dialog here is what gives that
+  // measurement something to measure. Shown from a passive effect instead, the
+  // note opened two pixels tall with its first line sliced in half.
+  useLayoutEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  const confirm = () => {
+    // The button is disabled for all three, but Enter in the name box is not.
+    if (busy || !ready || !bodyShown) return;
+    setBusy(true);
+    setError(null);
+    // Only the failure path comes back here — a handoff that lands closes this
+    // panel, so a `finally` would be writing state into something unmounted.
+    onConfirm(login, note.trim(), withReview).catch((e) => {
+      setError(String(e?.message ?? e));
+      setBusy(false);
+    });
+  };
+
+  return (
+    <dialog
+      className="handoff-dialog"
+      ref={dialog}
+      aria-label={`Hand off ${artifact.id}`}
+      // Escape, which the element raises as `cancel` rather than as a key. The
+      // only reason to refuse it is a write already on its way to GitHub.
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onCancel();
+      }}
+      // A click on the backdrop lands on the dialog itself — everything inside
+      // is a child and reports that child as the target. This is the whole of
+      // "click outside to close", and it needs the element to carry no padding
+      // of its own, which the stylesheet sees to.
+      onClick={(e) => {
+        if (e.target === dialog.current && !busy) onCancel();
+      }}
+    >
+      <div className="handoff-body">
+        <div className="send-top">
+          <span className="lab">hand off</span>
+          <span className="grow" />
+          <span className="faint">{artifact.id}</span>
+        </div>
+
+        <div className="handoff-who">
+          <span className="handoff-at">@</span>
+          <div className="handoff-combo">
+            <input
+              className="handoff-login"
+              autoFocus
+              value={to}
+              spellCheck={false}
+              placeholder="github login"
+              role="combobox"
+              aria-expanded={listOpen && shown.length > 0}
+              aria-controls="handoff-options"
+              aria-autocomplete="list"
+              aria-activedescendant={active >= 0 ? `handoff-option-${active}` : undefined}
+              onFocus={() => setListOpen(true)}
+              // The options take the click before this fires (they cancel the
+              // mousedown that would move focus), so closing here cannot close
+              // the list out from under the name being picked.
+              onBlur={() => setListOpen(false)}
+              onChange={(e) => {
+                pickLogin(e.target.value);
+                setListOpen(true);
+                // Back onto the best match on every keystroke, so typing three
+                // letters and pressing Enter fills in the name they belong to.
+                setActive(0);
+              }}
+              onKeyDown={(e) => {
+                const open = listOpen && shown.length > 0;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (!open) return setListOpen(true);
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setActive((i) => (i + step + shown.length) % shown.length);
+                  return;
+                }
+                if (e.key === "Enter") {
+                  // A highlighted suggestion is only worth taking while it says
+                  // something the box does not: once the name is typed out in
+                  // full, Enter is the confirmation it looks like.
+                  const pick = open && active >= 0 ? shown[active] : undefined;
+                  if (pick && pick.login.toLowerCase() !== login.toLowerCase()) choose(pick.login);
+                  else confirm();
+                  return;
+                }
+                if (e.key === "Escape" && open) {
+                  // Closes the list, not the dialog. `preventDefault` is what
+                  // stops the element taking this Escape as "close me" too —
+                  // one key, the innermost thing open.
+                  e.preventDefault();
+                  setListOpen(false);
+                  setActive(-1);
+                }
+              }}
+            />
+            {listOpen && shown.length > 0 && (
+              <ul className="handoff-options" id="handoff-options" role="listbox">
+                {shown.map((c, i) => (
+                  <li
+                    key={c.login}
+                    id={`handoff-option-${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    className={i === active ? "on" : undefined}
+                    onMouseEnter={() => setActive(i)}
+                    // `mousedown` and not `click`: the input is about to lose
+                    // focus to this row, and the blur handler would close the
+                    // list before the click ever landed. Cancelling the
+                    // mousedown keeps the focus where it is.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      choose(c.login);
+                    }}
+                  >
+                    <span className="handoff-option-login">@{c.login}</span>
+                    {c.recent && <span className="faint">handed to before</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Said once the fetch has answered, and only when it answered badly:
+            the box is free text and the suggestions were never the point. */}
+        {peopleError && (
+          <p className="faint handoff-who-note">
+            cerber could not read who this repo takes reviews from — type the login instead.
+          </p>
+        )}
+
+        <textarea
+          ref={box}
+          className="body-edit"
+          rows={2}
+          value={note}
+          onChange={(e) => {
+            setOwnNote(true);
+            setNote(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              // Or the browser types the newline into the box on the way out.
+              e.preventDefault();
+              confirm();
+            }
+          }}
+        />
+        <div className="body-source">
+          <span className="faint">
+            {note.trim()
+              ? "goes on the PR as a plain comment, not a review"
+              : "nothing will be posted — only the review request moves"}
+          </span>
+          {note.trim() !== "" && (
+            <button
+              className="link"
+              onClick={() => {
+                setOwnNote(true);
+                setNote("");
+              }}
+              disabled={busy}
+            >
+              post no note
+            </button>
+          )}
+        </div>
+
+        {draftWithheld && (
+          <p className="faint handoff-says">
+            You already reviewed this PR, so this draft can't ride along — a handoff that carried
+            it would be your second review. Send it yourself if that is what you mean.
+          </p>
+        )}
+        {/* Offered only where there is a draft nobody has posted yet: a row
+            already sent has its review on GitHub, and one with nothing drafted
+            has nothing to offer. */}
+        {draftToOffer && (
+          <div className="handoff-with-review">
+            <label>
+              <input
+                type="checkbox"
+                checked={withReview}
+                disabled={busy}
+                onChange={(e) => setWithReview(e.target.checked)}
+              />
+              <span>
+                also post the review — <span className="faint">{payloadSummary(artifact)}</span>
+              </span>
+            </label>
+            {withReview && (
+              <>
+                <p className="faint">
+                  Posts as a <strong>comment</strong>, never an approval or a change request: you
+                  are handing over the verdict, so it is @{ready ? login : "them"}'s to make. The
+                  findings keep their grades.
+                </p>
+                {previewError ? (
+                  <p className="error">
+                    cerber could not build the body this would post, so it will not post one:{" "}
+                    {previewError}
+                  </p>
+                ) : preview ? (
+                  <pre className="body-preview">{preview.body}</pre>
+                ) : (
+                  <p className="faint">building the body…</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+
+        <p className="faint handoff-says">
+          {ready ? <>@{login}</> : "They"} will be asked for this review and you will be taken off
+          it.{" "}
+          {withReview
+            ? "This row goes under sent, with the review on the PR."
+            : artifact.sent
+              ? "This row stays under sent."
+              : "This row is filed under settled, and comes back if anybody asks you again."}
+        </p>
+
+        <div className="card-actions">
+          <button className="btn btn-sm" onClick={confirm} disabled={busy || !ready || !bodyShown}>
+            <Icon name="arrowRight" />
+            {busy ? "handing over…" : ready ? `hand off to @${login}` : "hand off"}
+            <Key>⌘↵</Key>
+          </button>
+          <button className="btn btn-sm" onClick={onCancel} disabled={busy}>
+            cancel
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 /**
  * The one place anything reaches GitHub.
  *
@@ -1455,7 +2270,9 @@ function SendPanel({
   artifact,
   reviewKey,
   event,
+  own,
   sending,
+  checking,
   onSend,
   error,
   footer,
@@ -1467,7 +2284,15 @@ function SendPanel({
   artifact: Artifact;
   reviewKey: string;
   event: ReviewEvent;
+  /** Your own PR: `event` is a comment whatever the verdict, and the panel says why. */
+  own: boolean;
   sending: boolean;
+  /**
+   * A check for findings others already raised is running. Send waits for it,
+   * so what posts is what the check says. Under a minute, and only when
+   * somebody said something new since the last check; the button says why.
+   */
+  checking: boolean;
   onSend: () => void;
   error: string | null;
   /** The ways out that don't touch GitHub — kept here because this is where
@@ -1491,6 +2316,8 @@ function SendPanel({
   const [showBody, setShowBody] = useState(artifact.bodyOverride != null);
   const [editingBody, setEditingBody] = useState(false);
   const ownBody = artifact.bodyOverride != null;
+  /** Reviews already on this PR from here: what makes the next one a second. */
+  const priorSends = artifact.priorSends ?? [];
 
   // A body the user wrote opens shown — including one that arrived after this
   // panel was drawn, from another tab or a poll tick. Only ever in that
@@ -1516,7 +2343,16 @@ function SendPanel({
           artifact.bodyOverride,
           artifact.summary,
           artifact.chapters.map((ch) => [ch.title, ch.explanation]),
-          artifact.comments.map((c) => [c.path, c.line, c.body, c.severity, c.status, c.drifted]),
+          artifact.comments.map((c) => [
+            c.path,
+            c.line,
+            c.body,
+            c.severity,
+            c.status,
+            c.drifted,
+            c.alreadyRaised?.decision,
+            c.alreadyRaised?.where,
+          ]),
         ])
       : "";
 
@@ -1554,6 +2390,9 @@ function SendPanel({
           <span className="faint">
             {new Date(artifact.sent.at).toLocaleString()} · {payloadSummary(artifact)}
             {artifact.sent.auto ? " · auto-sent by the daemon" : ""}
+            {/* The count, not a list: the earlier ones are in the history
+                card, and what matters here is that this was not the first. */}
+            {priorSends.length > 0 ? ` · review ${sendCount(artifact)} on this PR` : ""}
           </span>
           <span className="grow" />
           {artifact.sent.url && (
@@ -1593,14 +2432,34 @@ function SendPanel({
         </button>
       </div>
 
+      {/* On the button rather than in a dialog: what changes is one fact
+          about the click, and the click is already the deliberate act. */}
+      {own && eventForVerdict(artifact.verdict) !== "COMMENT" && (
+        <p className="send-note">
+          This is your own PR, and GitHub takes no approve or change request from its author — so it
+          posts as a comment.
+        </p>
+      )}
+      {priorSends.length > 0 && (
+        <p className="send-note">
+          This posts review {sendCount(artifact) + 1} on this PR. What you sent before stays on
+          GitHub — a new one sits beside it rather than replacing it.
+        </p>
+      )}
+
       <div className="send-action">
         <button
           className={`send-btn tone-bg-${EVENT_TONE[event]}`}
-          disabled={sending}
+          disabled={sending || checking}
           onClick={onSend}
         >
           <Icon name={event === "APPROVE" ? "approve" : event === "COMMENT" ? "comment" : "changes"} size={15} />
-          {sending ? "sending…" : `${EVENT_LABEL[event]} on ${artifact.id}`} <Key>s</Key>
+          {sending
+            ? "sending…"
+            : checking
+              ? "checking what others already raised…"
+              : `${EVENT_LABEL[event]} on ${artifact.id}`}{" "}
+          <Key>s</Key>
         </button>
       </div>
 
@@ -1665,6 +2524,43 @@ function SendPanel({
       )}
 
       <div className="send-footer">{footer}</div>
+    </div>
+  );
+}
+
+/**
+ * A review you already posted on this PR, under a draft that has replaced it.
+ *
+ * The one thing a reader of a re-reviewed row cannot work out for themselves:
+ * the draft in front of them is new, but their name is already on a review
+ * over on GitHub, and the next Send adds to it rather than being the first
+ * word. Leads with what was posted and when, and links it — a record nobody
+ * can open is barely a record.
+ */
+function PriorSendsNote({ sends }: { sends: SentInfo[] }) {
+  const last = sends[sends.length - 1]!;
+  const one = sends.length === 1;
+  const on = (at: string) => new Date(at).toLocaleDateString();
+  const label = EVENT_LABEL[last.event];
+
+  return (
+    <div>
+      <strong>
+        You already sent {one ? "a review" : `${sends.length} reviews`} on this PR
+        {one ? "" : ", the last"} on {on(last.at)}
+        {one ? ` — ${label}` : ` as ${label}`}.
+      </strong>{" "}
+      {last.url ? (
+        <a href={last.url} target="_blank" rel="noreferrer">
+          {one ? "It is still on GitHub" : "The last is still on GitHub"}
+        </a>
+      ) : one ? (
+        "It is still on GitHub"
+      ) : (
+        "The last is still on GitHub"
+      )}
+      , untouched by the draft below — a re-review replaces what cerber holds, never what was
+      posted. Sending this one would be review {sends.length + 1}.
     </div>
   );
 }
@@ -1802,6 +2698,65 @@ function HistoryCard({
   );
 }
 
+/**
+ * Where this review went, on a row you gave away.
+ *
+ * Leads with what GitHub says now, because that is the half of a handoff that
+ * left this machine — then with what became of the draft, which is nothing, and
+ * is the part a reader is most likely to assume otherwise.
+ */
+function HandoffNote({
+  handoff,
+  sent,
+  hasDraft,
+}: {
+  handoff: NonNullable<Artifact["handoff"]>;
+  sent: Artifact["sent"];
+  /** Whether there is a draft on this row at all — a handoff does not need one. */
+  hasDraft: boolean;
+}) {
+  const when = new Date(handoff.at).toLocaleDateString();
+  return (
+    <div>
+      <strong>
+        You handed this to @{handoff.to} on {when}.
+      </strong>{" "}
+      GitHub asks them for this review now
+      {handoff.withdrewYours
+        ? " and no longer asks you"
+        : " — but cerber could not take your own request off, so it is asking both of you"}
+      .{" "}
+      {handoff.note ? (
+        handoff.note.url ? (
+          <>
+            A{" "}
+            <a href={handoff.note.url} target="_blank" rel="noreferrer">
+              note
+            </a>{" "}
+            on the PR says so.
+          </>
+        ) : (
+          <>A note on the PR says so.</>
+        )
+      ) : (
+        <>No note was posted — only the request moved.</>
+      )}{" "}
+      {sent ? (
+        // Said without dating it: the review may have gone with the handoff, or
+        // long before it, and the strip further down carries the when.
+        <>Your review of it is on the PR — the draft below is what went.</>
+      ) : hasDraft ? (
+        <>The draft below was never sent. It is still yours to read, or to send.</>
+      ) : (
+        // A row can be handed off before anything was drafted — the queue
+        // offers it on an `awaiting` stub and on a failed run. There is no
+        // draft to make a promise about.
+        <>Nothing was drafted here, and nothing was sent.</>
+      )}
+    </div>
+  );
+}
+
 function FreshnessBanner({
   artifact,
   freshness,
@@ -1818,20 +2773,51 @@ function FreshnessBanner({
   const closed = state === "CLOSED" || state === "MERGED";
   const refresh = artifact.refresh;
   const movedHere = freshness?.changed ? refresh : null;
+  // A sent review is never pulled forward — refresh declines it, because its
+  // comments are already posted and re-anchoring them would change the page
+  // and nothing on GitHub. So `refresh` has nothing to say about one, and the
+  // staleness has to come from the check's own answer. It is worth saying
+  // loudly: a review written for a commit the PR has left is the whole reason
+  // the re-review button is offered here.
+  const sentStale = !closed && sentAtOldHead(artifact, freshness) ? artifact.sent : null;
 
   if (running) {
     return (
-      <div className="freshness freshness-running">
-        <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates itself
-        when the run lands — it takes a few minutes.
+      <div className="freshness">
+        {/* Kept visible through the run: "you already reviewed this PR" is the
+            one thing on this page a reader cannot work out for themselves,
+            and a re-review takes minutes. */}
+        {(artifact.sent ? [] : (artifact.priorSends ?? [])).length > 0 && (
+          <PriorSendsNote sends={artifact.priorSends ?? []} />
+        )}
+        <div className="freshness-running">
+          <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates
+          itself when the run lands — it takes a few minutes.
+        </div>
       </div>
     );
   }
   const filed = artifact.filed;
-  if (!closed && !movedHere && !filed) return null;
+  const handoff = artifact.handoff;
+  // Only while the send it describes is the *previous* draft's: once this one
+  // has been sent too, the strip at the foot says so and the count with it.
+  const priorSends = artifact.sent ? [] : (artifact.priorSends ?? []);
+  if (!closed && !movedHere && !sentStale && !filed && !handoff && priorSends.length === 0) {
+    return null;
+  }
 
   return (
     <div className="freshness">
+      {priorSends.length > 0 && <PriorSendsNote sends={priorSends} />}
+      {/* Yours first: a handoff is a decision you made, and it is why anything
+          cerber did to this row afterwards happened at all. */}
+      {handoff && (
+        <HandoffNote
+          handoff={handoff}
+          sent={artifact.sent}
+          hasDraft={artifact.summary !== "" || artifact.comments.length > 0}
+        />
+      )}
       {filed && <FiledNote filed={filed} />}
       {closed && (
         <div>
@@ -1852,11 +2838,35 @@ function FreshnessBanner({
             </>
           )}
           The summary and verdict still describe the commit that was reviewed.
+          {/* A sent row has its own block below, with its own button: this one
+              is about comments that were re-anchored, which never happens to a
+              review already on GitHub. */}
           {!artifact.sent && (
             <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
               {rerunning ? "starting…" : "re-review at the new head"}
             </button>
           )}
+        </div>
+      )}
+      {sentStale && (
+        <div>
+          <strong>The PR moved on since you sent this review.</strong>{" "}
+          {freshness?.headSha && artifact.pr.headSha && (
+            <>
+              Now at <code>{freshness.headSha.slice(0, 7)}</code>, sent at{" "}
+              {/* `pr.headSha`, not `run.reviewedSha`: a review posts with the
+                  former as its commit id, and refresh declines a sent row, so
+                  this is frozen at exactly what GitHub attached it to. The two
+                  differ whenever the draft was pulled forward before sending. */}
+              <code>{artifact.pr.headSha.slice(0, 7)}</code>.{" "}
+            </>
+          )}
+          What you sent stays exactly as it was posted — cerber never re-anchors a review that
+          is already on GitHub. Answering the new commits means a new draft, which replaces this
+          one here and leaves what was posted alone.
+          <button className="btn btn-sm" disabled={rerunning} onClick={() => onRerun()}>
+            {rerunning ? "starting…" : "re-review at the new head"}
+          </button>
         </div>
       )}
     </div>
@@ -1872,11 +2882,18 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [freshnessError, setFreshnessError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [neighbours, setNeighbours] = useState<ReviewListItem[]>([]);
+  // Whether this is your own PR — said by the server on the review's own read,
+  // and kept apart from `artifact`, which most writes hand back without it.
+  const [ownPr, setOwnPr] = useState(false);
   // The reviews settled since this page opened — skipped, marked reviewed, or
   // sent. Kept here rather than refetched, so a decision leaves the walk the
   // moment you make it without the rest of the list moving.
   const [settledHere, setSettledHere] = useState<Set<string>>(new Set());
   const markSettled = (key: string) => setSettledHere((s) => new Set(s).add(key));
+  // Whether the handoff panel is open. Not a route and not remembered: it is a
+  // GitHub write being composed, and one left open across a reload would be a
+  // half-typed name sitting over a review somebody came back to read.
+  const [handingOff, setHandingOff] = useState(false);
   // What the user has pointed at with "discuss this", waiting to be sent with
   // their next message. Lives here so a button anywhere in the walkthrough can
   // reach the one chat panel at the bottom.
@@ -1889,8 +2906,15 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // an effect would draw the giant diff once before folding it away, which is
   // the whole cost the fold exists to avoid.
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
+  // Viewed files the reader opened back up without unticking them.
+  const [peeked, setPeeked] = useState<Set<string>>(new Set());
+  const viewedQueue = useRef<Promise<void>>(Promise.resolve());
+  const viewedTick = useRef(0);
   const [focused, setFocused] = useState(0);
   const chapterEls = useRef<Map<string, HTMLElement>>(new Map());
+  const [stickyChapters] = useStickyChapters();
+  // The chapter under the top bar right now, and whether its title is pinned.
+  const [here, setHere] = useState<{ id: string; stuck: boolean } | null>(null);
   const verdictEl = useRef<HTMLDivElement | null>(null);
   const summaryEl = useRef<HTMLDivElement | null>(null);
   const whyEl = useRef<HTMLDivElement | null>(null);
@@ -1900,6 +2924,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const topEl = useRef<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
+  // The open-time check's GitHub read is in flight. Before any model call it
+  // starts, so nothing on the artifact says so yet.
+  const [raisedReading, setRaisedReading] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // The comment the rail just sent you to, marked until you've had time to see it.
   const [flash, setFlash] = useState<string | null>(null);
@@ -1931,10 +2958,13 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     setFreshness(null);
     setFreshnessError(null);
     setSendError(null);
+    setRaisedReading(false);
+    setOwnPr(false);
     fetchReview(reviewKey)
       .then((a) => {
         if (cancelled) return;
         setArtifact(a);
+        setOwnPr(a.own === true);
         // Opening a review checks GitHub for new commits and pulls the comments
         // forward onto them, so what you read is anchored to current code. If
         // that check fails the review still reads — it is just older than we
@@ -1945,7 +2975,24 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
             setFreshness(r);
             if (r.changed) setArtifact(r.artifact);
           })
-          .catch((e) => !cancelled && setFreshnessError(String(e.message ?? e)));
+          .catch((e) => !cancelled && setFreshnessError(String(e.message ?? e)))
+          .then(() => {
+            // Then compare the draft with what others have said on the PR
+            // since it was written — after the refresh, so a thread is matched
+            // against the code as it stands. Nothing to do on a sent review or
+            // one a run is about to replace; the run checks for itself.
+            if (cancelled || a.sent || a.status === "running" || a.comments.length === 0) return;
+            // Send waits for the GitHub read too, not only for a model call
+            // the read may start: the read is what finds a new duplicate.
+            setRaisedReading(true);
+            return checkRaised(reviewKey)
+              .then((checking) => !cancelled && setArtifact(checking))
+              .catch(() => {
+                // Refused because a run or a turn got there first, which checks
+                // when it lands. Anything else surfaces on the artifact itself.
+              })
+              .finally(() => !cancelled && setRaisedReading(false));
+          });
       })
       .catch((e) => !cancelled && setError(String(e)));
     return () => {
@@ -1978,23 +3025,42 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     };
   }, [artifact?.id]);
 
-  // While AI work is in flight — a re-review, or a chat turn — follow it until
-  // it lands. Both run detached, so the artifact is the only thing that knows.
+  // While AI work is in flight — a re-review, a chat turn, or the check for
+  // findings others already raised — follow it until it lands. All of them run
+  // detached, so the artifact is the only thing that knows.
   const chatInFlight = artifact?.pendingChat != null && artifact.pendingChat.error == null;
+  /** The sent row's `run.startedAt` when a re-review was asked for — see `onRerun`. */
+  const startedFrom = useRef<string | null>(null);
+  const raisedChecking = artifact?.raisedCheck?.checkingSince != null || raisedReading;
   useEffect(() => {
-    if (artifact?.status !== "running" && !chatInFlight) return;
+    if (artifact?.status !== "running" && !chatInFlight && !raisedChecking) return;
     const timer = setInterval(() => {
       fetchReview(reviewKey)
         .then((a) => {
           setArtifact(a);
-          if (a.status !== "running") setRerunning(false);
+          // A login gh was slow to give on the first read is known by now.
+          setOwnPr(a.own === true);
+          if (a.status !== "running") {
+            setRerunning(false);
+            // Back where it started, with the same run still on it: the
+            // re-review died before it owned the row. The reason is in the
+            // history, which is collapsed, so say that much here.
+            const from = startedFrom.current;
+            if (from != null && a.sent && (a.run?.startedAt ?? "none") === from) {
+              setError(
+                "The re-review didn't start, so nothing here changed — the review you sent is " +
+                  "untouched. The history below says why.",
+              );
+            }
+            startedFrom.current = null;
+          }
         })
         .catch(() => {
           // Transient — the next tick tries again.
         });
     }, 3000);
     return () => clearInterval(timer);
-  }, [artifact?.status, chatInFlight, reviewKey]);
+  }, [artifact?.status, chatInFlight, raisedChecking, reviewKey]);
 
   const readOnly = artifact?.sent != null;
   // The walk is the queue as it stood when this page opened. Deliberately not
@@ -2037,6 +3103,39 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
       : artifact.chapters;
   }, [artifact]);
 
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const topH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--top-h")) || 0;
+      // A jump leaves a chapter 12px below the top bar (its scroll margin),
+      // and that chapter is still the one you're in.
+      const line = topH + 16;
+      let next: { id: string; stuck: boolean } | null = null;
+      for (const ch of chapters) {
+        const rect = chapterEls.current.get(ch.id)?.getBoundingClientRect();
+        if (rect && rect.top <= line && rect.bottom > line) next = { id: ch.id, stuck: rect.top < topH - 1 };
+      }
+      setHere((prev) => (prev?.id === next?.id && prev?.stuck === next?.stuck ? prev : next));
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    // Folding a chapter or the top bar changing height moves the page
+    // without a scroll event.
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.body);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      observer.disconnect();
+    };
+  }, [chapters]);
+
   /**
    * How many diff lines each chapter is asking the browser to draw.
    *
@@ -2076,7 +3175,62 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // A fold belongs to the review it was made in. The cockpit walks from one
   // review to the next without remounting, so without this a chapter opened
   // here would carry its id — "__other" above all — onto the next PR's page.
-  useEffect(() => setFlipped(new Set()), [reviewKey]);
+  useEffect(() => {
+    setFlipped(new Set());
+    setPeeked(new Set());
+  }, [reviewKey]);
+
+  const fingerprints = useMemo(
+    () =>
+      Object.fromEntries(
+        splitDiffByFile(artifact?.diff ?? "").map((p) => [p.path, fileFingerprint(p.patch)]),
+      ),
+    [artifact?.diff],
+  );
+  // A mark counts only while the file's diff is the one that was marked — a
+  // push that changes the file unticks it.
+  const viewed = useMemo(
+    () =>
+      new Set(
+        Object.keys(fingerprints).filter((p) => artifact?.viewed?.[p] === fingerprints[p]),
+      ),
+    [fingerprints, artifact?.viewed],
+  );
+  const togglePeek = (path: string) =>
+    setPeeked((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  const toggleViewed = (path: string) => {
+    const fingerprint = viewed.has(path) ? null : (fingerprints[path] ?? null);
+    setPeeked((s) => {
+      const next = new Set(s);
+      next.delete(path);
+      return next;
+    });
+    setArtifact((a) => {
+      if (!a) return a;
+      const next = { ...a.viewed };
+      if (fingerprint === null) delete next[path];
+      else next[path] = fingerprint;
+      return { ...a, viewed: next };
+    });
+    // One write at a time, so two ticks never race on the server, and only the
+    // last one's answer lands: an earlier answer lacks the later tick and would
+    // untick it on screen. Only `viewed` is taken from it, so nothing else that
+    // changed meanwhile is overwritten.
+    const tick = ++viewedTick.current;
+    viewedQueue.current = viewedQueue.current
+      .then(() => setViewed(reviewKey, path, fingerprint))
+      .then((saved) => {
+        if (tick !== viewedTick.current) return;
+        setArtifact((a) => (a && a.id === saved.id ? { ...a, viewed: saved.viewed } : a));
+      })
+      .catch((e) => setError(String(e)));
+  };
+  const viewedState: ViewedState = { viewed, peeked, onToggleViewed: toggleViewed, onTogglePeek: togglePeek };
 
   const openChapter = (i: number) => {
     const ch = chapters[i];
@@ -2101,23 +3255,32 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
 
   const goComment = (chapterIndex: number, commentId: string) => {
     openChapter(chapterIndex);
+    // A comment in a folded viewed file would otherwise be jumped to unseen.
+    const path = artifact?.comments.find((c) => c.id === commentId)?.path;
+    if (path && viewed.has(path)) setPeeked((s) => new Set(s).add(path));
     setFlash(commentId);
     scrollToComment(commentId);
   };
 
-  // What Send will do, and the only thing it can do: the verdict decides it.
-  const event = eventForVerdict(artifact?.verdict);
+  // Whether this is your own PR. Should the server not know who you are, Send
+  // follows the verdict and GitHub refuses what it would.
+  const own = ownPr;
+  // What Send will do, and the only thing it can do: the verdict decides it —
+  // except on your own PR, which takes a comment and nothing else.
+  const event = eventForVerdict(artifact?.verdict, own);
   // A failure belongs to the send it came from; changing the verdict makes it
   // history rather than a warning about the button in front of you.
   useEffect(() => setSendError(null), [event]);
 
   const doSend = () => {
-    if (!artifact || artifact.sent || sending) return;
+    if (!artifact || artifact.sent || sending || raisedChecking) return;
     setSending(true);
     setSendError(null);
     sendReview(reviewKey, event)
-      .then((a) => {
+      .then(({ replyError, ...a }) => {
         setArtifact(a);
+        // The review is up by now; a reply that failed is said, not retried.
+        if (replyError) setSendError(`Sent — but ${replyError}`);
         // A send settles this review too — it stays on screen showing what
         // landed, but the arrows have no reason to come back to it.
         markSettled(reviewKey);
@@ -2138,7 +3301,7 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prev?.key, next?.key, chapters, focused, readOnly, event, artifact?.sent, sending]);
+  }, [prev?.key, next?.key, chapters, focused, readOnly, event, artifact?.sent, sending, raisedChecking]);
 
   // Only a review that failed to load has nothing to show; anything else is a
   // note on a page that still works.
@@ -2148,6 +3311,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const onRerun = (withSource?: boolean) => {
     setRerunning(true);
     setError(null);
+    // What the row looked like before the run claimed it. On a sent row the
+    // claim is the only thing that replaces the run block, so a status that
+    // comes back to `sent` with this one still in place means the run never
+    // got that far — a failure the page would otherwise show nothing for,
+    // because its error deliberately does not go on the sent review's run.
+    startedFrom.current = artifact.sent ? (artifact.run?.startedAt ?? "none") : null;
     rerunReview(reviewKey, withSource)
       .then(setArtifact)
       .catch((e) => {
@@ -2166,7 +3335,40 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
         advance();
       })
       .catch((e) => setError(String(e)));
-  const onUpdateComment = (id: string, patch: { body?: string; status?: string }) =>
+  /**
+   * Give this review to somebody else. Rejects back into the panel, which is
+   * holding the only copy of the note — so a refusal from GitHub (not a
+   * collaborator, no permission to ask for reviews) lands next to the name that
+   * caused it, with nothing typed lost.
+   *
+   * The halves that come after it are different: by then the request has moved
+   * and the row is settled, so there is nothing to retry that would not ask a
+   * second time. A review or a note that did not post is said here, and the
+   * page stays put so it can be read.
+   */
+  const handOff = (to: string, note: string, postReview: boolean) =>
+    handOffReview(reviewKey, { to, note, postReview }).then(
+      ({ artifact: handed, noteError, sendError, replyError }) => {
+        rememberHandoff(to);
+        setArtifact(handed);
+        setHandingOff(false);
+        markSettled(reviewKey);
+        // The request has moved either way, so a half that failed is said here
+        // and the page stays put to be read. The review first: it is the half
+        // somebody was waiting for.
+        // Both halves can fail at once — a rate-limited token fails them
+        // together — and naming only the first leaves the user assuming the
+        // other one landed.
+        const missed = [
+          sendError && `the review did not post: ${sendError}`,
+          replyError,
+          noteError && `the note did not post: ${noteError}`,
+        ].filter(Boolean);
+        if (missed.length > 0) setError(`Handed to @${to}, but ${missed.join("; and ")}`);
+        else advance();
+      },
+    );
+  const onUpdateComment = (id: string, patch: CommentPatch) =>
     apply(patchComment(reviewKey, id, patch));
   const onDeleteComment = (id: string) => apply(deleteComment(reviewKey, id));
   const onAddComment = (c: { path: string; line: number | null; body: string; chapterId: string | null }) =>
@@ -2175,7 +3377,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   const orphanComments = artifact.comments.filter(
     (c) => !c.chapterId || !chapters.some((ch) => ch.id === c.chapterId),
   );
-  const { inline, folded, dropped } = splitComments(artifact);
+  const { inline, folded, dropped, held, replies } = splitComments(artifact);
+  const raisedCount = artifact.comments.filter((c) => c.alreadyRaised && c.status !== "dropped").length;
   const drifted = artifact.comments.filter((c) => c.status !== "dropped" && c.drifted).length;
   const tone = artifact.verdict ? TONE[artifact.verdict.recommendation] : "none";
   // The findings changed under the verdict (a blocker dropped, a grade edited).
@@ -2186,6 +3389,8 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
   // where each is spelled out.
   const basis = verdictBasis(artifact);
   const chatBusy = artifact.pendingChat != null && artifact.pendingChat.error == null;
+  // What the handoff route refuses on, asked here so the button can refuse first.
+  const busyWithRun = artifact.status === "running" || chatBusy;
   const retrue = () =>
     apply(
       startChatTurn(reviewKey, {
@@ -2312,14 +3517,19 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                     <Icon name="down" size={12} />
                   </button>
                 ))}
-              {!readOnly && artifact.status !== "running" && (
+              {/* Offered on a sent review too — it is the only way back into
+                  one, and the review already on GitHub is kept as a record
+                  rather than overwritten. */}
+              {artifact.status !== "running" && (
                 <button
                   className="btn btn-sm"
                   disabled={rerunning}
                   title={
-                    artifact.run
-                      ? "Review the current head again — this draft is replaced, your own comments are kept"
-                      : "Draft a review of this PR"
+                    readOnly
+                      ? "Draft a new review at the current head. What you sent stays on GitHub — this replaces the draft here, and sending again posts a second review"
+                      : artifact.run
+                        ? "Review the current head again — this draft is replaced, comments and all"
+                        : "Draft a review of this PR"
                   }
                   onClick={() => onRerun(true)}
                 >
@@ -2405,36 +3615,42 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               <button className="lab rail-lab rail-lab-btn" onClick={() => goChapter(0)}>
                 changes
               </button>
-              {chapters.map((ch, i) => (
-                <div key={ch.id} className="rail-group">
-                  <button
-                    className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}`}
-                    onClick={() => goChapter(i)}
-                  >
-                    <span className="grow">
-                      {i + 1} · {ch.title}
-                    </span>
-                    <span className="rail-count">{ch.files.length}f</span>
-                  </button>
-                  {/* Where the comments are, before you go looking for them. */}
-                  {artifact.comments
-                    .filter((c) => c.chapterId === ch.id)
-                    .map((c) => (
-                      <button
-                        key={c.id}
-                        className={`rail-comment${c.status === "dropped" ? " rail-comment-dropped" : ""}`}
-                        title={`${c.path}${c.line != null ? `:${c.line}` : ""} — ${c.body}`}
-                        onClick={() => goComment(i, c.id)}
-                      >
-                        <span className={`rail-dot tone-${commentTone(c, tone)}`}>●</span>
-                        <span className="rail-comment-loc">
-                          {c.path.split("/").pop()}
-                          {c.line != null ? `:${c.drifted ? "~" : ""}${c.line}` : ""}
-                        </span>
-                      </button>
-                    ))}
-                </div>
-              ))}
+              {chapters.map((ch, i) => {
+                const done = ch.files.length > 0 && ch.files.every((f) => viewed.has(f));
+                return (
+                  <div key={ch.id} className="rail-group">
+                    <button
+                      className={`rail-item${isOpen(ch.id) ? " rail-item-on" : ""}${done ? " rail-item-done" : ""}${here?.id === ch.id ? " rail-item-here" : ""}`}
+                      onClick={() => goChapter(i)}
+                    >
+                      <span className="grow">
+                        {i + 1} · {ch.title}
+                      </span>
+                      <span className="rail-count" title={done ? "every file viewed" : undefined}>
+                        {done ? "✓ " : ""}
+                        {ch.files.length}f
+                      </span>
+                    </button>
+                    {/* Where the comments are, before you go looking for them. */}
+                    {artifact.comments
+                      .filter((c) => c.chapterId === ch.id)
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          className={`rail-comment${c.status === "dropped" ? " rail-comment-dropped" : ""}`}
+                          title={`${c.path}${c.line != null ? `:${c.line}` : ""} — ${c.body}`}
+                          onClick={() => goComment(i, c.id)}
+                        >
+                          <span className={`rail-dot tone-${commentTone(c, tone)}`}>●</span>
+                          <span className="rail-comment-loc">
+                            {c.path.split("/").pop()}
+                            {c.line != null ? `:${c.drifted ? "~" : ""}${c.line}` : ""}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                );
+              })}
             </>
           )}
 
@@ -2458,6 +3674,12 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 {drifted} drifted
               </div>
             )}
+            <RaisedFacts
+              check={artifact.raisedCheck ?? null}
+              raised={raisedCount}
+              held={held.length}
+              replies={replies.length}
+            />
           </div>
         </aside>
 
@@ -2537,6 +3759,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               chatBusy={chatBusy}
               readOnly={readOnly}
               flash={flash}
+              viewedState={viewedState}
+              sticky={stickyChapters}
+              stuck={here?.id === ch.id && here.stuck}
               anchorRef={(el) => {
                 if (el) chapterEls.current.set(ch.id, el);
                 else chapterEls.current.delete(ch.id);
@@ -2616,7 +3841,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               artifact={artifact}
               reviewKey={reviewKey}
               event={event}
+              own={own}
               sending={sending}
+              checking={raisedChecking}
               onSend={doSend}
               error={sendError}
               next={next}
@@ -2627,7 +3854,9 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
               anchorRef={sendEl}
               footer={
                 <>
-                  <span className="faint">not sending?</span>
+                  {/* The question only makes sense before a send. After one the
+                      sent strip above has already said what happened. */}
+                  {!readOnly && <span className="faint">not sending?</span>}
                   {!readOnly && (
                     <>
                       {/* Both mean "I'm done with this one" — so they move you on. */}
@@ -2653,6 +3882,25 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                       </button>
                     </>
                   )}
+                  {/* Outside the `readOnly` fence the other two sit behind: a
+                      review you have already sent can still be the one GitHub
+                      keeps asking you about, and passing it on is the answer. */}
+                  <button
+                    className="btn btn-sm"
+                    title={
+                      busyWithRun
+                        ? "Wait for the run to finish — a handoff settles the row it is rewriting"
+                        : "Move GitHub's review request to somebody else, and settle this row"
+                    }
+                    onClick={() => setHandingOff(true)}
+                    // The route refuses both of these. Refusing here too is the
+                    // difference between not offering it and letting someone
+                    // fill the dialog in for a 409.
+                    disabled={handingOff || busyWithRun}
+                  >
+                    <Icon name="arrowRight" />
+                    hand off
+                  </button>
                   <a className="btn btn-sm" href={exportUrl(reviewKey)}>
                     <Icon name="download" />
                     export .md
@@ -2660,6 +3908,19 @@ export function Detail({ reviewKey }: { reviewKey: string }) {
                 </>
               }
             />
+            {/* A modal rather than another row in this column: it is a write to
+                GitHub being composed, and the page behind it is a review you are
+                deciding not to read. Rendered here only because this is where
+                the button is — a modal dialog lives in the top layer, so where
+                it sits in the markup decides nothing about where it appears. */}
+            {handingOff && (
+              <HandoffDialog
+                artifact={artifact}
+                reviewKey={reviewKey}
+                onConfirm={handOff}
+                onCancel={() => setHandingOff(false)}
+              />
+            )}
           </div>
         </aside>
       </div>

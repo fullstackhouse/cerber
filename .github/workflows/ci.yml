@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -12,12 +13,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # package.json says Node 20+, so 20 is tested and not merely claimed. 22 is
-    # what the maintainers run; the release job builds on it.
+    # package.json says Node 22+, so the 22 floor is tested and not merely
+    # claimed; the release job builds on it. 24 is the current LTS.
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,12 +35,44 @@ jobs:
   # commits since the last tag, bumps the version, tags, writes the GitHub
   # release notes, and publishes to npm over OIDC. Commits that change nothing
   # users can see (chore/docs/refactor/test) release nothing.
+  #
+  # Nothing here pushes to main, which is why the job's own GITHUB_TOKEN is
+  # enough. It writes two refs, neither of them a branch: the tag, and a note
+  # under refs/notes/semantic-release-* that records the release channel. The
+  # GitHub release and the npm publish are an API call and an OIDC exchange.
+  # The ruleset on main requires a pull request, and Actions cannot be excused —
+  # it is not an installable app, so the rulesets API refuses it as a bypass
+  # actor outright. A release that needs a branch push would therefore need a
+  # stored credential that can push to main; this one doesn't. See .releaserc.md.
   release:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Two merges in quick succession would otherwise run two releases at once,
+    # both computing the same next version from the same newest tag. Usually the
+    # loser is harmless — semantic-release checks `isBranchUpToDate` and
+    # declines to publish from a checkout behind the remote — but the window
+    # where neither has tagged yet is real, and the loser then fails at the tag
+    # push.
+    #
+    # `cancel-in-progress: false` is the half that matters. A release cancelled
+    # between its tag push and its publish leaves the tag standing with nothing
+    # behind it, which is the state here that needs a human judgement;
+    # `.releaserc.md` has the recovery. Note this serialises rather than queues: Actions keeps
+    # one run pending per group and cancels an older *pending* one, which is
+    # safe because whichever run survives releases every commit since the tag.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    # A timeout cannot avoid the stranded-tag state: Actions kills a wedged job
+    # at its own 360-minute default anyway, in exactly that state. All a
+    # timeout changes is how long a wedge holds this group — and since the
+    # group is serialised, that is how long every later release waits. So have
+    # one, generously above the ~1 minute a release actually takes, and accept
+    # that a wedge past the tag push needs `.releaserc.md` either way.
+    timeout-minutes: 30
     permissions:
-      contents: write # bump commit, tag, GitHub release
+      contents: write # tag, GitHub release
       issues: write # release comments
       pull-requests: write # release comments
       id-token: write # npm trusted publishing + provenance
@@ -60,3 +93,54 @@ jobs:
         run: pnpm exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Every non-draft PR from this repo publishes what it would ship, so a reviewer
+  # can run it: <last tag>-pr.<N>.<sha> under dist-tag pr-<N>. Fork PRs get no
+  # OIDC token, so they are skipped. Published versions are permanent; the
+  # dist-tag moves. The version is set in the working tree only, so the
+  # sentinel guard in prepublishOnly lets it through, as it does in release.
+  preview:
+    runs-on: ubuntu-latest
+    needs: test
+    if: >-
+      github.event_name == 'pull_request'
+      && !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for the last tag
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Install latest npm for OIDC support
+        run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - id: version
+        name: Preview version
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          last="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)"
+          version="${last#v}-pr.${PR}.${SHA:0:7}"
+          # A re-run of the same commit must not fail on a version that already exists.
+          if npm view "@fullstackhouse/cerber@${version}" version >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "${version} is already published"; exit 0
+          fi
+          npm version "$version" --no-git-tag-version
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - if: steps.version.outputs.skip == 'false'
+        run: npm publish --tag "pr-${{ github.event.pull_request.number }}"
+      - if: steps.version.outputs.skip == 'false'
+        run: echo "Install with \`npm i -g @fullstackhouse/cerber@pr-${{ github.event.pull_request.number }}\` (${{ steps.version.outputs.version }})" >> "$GITHUB_STEP_SUMMARY"
+

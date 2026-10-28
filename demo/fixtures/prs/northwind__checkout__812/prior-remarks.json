@@ -1,0 +1,41 @@
+{
+  "threads": [
+    {
+      "id": "PRRT_demo_812_1",
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "src/payments/webhook-handler.ts",
+      "line": 31,
+      "comments": {
+        "nodes": [
+          {
+            "fullDatabaseId": "5100000812",
+            "url": "https://github.com/northwind/checkout/pull/812#discussion_r5100000812",
+            "createdAt": "2026-09-19T08:40:00Z",
+            "body": "After the last retry this returns 200, which tells Stripe the event was handled. Stripe will not redeliver it, so the capture is dropped. Return a 5xx here so Stripe tries again later.",
+            "author": { "login": "review-bot", "__typename": "Bot" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "PRRT_demo_812_2",
+      "isResolved": true,
+      "isOutdated": false,
+      "path": "src/payments/webhook-handler.ts",
+      "line": 14,
+      "comments": {
+        "nodes": [
+          {
+            "fullDatabaseId": "5100000813",
+            "url": "https://github.com/northwind/checkout/pull/812#discussion_r5100000813",
+            "createdAt": "2026-09-19T09:05:00Z",
+            "body": "Can a redelivery of the same event get past `inFlight`? It is cleared in `finally`, so I think only overlapping deliveries are stopped.",
+            "author": { "login": "tomek-r", "__typename": "User" }
+          }
+        ]
+      }
+    }
+  ],
+  "reviews": []
+}

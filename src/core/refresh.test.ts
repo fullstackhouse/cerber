@@ -33,6 +33,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id">): Comment {
     editedByUser: false,
     originalLine: null,
     drifted: false,
+    alreadyRaised: null,
     ...overrides,
   };
 }
@@ -70,7 +71,10 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     run: null,
     sent: null,
     refresh: null,
+    priorSends: [],
     filed: null,
+    handoff: null,
+    raisedCheck: null,
     settledAt: null,
     calibration: null,
   chat: [],
@@ -160,6 +164,13 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
     expect(merged.summary).toBe("the new draft");
   });
 
+  // Written by the claim at the top of the run, minutes after `fresh` was
+  // built — so the disk is the only copy of it.
+  it("keeps the sends an earlier draft of this row made", () => {
+    const earlier = { at: "2026-08-20T09:00:00.000Z", event: "COMMENT" as const, url: "u", auto: false };
+    expect(mergeRunResult(fresh, makeArtifact({ priorSends: [earlier] })).priorSends).toEqual([earlier]);
+  });
+
   it("does not reopen a decision you made while the run worked", () => {
     for (const status of ["reviewed", "skipped"] as const) {
       expect(mergeRunResult(fresh, makeArtifact({ status })).status).toBe(status);
@@ -171,6 +182,11 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
       { id: "t1", role: "user" as const, at: "2026-08-21T10:01:00.000Z", body: "why?", refs: [], revisions: [], refused: [], costUsd: null },
     ];
     expect(mergeRunResult(fresh, makeArtifact({ chat })).chat).toEqual(chat);
+  });
+
+  it("keeps what you marked as viewed", () => {
+    const viewed = { "src/a.ts": "0badf00d" };
+    expect(mergeRunResult(fresh, makeArtifact({ viewed })).viewed).toEqual(viewed);
   });
 
   it("otherwise takes the run's own status", () => {

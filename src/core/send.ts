@@ -1,5 +1,8 @@
 import { Artifact, Calibration, Comment, Verdict } from "./artifact.js";
+import type { ReplyOutcome } from "./gh.js";
+import { isOwnPr } from "./own.js";
 import { newSideLines } from "./diff.js";
+import { sendTreatment } from "./raised.js";
 import { withGrade } from "./severity.js";
 
 export type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
@@ -8,6 +11,33 @@ export function eventForRecommendation(rec: Verdict["recommendation"]): ReviewEv
   return { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" }[
     rec
   ] as ReviewEvent;
+}
+
+/**
+ * Why Send refuses this event on this PR, or null when it may go.
+ *
+ * Your own PR takes a comment and nothing else: GitHub refuses an approve or a
+ * change request from a PR's author, and GitHub's error after the click is a
+ * worse place to learn that than here.
+ * A login nobody could fetch refuses nothing; GitHub is still the last word.
+ */
+export function ownPrRefusal(
+  pr: { author: string },
+  event: ReviewEvent,
+  login: string | null,
+): string | null {
+  if (event === "COMMENT" || !isOwnPr(pr, login)) return null;
+  const what = event === "APPROVE" ? "an approve" : "a change request";
+  return `this is your own PR, and GitHub takes no ${what} from its author — send it as a comment`;
+}
+
+/** What Send posts by default: the verdict's event, except on your own PR. */
+export function defaultSendEvent(
+  artifact: Pick<Artifact, "pr" | "verdict">,
+  login: string | null,
+): ReviewEvent {
+  if (isOwnPr(artifact.pr, login)) return "COMMENT";
+  return artifact.verdict ? eventForRecommendation(artifact.verdict.recommendation) : "COMMENT";
 }
 
 export interface InlineComment {
@@ -23,6 +53,13 @@ export interface ReviewPayload {
   comments: InlineComment[];
   /** Comments that could not be attached inline (no/invalid line) — folded into the body. */
   folded: Comment[];
+  /**
+   * Findings somebody else already raised, answered in their thread instead of
+   * posted again. Posted after the review, one reply each (`postReplies`).
+   */
+  replies: { commentId: string; replyTo: string; body: string }[];
+  /** Findings somebody else already raised and nobody decided to post: left out. */
+  held: Comment[];
   /** Head commit the review was drafted against; anchors inline comments there. */
   commitId?: string;
 }
@@ -33,8 +70,10 @@ function graded(c: Comment): string {
 
 /**
  * Build the GitHub review payload from an artifact.
- * Includes every comment that is not dropped. Comments whose line is not part
- * of the diff (GitHub would reject them) are folded into the review body.
+ * Includes every comment that is not dropped, except the ones somebody else
+ * already raised: those are held back or answered in that reviewer's thread,
+ * as `sendTreatment` says. Comments whose line is not part of the diff (GitHub
+ * would reject them) are folded into the review body.
  */
 export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): ReviewPayload {
   const active = artifact.comments.filter((c) => c.status !== "dropped");
@@ -42,7 +81,18 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
 
   const inline: InlineComment[] = [];
   const folded: Comment[] = [];
+  const replies: ReviewPayload["replies"] = [];
+  const held: Comment[] = [];
   for (const c of active) {
+    const treatment = sendTreatment(c);
+    if (treatment === "hold") {
+      held.push(c);
+      continue;
+    }
+    if (treatment === "reply" && c.alreadyRaised?.where.kind === "thread") {
+      replies.push({ commentId: c.id, replyTo: c.alreadyRaised.where.replyTo, body: graded(c) });
+      continue;
+    }
     // A drifted comment's line number may still exist in the diff, but it now
     // holds different code — posting there would point the author at something
     // the comment was never about.
@@ -88,6 +138,8 @@ export function buildReviewPayload(artifact: Artifact, event: ReviewEvent): Revi
     body: artifact.bodyOverride ?? parts.join("\n").trim(),
     comments: inline,
     folded,
+    replies,
+    held,
     commitId: artifact.pr.headSha || undefined,
   };
 }
@@ -104,4 +156,30 @@ export function computeCalibration(artifact: Artifact, event: ReviewEvent): Cali
     aiCommentsEdited: ai.filter((c) => c.editedByUser).length,
     userCommentsAdded: artifact.comments.filter((c) => c.origin === "user").length,
   };
+}
+
+/**
+ * Write how a Send's replies went onto the comments they answered for. A reply
+ * that failed leaves `replied` null, which is what the cockpit reads to say so.
+ */
+export function recordReplies(artifact: Artifact, outcomes: ReplyOutcome[]): Artifact {
+  const posted = new Map(outcomes.filter((o) => o.error === null).map((o) => [o.commentId, o]));
+  if (posted.size === 0) return artifact;
+  return {
+    ...artifact,
+    comments: artifact.comments.map((c) => {
+      const o = posted.get(c.id);
+      return o && c.alreadyRaised ? { ...c, alreadyRaised: { ...c.alreadyRaised, replied: { at: o.at, url: o.url } } } : c;
+    }),
+  };
+}
+
+/** "2 replies did not post: …" — or null when every one did. */
+export function describeReplyFailures(outcomes: ReplyOutcome[]): string | null {
+  const failed = outcomes.filter((o) => o.error !== null);
+  if (failed.length === 0) return null;
+  return (
+    `${failed.length} ${failed.length === 1 ? "reply" : "replies"} in an existing thread did not post: ` +
+    failed.map((o) => o.error).join("; ")
+  );
 }

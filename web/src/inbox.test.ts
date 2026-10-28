@@ -3,16 +3,21 @@ import type { Tab } from "./inbox";
 import {
   ageLabel,
   bucket,
+  commentsCell,
+  exceptionsLabel,
   hiddenAwaiting,
   hiddenAwaitingNote,
   filedOn,
+  activityAt,
   isArchived,
+  ownLast,
   replyOf,
   replyTag,
   requestTag,
   rowTag,
   shownTab,
   sortReviews,
+  startsOwnGroup,
   strip,
   tabOf,
   verdictCell,
@@ -392,6 +397,23 @@ describe("a draft cerber filed rather than you", () => {
     expect(rowTag(row({ status: "reviewed" }))).toBe("reviewed");
   });
 
+  it("says outright when the poll is not going to draft the row's repo", () => {
+    const waiting = row({ status: "awaiting" });
+    const repo = `${waiting.pr.owner}/${waiting.pr.repo}`;
+    expect(strip(waiting, daemon({ autoReviewRepos: { [repo]: false } })).reasoning).toContain(
+      `Auto-review is off for ${repo}`,
+    );
+    expect(strip(waiting, daemon()).reasoning).toContain("still queued");
+  });
+
+  // Off everywhere is not an exception for this repo, and shouldn't read like one.
+  it("doesn't name the repo when auto-review is simply off", () => {
+    const waiting = row({ status: "awaiting" });
+    const s = strip(waiting, daemon({ autoReview: false }));
+    expect(s.reasoning).toContain("Auto-review is off, so it waits");
+    expect(s.reasoning).not.toContain(`${waiting.pr.owner}/${waiting.pr.repo}`);
+  });
+
   it("says why the row is filed, not what the verdict thought", () => {
     const s = strip(filed(), daemon());
     expect(s.reasoning).toContain("GitHub stopped asking you");
@@ -427,24 +449,87 @@ describe("a draft cerber filed rather than you", () => {
   });
 });
 
+describe("a review you handed to somebody else", () => {
+  const handed = (over: Partial<NonNullable<ReviewListItem["handoff"]>> = {}) =>
+    row({
+      status: "skipped",
+      handoff: { at: "2026-08-20T12:00:00.000Z", to: "maks", withdrewYours: true, note: null, ...over },
+    });
+
+  it("names who has it, rather than calling the row skipped", () => {
+    // A handed-off row *is* skipped, and "skipped" alone reads as work dropped
+    // rather than work passed on.
+    expect(rowTag(handed())).toBe("handed to @maks");
+  });
+
+  it("outranks cerber's own filing — you did this, cerber didn't", () => {
+    const both = handed();
+    both.filed = { at: "2026-08-20T13:00:00.000Z", reason: "request-withdrawn", review: null, reply: null };
+    expect(rowTag(both)).toBe("handed to @maks");
+  });
+
+  it("explains an open request GitHub has not caught up on", () => {
+    // The handoff took your request off the PR, so a row still listed is the
+    // search lagging the swap — or somebody asking you again since. Either way
+    // the thing to say is who has it, not "you haven't replied".
+    const tag = requestTag(handed(), "none");
+    expect(tag.label).toBe("handed to @maks");
+    expect(tag.title).toContain("took your own review request off");
+  });
+
+  it("says plainly when cerber could not take your own request off", () => {
+    const tag = requestTag(handed({ withdrewYours: false }), "none");
+    expect(tag.title).toContain("asking both of you");
+  });
+
+  it("does not call it skipped in the strip either", () => {
+    // The row *is* `skipped`, and "you skipped this" under a tag reading
+    // "handed to @maks" is the one thing that did not happen.
+    const { reasoning, meta } = strip(handed(), null);
+    expect(meta.join(" ")).toContain("you handed this to @maks");
+    expect(meta.join(" ")).not.toContain("you skipped this");
+    expect(reasoning).toContain("GitHub asks @maks for this review now");
+    expect(reasoning).toContain("never sent");
+  });
+
+  it("does not promise a draft on a row that never had one", () => {
+    // The queue offers a handoff on an `awaiting` stub and on a failed run.
+    const bare = handed();
+    bare.commentCount = 0;
+    bare.verdict = null;
+    expect(strip(bare, null).reasoning).toContain("Nothing was drafted here");
+    expect(strip(bare, null).reasoning).not.toContain("yours to read");
+  });
+
+  it("still says where the PR went on a row that was also sent", () => {
+    // SPEC §17.6 ranks the handoff above the status, and the sent branch
+    // returns first — so without this the one row that did both reads like an
+    // ordinary send.
+    const both = handed();
+    both.sent = { at: "2026-08-20T11:00:00.000Z", event: "COMMENT", url: null, auto: false };
+    const { reasoning, meta } = strip(both, null);
+    expect(reasoning).toContain("GitHub asks @maks for it now");
+    expect(meta.join(" ")).toContain("you handed this to @maks");
+  });
+
+  it("beats a send, because it is the thing that moved the request", () => {
+    const both = handed();
+    both.sent = { at: "2026-08-20T11:00:00.000Z", event: "COMMENT", url: null, auto: false };
+    expect(requestTag(both, "none").label).toBe("handed to @maks");
+  });
+});
+
 describe("sortReviews", () => {
-  it("puts what wants you most on top, newest first inside a band", () => {
+  it("puts the most recent activity on top, whatever the status", () => {
+    const at = (h: number) => `2026-08-19T${String(h).padStart(2, "0")}:00:00.000Z`;
     const list = [
-      row({ key: "sent", status: "sent" }),
-      row({ key: "running", status: "running" }),
-      row({ key: "failed", status: "failed" }),
-      row({ key: "ready-old", status: "ready", updatedAt: "2026-08-01T12:00:00.000Z" }),
-      row({ key: "awaiting", status: "awaiting" }),
-      row({ key: "ready-new", status: "ready", updatedAt: "2026-08-19T12:00:00.000Z" }),
+      row({ key: "ready-old", status: "ready", updatedAt: at(1) }),
+      row({ key: "sent", status: "sent", updatedAt: at(5) }),
+      row({ key: "awaiting-new", status: "awaiting", updatedAt: at(2), pr: { ...row().pr, updatedAt: at(9) } }),
+      row({ key: "failed", status: "failed", updatedAt: at(3) }),
+      row({ key: "ready-new", status: "ready", updatedAt: at(7) }),
     ];
-    expect(sortReviews(list).map((r) => r.key)).toEqual([
-      "ready-new",
-      "ready-old",
-      "awaiting",
-      "running",
-      "failed",
-      "sent",
-    ]);
+    expect(sortReviews(list).map((r) => r.key)).toEqual(["awaiting-new", "ready-new", "sent", "failed", "ready-old"]);
   });
 });
 
@@ -486,6 +571,20 @@ describe("verdictCell", () => {
       sent: { at: "2026-08-14T09:00:00.000Z", event: "APPROVE", url: null, auto: true },
     });
     expect(verdictCell(sent)).toEqual({ label: "sent · approve", tone: "sent" });
+  });
+});
+
+describe("commentsCell", () => {
+  it("shows a dash while there is no draft to count", () => {
+    expect(commentsCell(row({ status: "awaiting", verdict: null, commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ status: "running", commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ status: "failed", verdict: null, commentCount: 0 }))).toBe("—");
+    expect(commentsCell(row({ verdict: null, commentCount: 0 }))).toBe("—");
+  });
+
+  it("shows 0 for a draft with no comments, not a blank cell", () => {
+    expect(commentsCell(row({ commentCount: 0 }))).toBe("0");
+    expect(commentsCell(row({ commentCount: 3 }))).toBe("3");
   });
 });
 
@@ -546,5 +645,95 @@ describe("strip", () => {
     );
     expect(s.reasoning).toContain("Sent to GitHub as approve");
     expect(s.meta).toContain("auto-sent by the daemon");
+  });
+});
+
+describe("the queue strip's count of per-repo exceptions", () => {
+  it("says nothing with no exceptions", () => {
+    expect(exceptionsLabel(true, {})).toBe("");
+  });
+
+  it("counts the repos that go against the default, and only those", () => {
+    expect(exceptionsLabel(true, { "acme/a": false, "acme/b": false, "acme/c": true })).toBe(" · 2 repos on click");
+    expect(exceptionsLabel(false, { "acme/a": true })).toBe(" · 1 repo auto");
+    expect(exceptionsLabel(true, { "acme/c": true })).toBe("");
+  });
+});
+
+describe("your own PRs in the queue", () => {
+  const at = (h: number) => `2026-08-19T${String(h).padStart(2, "0")}:00:00.000Z`;
+  const theirsReady = row({ id: "acme/web#1", key: "theirs-ready", status: "ready", updatedAt: at(4) });
+  const theirsQueued = row({ id: "acme/web#2", key: "theirs-queued", status: "awaiting", updatedAt: at(3) });
+  const mineReady = row({ id: "acme/web#3", key: "mine-ready", status: "ready", own: true, updatedAt: at(9) });
+  const mineQueued = row({ id: "acme/web#4", key: "mine-queued", status: "awaiting", own: true, updatedAt: at(8) });
+  const list = [mineReady, theirsQueued, mineQueued, theirsReady];
+
+  it("lists them after every PR awaiting you, in every live tab and on the walk", () => {
+    const b = bucket(list, daemon());
+    expect(b.inbox.map((r) => r.key)).toEqual(["theirs-ready", "theirs-queued", "mine-ready", "mine-queued"]);
+    expect(b.awaiting.map((r) => r.key)).toEqual(["theirs-queued", "mine-queued"]);
+    expect(b.drafted.map((r) => r.key)).toEqual(["theirs-ready", "mine-ready"]);
+    // The ‹ › arrows walk the same order the table draws.
+    expect(walkable(list).map((r) => r.key)).toEqual(b.inbox.map((r) => r.key));
+  });
+
+  it("heads the group once, at its first row", () => {
+    const rows = ownLast(list);
+    expect(rows.map((_, i) => startsOwnGroup(rows, i))).toEqual([false, false, true, false]);
+    // An inbox holding only your own PRs still says whose they are.
+    expect(startsOwnGroup([mineQueued], 0)).toBe(true);
+    expect(startsOwnGroup([theirsReady], 0)).toBe(false);
+  });
+
+  it("says an undrafted one waits for you to ask, and that it sends as a comment", () => {
+    const s = strip(mineQueued, daemon());
+    expect(s.reasoning).toContain("Your own PR");
+    expect(s.reasoning).toContain("comment");
+    expect(s.meta).toContain("press r to review now");
+  });
+
+  it("never offers a drafted one as an auto-send candidate", () => {
+    const meta = strip(mineReady, daemon()).meta;
+    expect(meta).toContain("your PR — sends as a comment");
+    expect(meta.join(" ")).not.toContain("auto-send");
+    expect(strip(theirsReady, daemon()).meta.join(" ")).toContain("auto-send candidate");
+  });
+
+  it("treats a row from a server too old to say as somebody else's", () => {
+    const mine = row({ key: "mine", own: true });
+    const unsaid = row({ key: "unsaid", own: undefined });
+    expect(ownLast([mine, unsaid]).map((r) => r.key)).toEqual(["unsaid", "mine"]);
+    expect(startsOwnGroup([unsaid], 0)).toBe(false);
+  });
+});
+
+describe("activityAt — what the upd column and the sort read", () => {
+  const PR_AT = "2026-08-10T09:00:00.000Z";
+  const FOUND_AT = "2026-08-19T12:00:00.000Z";
+
+  it("is the PR's own last activity on a row nobody has drafted", () => {
+    // A stub's updatedAt is only when the poll found it — the same minute for
+    // every row discovered together.
+    const stub = row({ status: "awaiting", updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } });
+    expect(activityAt(stub)).toBe(PR_AT);
+  });
+
+  it("is the review's on a drafted row, and on a stub from a server too old to say", () => {
+    expect(activityAt(row({ status: "ready", updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } }))).toBe(
+      FOUND_AT,
+    );
+    expect(activityAt(row({ status: "awaiting", updatedAt: FOUND_AT }))).toBe(FOUND_AT);
+  });
+
+  it("orders undrafted rows by PR activity, newest first — your PRs and the rest alike", () => {
+    const stub = (key: string, prAt: string, own = false) =>
+      row({ key, status: "awaiting", updatedAt: FOUND_AT, own, pr: { ...row().pr, updatedAt: prAt } });
+    const list = [
+      stub("mine-old", "2026-07-01T00:00:00.000Z", true),
+      stub("theirs-old", "2026-07-02T00:00:00.000Z"),
+      stub("mine-new", "2026-08-15T00:00:00.000Z", true),
+      stub("theirs-new", "2026-08-16T00:00:00.000Z"),
+    ];
+    expect(walkable(list).map((r) => r.key)).toEqual(["theirs-new", "theirs-old", "mine-new", "mine-old"]);
   });
 });

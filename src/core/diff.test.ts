@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   diffLineCounts,
+  fileFingerprint,
   newSideLineText,
   oldSideLineText,
   patchForFiles,
@@ -99,5 +100,37 @@ describe("diffLineCounts", () => {
 
   it("has nothing to count in an empty diff", () => {
     expect(diffLineCounts("").size).toBe(0);
+  });
+});
+
+describe("fileFingerprint", () => {
+  const patch = `diff --git a/src/a.ts b/src/a.ts
+index 111..222 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,3 +1,4 @@
+ const a = 1;
++const b = 2;
+ export { a };`;
+
+  it("ignores what a rebase moves: blob ids and hunk positions", () => {
+    const rebased = patch.replace("index 111..222", "index 999..888").replace("@@ -1,3 +1,4 @@", "@@ -10,3 +10,4 @@");
+    expect(fileFingerprint(rebased)).toBe(fileFingerprint(patch));
+  });
+
+  it("changes when the change does", () => {
+    expect(fileFingerprint(patch.replace("const b = 2;", "const b = 3;"))).not.toBe(fileFingerprint(patch));
+  });
+
+  it("counts a removed `-- comment`, which reads like a file header", () => {
+    const sql = (removed: string) =>
+      `diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n select 1;\n--- ${removed}`;
+    expect(fileFingerprint(sql("old note"))).not.toBe(fileFingerprint(sql("other note")));
+  });
+
+  it("tells two versions of a binary apart by the only line that differs", () => {
+    const binary = (index: string) =>
+      `diff --git a/logo.png b/logo.png\nindex ${index} 100644\nBinary files a/logo.png and b/logo.png differ`;
+    expect(fileFingerprint(binary("111..222"))).not.toBe(fileFingerprint(binary("111..333")));
   });
 });

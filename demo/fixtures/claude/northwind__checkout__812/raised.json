@@ -1,0 +1,16 @@
+{
+  "pairs": [
+    {
+      "draftAt": "src/payments/webhook-handler.ts:30",
+      "earlierBy": "review-bot",
+      "earlierAt": "src/payments/webhook-handler.ts",
+      "reason": "Both say that answering 200 after the last retry stops Stripe redelivering, so the payment is lost. The draft adds that this is the same failure the PR set out to fix."
+    },
+    {
+      "draftAt": "src/payments/webhook-handler.ts:15",
+      "earlierBy": "tomek-r",
+      "earlierAt": "src/payments/webhook-handler.ts",
+      "reason": "Both say `inFlight` is cleared in `finally`, so a redelivery that arrives after the first finishes is captured again."
+    }
+  ]
+}
