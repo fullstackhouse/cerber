@@ -1238,6 +1238,13 @@ button {
     overflow-y: auto;
   }
 
+  /* Only the log gives up height. A textarea scrolls, so a flex column may
+     shrink it to nothing — and it did, a little more with every line the log
+     grew, while you were typing the next message. */
+  .cockpit .chat-panel .card-body > :not(.chat-log) {
+    flex-shrink: 0;
+  }
+
   .cockpit .verdict-bar {
     margin-top: 0;
   }
