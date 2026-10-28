@@ -448,7 +448,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `daemon.poll` | boolean | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | boolean | `true` | draft a review for what the poll finds |
 | `daemon.notify` | boolean | `true` | desktop announcements on this machine (§9.8) |
-| `daemon.intervalMinutes` | positive int | `5` | |
+| `daemon.intervalMinutes` | positive int | `5` | minutes between polls; live (§6.3) |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
 | `daemon.repos` | string[] | `[]` | `owner/repo` filters; empty = everything `gh` can see |
 
@@ -471,8 +471,10 @@ launch.
 
 - The daemon MUST re-read the config on **every poll tick**, so cockpit
   toggles for `poll` and `autoReview` (and `notify`) apply on the next tick
-  without a restart. `intervalMinutes`, `parallel` and `repos` are captured at
-  daemon start and need a restart. Trust rules are re-read by every review run.
+  without a restart. `intervalMinutes` is re-read too, and a change saved from
+  the cockpit reschedules the pending tick at once (last poll's end + new
+  interval); `--interval` pins it for the process. `parallel` and `repos` are
+  captured at daemon start and need a restart. Trust rules are re-read by every review run.
 - CLI `--no-poll`, `--no-auto-review`, `--no-notify`, `--no-trust` **cap** the
   config for that process — effective value = flag AND config — and can never
   re-enable something the config disabled. `--no-source` is the one exception:

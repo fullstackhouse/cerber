@@ -113,6 +113,7 @@ describe("the awaiting list the daemon publishes", () => {
     // Short enough that a second tick lands inside the test, not the interval a
     // real cockpit polls on.
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: false,
     notify: true,
@@ -314,6 +315,7 @@ describe("draft PRs in the inbox", () => {
   const options = {
     repos: [],
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: false,
     notify: true,
@@ -420,6 +422,7 @@ describe("a draft you already answered on GitHub", () => {
   const options = {
     repos: [],
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: false,
     notify: true,
@@ -744,6 +747,7 @@ describe("the tap on the machine when a PR lands", () => {
   const options = {
     repos: [],
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: false,
     notify: true,
@@ -880,6 +884,7 @@ describe("a review you settled, and were asked for again", () => {
   const options = {
     repos: [],
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: false,
     notify: false,
@@ -1218,6 +1223,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
   const options = {
     repos: [],
     intervalMs: 10,
+    intervalFixed: true,
     parallel: 1,
     autoReview: true,
     notify: true,
@@ -1423,5 +1429,62 @@ describe("when the tap comes, with cerber drafting for you", () => {
     config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
     await pollTimes(2);
     expect(notified).not.toHaveBeenCalled();
+  });
+});
+
+describe("the poll interval", () => {
+  const daemonKnobs = {
+    poll: false,
+    autoReview: false,
+    notify: false,
+    intervalMinutes: 2,
+    parallel: 1,
+    repos: [],
+  };
+
+  const options = {
+    repos: [],
+    intervalMs: 5 * 60_000,
+    parallel: 1,
+    autoReview: false,
+    notify: false,
+    autoSend: "shadow" as const,
+    autoSendThreshold: 90,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CERBER_HOME = mkdtempSync(path.join(os.tmpdir(), "cerber-daemon-"));
+    config.mockResolvedValue({ trust: [], daemon: daemonKnobs });
+  });
+
+  const firstPoll = async (handle: DaemonHandle) =>
+    vi.waitFor(() => expect(handle.status().polls).toBe(1));
+
+  it("follows the config's intervalMinutes", async () => {
+    const handle = startDaemon({ ...options, intervalFixed: false });
+    await firstPoll(handle);
+    expect(handle.status().intervalMs).toBe(2 * 60_000);
+    await stopAndDrain(handle);
+  });
+
+  it("keeps the --interval value over the config's", async () => {
+    const handle = startDaemon({ ...options, intervalFixed: true });
+    await firstPoll(handle);
+    expect(handle.status().intervalMs).toBe(5 * 60_000);
+    handle.retime(1);
+    expect(handle.status().intervalMs).toBe(5 * 60_000);
+    await stopAndDrain(handle);
+  });
+
+  // Shortening it from Settings must not wait out the old, longer timer.
+  it("reschedules the waiting poll when retimed", async () => {
+    const handle = startDaemon({ ...options, intervalFixed: false });
+    await firstPoll(handle);
+    const before = Date.parse(handle.status().nextPollAt!);
+    handle.retime(1);
+    expect(handle.status().intervalMs).toBe(60_000);
+    expect(before - Date.parse(handle.status().nextPollAt!)).toBeGreaterThan(50_000);
+    await stopAndDrain(handle);
   });
 });

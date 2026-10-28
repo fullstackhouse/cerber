@@ -583,6 +583,7 @@ program
             intervalMs:
               Math.max(1, opts.interval !== undefined ? Number(opts.interval) || d.intervalMinutes : d.intervalMinutes) *
               60_000,
+            intervalFixed: opts.interval !== undefined,
             parallel: Math.max(1, opts.parallel !== undefined ? Number(opts.parallel) || d.parallel : d.parallel),
             model: opts.model,
             withSource: opts.source,

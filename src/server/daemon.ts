@@ -36,6 +36,12 @@ export interface DaemonOptions {
   /** Repos to watch (owner/repo). Empty = everything your gh account can see. */
   repos: string[];
   intervalMs: number;
+  /**
+   * True when `--interval` pinned `intervalMs` for this run. Otherwise the
+   * config's daemon.intervalMinutes is re-read every poll, and `retime` applies
+   * a cockpit change to the timer already waiting.
+   */
+  intervalFixed: boolean;
   parallel: number;
   model?: string;
   /** False reviews the diff alone, with no local checkout. Defaults to on. */
@@ -88,6 +94,8 @@ export interface DaemonStatus {
   polling: boolean;
   repos: string[];
   intervalMs: number;
+  /** `--interval` pinned it, so the config's value is ignored for this run. */
+  intervalFixed: boolean;
   /** False when the config's daemon.poll toggle idles the loop. */
   pollEnabled: boolean;
   /**
@@ -130,6 +138,8 @@ export interface DaemonHandle {
    * its first poll is already running while the port is being bound.
    */
   cockpitAt: (url: string | null) => void;
+  /** A new interval from Settings, applied to the wait already under way. */
+  retime: (minutes: number) => void;
 }
 
 /**
@@ -351,11 +361,13 @@ const STATE_REFRESH_MIN_MS = 30 * 60_000;
 export function startDaemon(opts: DaemonOptions): DaemonHandle {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
+  let lastPollEndedAt = Date.now();
   const status: DaemonStatus = {
     enabled: true,
     polling: false,
     repos: opts.repos,
     intervalMs: opts.intervalMs,
+    intervalFixed: opts.intervalFixed,
     pollEnabled: true,
     // Claims nothing until a poll has read the config, so the cockpit's bell
     // keeps its own counsel for the few seconds that takes.
@@ -891,6 +903,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // proceeding on guessed defaults.
       const config = await loadConfig();
       const knobs = config.daemon;
+      if (!opts.intervalFixed) status.intervalMs = knobs.intervalMinutes * 60_000;
       const autoReview = opts.autoReview && knobs.autoReview;
       status.pollEnabled = knobs.poll;
       // What the cockpit's bell defers to: a loop that isn't polling announces
@@ -953,11 +966,15 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     } finally {
       status.polls++;
       status.polling = false;
-      if (!stopped) {
-        status.nextPollAt = new Date(Date.now() + opts.intervalMs).toISOString();
-        timer = setTimeout(poll, opts.intervalMs);
-      }
+      lastPollEndedAt = Date.now();
+      if (!stopped) schedule(status.intervalMs);
     }
+  }
+
+  function schedule(delayMs: number): void {
+    if (timer) clearTimeout(timer);
+    status.nextPollAt = new Date(Date.now() + delayMs).toISOString();
+    timer = setTimeout(poll, delayMs);
   }
 
   async function handleAutoSend(artifact: Artifact): Promise<void> {
@@ -1011,6 +1028,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     status: () => ({ ...status }),
     cockpitAt: (url) => {
       cockpitUrl = url;
+    },
+    retime: (minutes) => {
+      if (opts.intervalFixed || stopped) return;
+      status.intervalMs = minutes * 60_000;
+      // Mid-poll the finally block schedules with the new value anyway.
+      if (!status.polling) schedule(Math.max(0, lastPollEndedAt + status.intervalMs - Date.now()));
     },
     stop: () => {
       stopped = true;

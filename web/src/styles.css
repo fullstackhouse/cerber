@@ -2334,6 +2334,17 @@ button {
   margin: 8px 0;
 }
 
+.interval-input {
+  width: 4.5em;
+  margin: 0 6px;
+  font: inherit;
+  padding: 3px 6px;
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
 .trust-add {
   display: flex;
   gap: 8px;

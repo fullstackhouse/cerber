@@ -138,6 +138,7 @@ export async function buildApp(
       const config = await loadConfig();
       const daemon = DaemonConfigSchema.parse({ ...config.daemon, ...body });
       await saveConfig({ ...config, daemon });
+      opts.daemon?.retime(daemon.intervalMinutes);
       return c.json({ path: configPath(), trust: trustView(config.trust), daemon });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) {

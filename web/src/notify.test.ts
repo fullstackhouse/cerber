@@ -225,6 +225,7 @@ describe("who announces an arrival when both could", () => {
     polling: false,
     repos: [],
     intervalMs: 300_000,
+    intervalFixed: false,
     pollEnabled: true,
     notify: true,
     autoReview: true,

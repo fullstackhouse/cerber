@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, updateDaemonConfig, updateTrustRule } from "./api";
+import { fetchConfig, fetchDaemonStatus, updateDaemonConfig, updateTrustRule } from "./api";
 import { NotifyState, useNotifyState } from "./notify";
 import { ThemeChoice, useTheme } from "./theme";
 import { ConfigView } from "./types";
@@ -36,10 +36,19 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [intervalDraft, setIntervalDraft] = useState("");
+  const [intervalFixed, setIntervalFixed] = useState(false);
 
   useEffect(() => {
     fetchConfig().then(setConfig).catch((e) => setError(message(e)));
+    fetchDaemonStatus()
+      .then((s) => setIntervalFixed(s.enabled && s.intervalFixed))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (config) setIntervalDraft(String(config.daemon.intervalMinutes));
+  }, [config]);
 
   const apply = (p: Promise<ConfigView>) => {
     setBusy(true);
@@ -51,6 +60,16 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
 
   if (error && !config) return <p className="error">{error}</p>;
   if (!config) return <p className="muted">Loading…</p>;
+
+  // On blur/Enter rather than per keystroke: typing "15" would save "1" first.
+  const saveInterval = () => {
+    const minutes = Number(intervalDraft);
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      setIntervalDraft(String(config.daemon.intervalMinutes));
+    } else if (minutes !== config.daemon.intervalMinutes) {
+      apply(updateDaemonConfig({ intervalMinutes: minutes }));
+    }
+  };
 
   return (
     <div className="settings">
@@ -70,7 +89,24 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
           disabled={busy}
           onChange={(e) => apply(updateDaemonConfig({ poll: e.target.checked }))}
         />{" "}
-        poll GitHub for PRs awaiting my review (every {config.daemon.intervalMinutes}m)
+        poll GitHub for PRs awaiting my review
+      </label>
+      <label className="inbox-toggle">
+        poll every
+        <input
+          type="number"
+          className="interval-input"
+          min={1}
+          step={1}
+          value={intervalDraft}
+          disabled={busy || !config.daemon.poll || intervalFixed}
+          onChange={(e) => setIntervalDraft(e.target.value)}
+          onBlur={saveInterval}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveInterval();
+          }}
+        />
+        minutes{intervalFixed && <span className="muted"> (set by --interval for this run)</span>}
       </label>
       <label className="inbox-toggle">
         <input
@@ -82,7 +118,7 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         draft a review automatically (off: awaiting PRs wait for a click)
       </label>
       <p className="muted">
-        Interval, concurrency and a repo filter live in <code>{config.path}</code> under{" "}
+        Concurrency and a repo filter live in <code>{config.path}</code> under{" "}
         <code>daemon</code> — hand-editable, like everything here.
       </p>
 
