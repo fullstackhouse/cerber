@@ -1521,6 +1521,36 @@ function ChatPanel({
   const inFlight = pending != null && pending.error == null;
   const busy = starting || inFlight;
 
+  // Where the log scrolls inside itself (the wide layout), the newest turn is
+  // the one you came for: it opens at the bottom, and goes back there when you
+  // ask or steer something, or the turn ends either way. In between it follows
+  // the progress only while you are at the bottom — scrolled up to re-read, you
+  // stay put. Narrower, the page scrolls instead and none of this moves anything.
+  const log = useRef<HTMLDivElement | null>(null);
+  const pinned = useRef(true);
+  const toBottom = () => {
+    const el = log.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+  const asked = pending != null;
+  useLayoutEffect(() => {
+    pinned.current = true;
+    toBottom();
+  }, [reviewKey, chat.length, asked, pending?.steers?.length, pending?.error]);
+  useLayoutEffect(() => {
+    if (pinned.current) toBottom();
+  }, [pending?.progress.length]);
+  // The log also shrinks under you — the preview opening below the box as you
+  // type — which would leave the last line just out of view.
+  const hasLog = chat.length > 0 || asked;
+  useEffect(() => {
+    const el = log.current;
+    if (!el) return;
+    const watch = new ResizeObserver(() => pinned.current && toBottom());
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [hasLog]);
+
   const start = (message: string, withRefs: ChatRef[], onStarted?: () => void) => {
     if (!message || busy) return;
     setStarting(true);
@@ -1572,8 +1602,15 @@ function ChatPanel({
       </header>
 
       <div className="card-body">
-        {(chat.length > 0 || pending) && (
-          <div className="chat-log">
+        {hasLog && (
+          <div
+            className="chat-log"
+            ref={log}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+            }}
+          >
             {chat.map((t) => (
               <ChatTurnView key={t.id} turn={t} artifact={artifact} />
             ))}
