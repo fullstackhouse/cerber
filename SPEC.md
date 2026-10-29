@@ -838,7 +838,10 @@ that is every stub, so reaping waits for a poll that knows it.
 
 Non-stub artifacts get their PR state re-checked on a leash: at most 10
 artifacts per poll, each at most once per 30 minutes (in-memory bookkeeping; a
-restart merely re-checks sooner). A closed/merged PR gets `pr.state` (and
+restart merely re-checks sooner). An artifact that was in the previous poll's
+search results and is absent now is checked on this poll, outside both bounds —
+dropping out of the search is how a merge first shows. A poll whose own-PR
+search failed does not count the user's own PRs as dropped out. A closed/merged PR gets `pr.state` (and
 `isDraft`) patched — nothing else — which is what moves it to the archive tab.
 An open one proceeds to the filing check. Errors are swallowed; bookkeeping
 waits for the next poll.

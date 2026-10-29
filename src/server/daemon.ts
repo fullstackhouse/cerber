@@ -442,6 +442,10 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   /** When GitHub was last asked whether a settled row has been re-requested, by
    *  artifact id. In-memory for the same reason: a restart just asks sooner. */
   const requestCheckedAt = new Map<string, number>();
+  /** What the last poll's searches returned. A row that has just dropped out
+   *  of them most likely merged or closed, so its state check skips the queue.
+   *  In-memory: a restart just waits for the rotation, as before. */
+  let lastSearched = new Set<string>();
 
   /**
    * What GitHub has for you: the PRs awaiting your review, then your own open
@@ -754,6 +758,15 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     }
 
     const awaitingIds = new Set(refs.map((r) => artifactId(r)));
+    // A row that left the searches since last poll is checked now, outside the
+    // cap and the leash: it is the one most likely to have merged, and behind
+    // the rotation of every open draft it could sit in the inbox for several
+    // polls. Without the own-PR search, every PR of yours would look like it left.
+    const me = ownSearched ? null : await who();
+    const searchedBefore = lastSearched;
+    lastSearched = awaitingIds;
+    const leftSearch = (a: Artifact) =>
+      searchedBefore.has(a.id) && (ownSearched || (me !== null && !isOwnPr(a.pr, me)));
     let refreshed = 0;
     for (const artifact of await listArtifacts()) {
       if (artifact.status === "running") continue;
@@ -788,10 +801,12 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // Anything with real work in it: periodically confirm the PR is still
       // open, so merged/closed ones stop cluttering the queue. Capped and
       // spaced out — this is book-keeping, not a data feed.
-      if (refreshed >= STATE_REFRESH_CAP) continue;
-      const last = stateCheckedAt.get(artifact.id) ?? 0;
-      if (Date.now() - last < STATE_REFRESH_MIN_MS) continue;
-      refreshed++;
+      if (!leftSearch(artifact)) {
+        if (refreshed >= STATE_REFRESH_CAP) continue;
+        const last = stateCheckedAt.get(artifact.id) ?? 0;
+        if (Date.now() - last < STATE_REFRESH_MIN_MS) continue;
+        refreshed++;
+      }
       stateCheckedAt.set(artifact.id, Date.now());
       try {
         const pr = await fetchPrInfo(artifact.pr);

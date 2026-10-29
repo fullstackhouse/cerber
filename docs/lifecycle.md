@@ -434,7 +434,8 @@ in `src/server/daemon.ts`; the `FiledReason` type itself in
 
 Someone *answering* your comment files nothing — that reply is addressed to
 you. State checks are leashed to one per artifact per 30 minutes and capped
-per poll.
+per poll — except a row that dropped out of the searches since the last poll,
+which is checked at once, since that is how a merge first shows (`syncQueue`).
 
 The two cases that leave a row alone — someone has answered you, and GitHub
 still lists you as a requested reviewer despite the search — write a note to
