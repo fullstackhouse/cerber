@@ -187,7 +187,7 @@ describe("computeCalibration", () => {
       comments: [
         { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
         { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
-        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "approved", editedByUser: true, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: true, originalLine: null, drifted: false, alreadyRaised: null },
         { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });

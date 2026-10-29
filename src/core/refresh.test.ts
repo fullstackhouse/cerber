@@ -113,11 +113,11 @@ describe("refreshArtifact", () => {
 
   it("keeps the human's own words untouched — only the line moves", () => {
     const artifact = makeArtifact({
-      comments: [comment({ id: "1", origin: "user", body: "please rename this", status: "approved" })],
+      comments: [comment({ id: "1", origin: "user", body: "please rename this", status: "dropped" })],
     });
     const moved = refreshArtifact(artifact, HEAD2, DIFF_AT_HEAD2).artifact.comments[0]!;
     expect(moved.body).toBe("please rename this");
-    expect(moved.status).toBe("approved");
+    expect(moved.status).toBe("dropped");
     expect(moved.origin).toBe("user");
   });
 

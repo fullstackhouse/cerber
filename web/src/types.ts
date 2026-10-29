@@ -118,7 +118,7 @@ export interface ReviewComment {
   /** Only "blocker" stands between the PR and approval. */
   severity?: Severity | null;
   origin: "ai" | "user";
-  status: "draft" | "approved" | "dropped";
+  status: "draft" | "dropped";
   /** Line this comment was written against, if a refresh has since moved it. */
   originalLine?: number | null;
   /** The commented code is gone from the diff — it can't post inline. */
