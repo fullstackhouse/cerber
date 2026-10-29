@@ -213,16 +213,24 @@ push convinced the guard the draft was current and the poll never re-reviewed
 that PR again. An artifact written before `reviewedSha` existed has none, and
 falls back to the old comparison.
 
-**A re-review replaces the whole draft, including comments you wrote and a send
-body you wrote yourself.** They are dropped when the run starts and they do not come back — not on success, not
-if the run fails. This is a decision rather than an oversight, and it is stated
-here rather than left to be discovered: if you have written comments you want
-to keep, send the review or copy them out before pressing re-review.
+**A re-review replaces the AI's draft and keeps your comments** (`carryYours`,
+`src/core/refresh.ts`). Yours are the ones you wrote, the AI findings you
+rewrote by hand, and the ones the chat added or rewrote at your asking
+(`fromChat`). They are carried onto the new head at the claim — re-anchored by
+line text, like a refresh, so one whose code is gone is marked drifted and
+posts in the body — and again in the fold when the run lands, so a run that
+fails keeps them and a comment written while it ran is kept too. They sit ahead
+of the run's new findings, which may repeat one of them; dropping the copy is
+yours. AI findings you only dropped are not carried: the new run writes its own.
+A send body you wrote yourself (`bodyOverride`) does not survive — it described
+the draft being replaced.
 
 The same goes for what you decided about findings another reviewer already
 raised (`alreadyRaised`, `src/core/raised.ts`): a re-review writes new findings,
 compares them afresh against what is on the PR by then, and every match comes
-back undecided — left out of Send unless its thread was resolved.
+back undecided — left out of Send unless its thread was resolved. A comment of
+yours that was carried over keeps its decision for as long as it matches the
+same remark.
 
 What a re-review does *not* touch are the decisions you have made
 (`mergeRunResult`, `src/core/refresh.ts`). The run's result is folded onto

@@ -261,11 +261,12 @@ left unwritten. Code and tests win when they disagree.
   are one JSON file with a zod schema and sane defaults; absent must keep
   working, and every field must be hand-editable
 - Don't handle API keys — `gh` and `claude` own auth
-- A re-review replaces the whole draft, comments included — the user's own
-  along with the AI's. That is a decision, not a gap to fix: half-keeping them
-  (carrying on success, losing on failure) costs the code and still loses the
-  work, so cerber does neither and `docs/lifecycle.md` tells the reader plainly
-  instead. Don't add carry-over back without changing that page too.
+- A re-review replaces the AI's draft, not the user's comments. Theirs — written,
+  rewritten by hand, or added/rewritten through the chat (`fromChat`) — are
+  carried onto the new head (`carryYours`, re-anchored by line text) at the
+  claim *and* in the fold, so success, failure and a comment written mid-run
+  all keep them. A push from the author is not the user's decision, and the
+  chat transcript survives naming them. Don't carry on one path only.
 - Don't let a re-review discard a *decision*, on any path it can take. Its
   result is folded onto whatever the artifact says now (`mergeRunResult`)
   rather than written over it, so a send stands and the chat is kept. The one

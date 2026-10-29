@@ -437,14 +437,13 @@ The AI's summary and verdict still describe the commit that was reviewed. To
 get its opinion of the new code, hit **Re-review at the new head** in the
 cockpit (or `cerber review <pr> --force`).
 
-> ⚠️ **A re-review replaces the whole draft — including comments you wrote or
-> rewrote, and a send body you wrote yourself.** They are dropped when the run
-> starts and they do not come back, on success or on failure. This is a
-> decision, not a bug ([`docs/lifecycle.md`](docs/lifecycle.md)): the run owns
-> the draft. If you have written comments you want to keep, send the review or
-> copy them out first. Your *decisions* do survive — a `reviewed` or `skipped`
-> you set and the chat transcript are kept, and a send is kept as a record of
-> what went to GitHub (see the next section).
+> **A re-review replaces the AI's draft and keeps your comments.** The ones you
+> wrote, rewrote, or had the chat add or rewrite move onto the new head by
+> their line's text; one whose code is gone posts in the body instead
+> ([`docs/lifecycle.md`](docs/lifecycle.md)). A send body you wrote yourself
+> does not survive — it described the old draft. Your *decisions* survive too:
+> a `reviewed` or `skipped` you set and the chat transcript are kept, and a send
+> is kept as a record of what went to GitHub (see the next section).
 
 ### Re-reviewing one you already sent
 

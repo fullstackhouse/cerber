@@ -31,6 +31,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id">): Comment {
     origin: "ai",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised: null,
@@ -143,16 +144,17 @@ describe("mergeRunResult — folding a finished run onto what is on disk", () =>
     comments: [comment({ id: "ai-new", body: "fresh ai comment" })],
   });
 
-  it("replaces the previous draft's comments, whoever wrote them", () => {
+  it("replaces the AI's comments and keeps yours, ahead of the new ones", () => {
     const current = makeArtifact({
       comments: [
         comment({ id: "ai-untouched", origin: "ai" }),
-        comment({ id: "ai-edited", origin: "ai", editedByUser: true, body: "my rewrite" }),
+        comment({ id: "ai-edited", origin: "ai", editedByUser: true, fromChat: false, body: "my rewrite" }),
+        comment({ id: "from-chat", origin: "ai", fromChat: true, body: "argued into shape" }),
         comment({ id: "mine", origin: "user", body: "my own note" }),
       ],
     });
     const merged = mergeRunResult(fresh, current);
-    expect(merged.comments.map((c) => c.id)).toEqual(["ai-new"]);
+    expect(merged.comments.map((c) => c.id)).toEqual(["ai-edited", "from-chat", "mine", "ai-new"]);
     expect(merged.summary).toBe("the new draft");
   });
 

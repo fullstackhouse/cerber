@@ -73,6 +73,7 @@ function finding(id: string, alreadyRaised: AlreadyRaised | null): Comment {
     origin: "ai",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised,

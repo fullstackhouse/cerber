@@ -690,6 +690,7 @@ export async function buildApp(
           originalLine: null,
           drifted: false,
           alreadyRaised: null,
+          fromChat: false,
         },
       ],
     }));

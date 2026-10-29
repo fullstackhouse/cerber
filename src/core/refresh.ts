@@ -1,4 +1,4 @@
-import { Artifact, PrInfo, SentInfo } from "./artifact.js";
+import { Artifact, Comment, PrInfo, SentInfo } from "./artifact.js";
 import { AnchorResult, reanchorComments } from "./anchor.js";
 
 export interface RefreshResult {
@@ -48,6 +48,28 @@ export function refreshArtifact(artifact: Artifact, pr: PrInfo, diff: string): R
 
 
 /**
+ * A comment that is the user's call rather than the run's: one they wrote, one
+ * they rewrote, or one they had the chat add or rewrite.
+ */
+export function isYours(c: Comment): boolean {
+  return c.origin === "user" || c.editedByUser || c.fromChat;
+}
+
+/**
+ * The user's comments, pulled from the diff they were written on onto the one a
+ * re-review is reading.
+ *
+ * A re-review replaces the AI's findings, not the user's. A push from the
+ * author is no reason to lose a comment they wrote or a finding they argued
+ * into shape in the chat — and the old conversation would go on naming it
+ * as though it were still there. Anchored by line text like a refresh; one
+ * whose code is gone is marked drifted and posts in the body.
+ */
+export function carryYours(comments: Comment[], fromDiff: string, toDiff: string): Comment[] {
+  return reanchorComments(comments.filter(isYours), fromDiff, toDiff).comments;
+}
+
+/**
  * Is this artifact's status the user's to keep, rather than the run's to set?
  *
  * A send or a settle is a decision about the PR; a run finishing is a fact
@@ -82,10 +104,8 @@ export function supersede(a: Artifact): SentInfo[] {
  * `mergeConcurrentEdits` exists to stop a chat turn making.
  *
  * `fresh` is what the run produced; `current` is what is on disk now. The run
- * owns the draft — summary, chapters, verdict, comments — and that includes
- * replacing comments the user wrote: a re-review starts fresh by design, and
- * `docs/lifecycle.md` says so plainly rather than leaving anyone to count on
- * work surviving one. What it does *not* own are the decisions:
+ * owns the draft — summary, chapters, verdict, the AI's comments. What it does
+ * *not* own are the decisions:
  *
  *   - **a send** stands, and takes the status with it. Without this a run
  *     finishing after a send wrote `sent: null` back over the record, and the
@@ -95,10 +115,13 @@ export function supersede(a: Artifact): SentInfo[] {
  *     The fresh draft still lands underneath, which is what the row shows if
  *     the user changes their mind.
  *   - **the conversation** is the user's writing, snapshot and all.
+ *   - **the user's comments** (`carryYours`), read from disk so one written
+ *     while the run worked is kept too, and put ahead of the run's own.
  */
 export function mergeRunResult(fresh: Artifact, current: Artifact): Artifact {
   return {
     ...fresh,
+    comments: [...carryYours(current.comments, current.diff, fresh.diff), ...fresh.comments],
     status: userOwnsStatus(current) ? current.status : fresh.status,
     // Travels with the status it dates. A settle that landed while the run
     // worked keeps both halves of itself, and a run that reopens the row takes

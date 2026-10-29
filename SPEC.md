@@ -238,6 +238,7 @@ chapter (enforced by de-duplication on ingest, §11.6).
 | `originalLine` | int \| null | default `null`; where the comment was originally written when a refresh moved it |
 | `drifted` | boolean | default `false`; the commented line is no longer in the diff, so the comment cannot post inline |
 | `alreadyRaised` | AlreadyRaised \| null | default `null`; another reviewer already raised the same defect on the PR (§14.7). Set on `ai` comments only |
+| `fromChat` | boolean | default `false`; added or rewritten by a chat turn — the user's call, so a re-review carries it (§8.5) |
 
 Comments are drafts. They MUST NOT reach GitHub except inside an explicitly
 sent review. Every comment not `dropped` is included in a send — keeping one
@@ -745,12 +746,14 @@ another look — and then a new head means a new run.
 
 ### 8.5 What a Re-Review Destroys and What Survives
 
-A re-review replaces the whole draft — summary, chapters, verdict, a
+A re-review replaces the AI's draft — summary, chapters, verdict, a
 hand-written `bodyOverride` (it described a body for a
 draft that no longer exists — the same reason the pre-chat snapshot goes), and
-**all comments, the user's own included**. That is a decision, not a gap:
-half-keeping them (carrying on success, losing on failure) costs the code and
-still loses the work, so cerber does neither and says so plainly.
+the AI's comments. The user's comments — `origin: user`, `editedByUser`, or
+`fromChat` (added or rewritten by a chat turn) — MUST be carried onto the new
+head, re-anchored as a refresh does (§13.3; a comment whose line is
+gone becomes `drifted`), on the success path, the failure path, and for a
+comment written while the run worked. Carried comments precede the run's.
 
 What MUST survive any run, on both its success and failure paths, is every
 *decision*: a send that landed mid-run (one from *before* the run is kept too,

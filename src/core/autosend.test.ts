@@ -87,7 +87,7 @@ describe("evaluateAutoSend", () => {
     const finding = {
       id: "1", path: "f", line: 1, body: "broken", chapterId: null,
       severity: "blocker" as const, origin: "ai" as const, status: "draft" as const,
-      editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null,
+      editedByUser: false, fromChat: false, originalLine: null, drifted: false, alreadyRaised: null,
     };
     const d = evaluateAutoSend(makeArtifact({ comments: [finding] }), 90, "me");
     expect(d.eligible).toBe(false);
@@ -97,7 +97,7 @@ describe("evaluateAutoSend", () => {
   it("still accepts an approve whose blocker was dropped, and one with only minors and nits", () => {
     const c = (severity: "blocker" | "minor" | "nit", status: "draft" | "dropped") => ({
       id: severity, path: "f", line: 1, body: "x", chapterId: null,
-      severity, origin: "ai" as const, status, editedByUser: false,
+      severity, origin: "ai" as const, status, editedByUser: false, fromChat: false,
       originalLine: null, drifted: false, alreadyRaised: null,
     });
     expect(
@@ -113,7 +113,7 @@ describe("evaluateAutoSend", () => {
     const dup = {
       id: "1", path: "f", line: 1, body: "repeat", chapterId: null,
       severity: "minor" as const, origin: "ai" as const, status: "draft" as const,
-      editedByUser: false, originalLine: null, drifted: false,
+      editedByUser: false, fromChat: false, originalLine: null, drifted: false,
       alreadyRaised: {
         remarkId: "T_1", by: "someone", at: "x", url: null, reason: "same",
         where: { kind: "thread" as const, path: "f", line: 1, state: "open" as const, replyTo: "1" },
@@ -185,10 +185,10 @@ describe("computeCalibration", () => {
   it("counts AI comment outcomes and user additions", () => {
     const a = makeArtifact({
       comments: [
-        { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
-        { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
-        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: true, originalLine: null, drifted: false, alreadyRaised: null },
-        { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "1", path: "f", line: 1, body: "x", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: false, fromChat: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "2", path: "f", line: 2, body: "y", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, fromChat: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "f", line: 3, body: "z", chapterId: null, severity: null, origin: "ai", status: "draft", editedByUser: true, fromChat: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "4", path: "f", line: null, body: "mine", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, fromChat: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });
     expect(computeCalibration(a, "COMMENT")).toEqual({

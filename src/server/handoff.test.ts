@@ -358,6 +358,7 @@ describe("handing the draft over with it", () => {
           originalLine: null,
           drifted: false,
           editedByUser: false,
+          fromChat: false,
           alreadyRaised: null,
         },
       ],
