@@ -14,6 +14,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     origin: "ai",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised: null,
@@ -101,6 +102,8 @@ describe("applyRevisions", () => {
   it("edits an AI comment", () => {
     const r = applyRevisions(artifact(), [{ kind: "comment-edit", commentId: "c1", body: "Sharper." }]);
     expect(r.artifact.comments[0]!.body).toBe("Sharper.");
+    // Rewritten on the user's say-so, so a re-review keeps it.
+    expect(r.artifact.comments[0]!.fromChat).toBe(true);
   });
 
   it("drops a comment by marking it dropped, not by deleting it", () => {
@@ -125,6 +128,8 @@ describe("applyRevisions", () => {
       origin: "ai",
       status: "draft",
       editedByUser: false,
+      // Asked for in the conversation, so a re-review keeps it.
+      fromChat: true,
     });
   });
 
@@ -220,7 +225,7 @@ describe("applyRevisions", () => {
     });
 
     it("refuses to rewrite an AI comment the user edited", () => {
-      const a = artifact({ comments: [comment({ editedByUser: true, body: "My rewrite." })] });
+      const a = artifact({ comments: [comment({ editedByUser: true, fromChat: false, body: "My rewrite." })] });
       const r = applyRevisions(a, [{ kind: "comment-edit", commentId: "c1", body: "Undone." }]);
       expect(r.artifact.comments[0]!.body).toBe("My rewrite.");
       expect(r.refused).toHaveLength(1);

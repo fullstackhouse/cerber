@@ -201,6 +201,8 @@ export function applyRevisions(
                   ...rewriteFinding(c, revision.body),
                   // Omitted = the turn is not re-grading; null = "not a finding".
                   severity: revision.severity === undefined ? c.severity : revision.severity,
+                  // The user's call now, so a re-review keeps it.
+                  fromChat: true,
                 }
               : c,
           ),
@@ -246,6 +248,7 @@ export function applyRevisions(
               originalLine: null,
               drifted: false,
               alreadyRaised: null,
+              fromChat: true,
             },
           ],
         };

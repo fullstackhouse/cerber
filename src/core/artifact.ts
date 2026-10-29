@@ -98,6 +98,11 @@ export const CommentSchema = z.object({
   drifted: z.boolean().default(false),
   /** Somebody else already raised this on the PR. AI comments only. */
   alreadyRaised: AlreadyRaisedSchema.nullable().default(null),
+  /**
+   * Added or rewritten through the chat. That was the user's call, not the
+   * run's, so a re-review carries it over like their own (`carryYours`).
+   */
+  fromChat: z.boolean().default(false),
 });
 export type Comment = z.infer<typeof CommentSchema>;
 

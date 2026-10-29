@@ -39,6 +39,7 @@ function finding(over: Partial<Comment> = {}): Comment {
     origin: "ai",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised: null,

@@ -66,6 +66,7 @@ function comment(over: Partial<Comment> = {}): Comment {
     origin: "user",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised: null,
@@ -127,15 +128,53 @@ beforeEach(() => {
 });
 
 describe("what a re-review does to the previous draft", () => {
-  it("replaces the comments wholesale, including ones you wrote", async () => {
-    // A decided behaviour, not an oversight: a re-review starts fresh. Pinned
-    // so that changing it back is a deliberate act with a failing test, and so
-    // `docs/lifecycle.md` cannot quietly drift from what the code does.
-    await saveArtifact(ready([comment({ id: "mine", body: "I wrote this myself" })]));
+  it("replaces the AI's comments and keeps yours", async () => {
+    // A push from the author is no reason to lose what you wrote, rewrote, or
+    // had the chat add — the old conversation would still be naming it.
+    await saveArtifact(
+      ready([
+        comment({ id: "mine", body: "I wrote this myself" }),
+        comment({ id: "old-ai", origin: "ai", body: "a stale AI finding" }),
+        comment({ id: "edited", origin: "ai", editedByUser: true, body: "my rewrite of a finding" }),
+        comment({ id: "chat", origin: "ai", fromChat: true, body: "the chat added this" }),
+      ]),
+    );
     claudeThat(async () => {});
 
     const { artifact } = await reviewPr(REF, { withSource: false });
-    expect(artifact.comments.map((c) => c.body)).toEqual(["the AI's finding"]);
+    expect(artifact.comments.map((c) => c.body)).toEqual([
+      "I wrote this myself",
+      "my rewrite of a finding",
+      "the chat added this",
+      "the AI's finding",
+    ]);
+  });
+
+  it("moves yours onto the new head by line text", async () => {
+    const head = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts"];
+    const before = [...head, "@@ -1,1 +1,2 @@", " const x = 1;", "+const y = 2;"].join("\n");
+    // The author pushed a line above the one the comment is on.
+    const after = [...head, "@@ -1,1 +1,3 @@", " const x = 1;", "+const w = 0;", "+const y = 2;"].join("\n");
+    await saveArtifact({ ...ready([comment({ id: "mine", line: 2 })]), diff: before });
+    diff.mockResolvedValue(after);
+    claudeThat(async () => {});
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    const mine = artifact.comments.find((c) => c.id === "mine")!;
+    expect(mine).toMatchObject({ line: 3, originalLine: 2, drifted: false });
+  });
+
+  it("keeps a comment you wrote while the run worked", async () => {
+    await saveArtifact(ready([]));
+    claudeThat(async () => {
+      await updateArtifactByKey(KEY, (a) => ({
+        ...a,
+        comments: [...a.comments, comment({ id: "mid-run", body: "written mid-run" })],
+      }));
+    });
+
+    const { artifact } = await reviewPr(REF, { withSource: false });
+    expect(artifact.comments.map((c) => c.body)).toEqual(["written mid-run", "the AI's finding"]);
   });
 
   it("does not accumulate the AI's own comments either", async () => {
@@ -254,16 +293,21 @@ describe("what a re-review does to the previous draft", () => {
     expect((await loadArtifact(ID))!.status).toBe("skipped");
   });
 
-  it("leaves nothing behind when it fails", async () => {
-    // The failure path holds the same line as the success path: no half-kept
-    // draft, so what a reader is told about re-review is true either way.
-    await saveArtifact(ready([comment({ id: "mine", body: "I wrote this myself" })]));
+  it("keeps yours and only yours when it fails", async () => {
+    // The failure path holds the same line as the success path, so what a
+    // reader is told about re-review is true either way.
+    await saveArtifact(
+      ready([
+        comment({ id: "mine", body: "I wrote this myself" }),
+        comment({ id: "old-ai", origin: "ai", body: "a stale AI finding" }),
+      ]),
+    );
     claudeThat(async () => {}, new Error("model unavailable"));
 
     await expect(reviewPr(REF, { withSource: false })).rejects.toThrow("model unavailable");
     const after = (await loadArtifact(ID))!;
     expect(after.status).toBe("failed");
-    expect(after.comments).toEqual([]);
+    expect(after.comments.map((c) => c.id)).toEqual(["mine"]);
   });
 });
 

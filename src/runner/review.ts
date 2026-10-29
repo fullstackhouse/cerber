@@ -10,7 +10,7 @@ import {
 } from "../core/artifact.js";
 import { createRunDir, evictOldCheckouts, prepareCheckout, removeRunDir } from "../core/checkout.js";
 import { PrRef, fetchPrDiff, fetchPrInfo, isOrgMember, isTeamMember } from "../core/gh.js";
-import { mergeRunResult, supersede, userOwnsStatus } from "../core/refresh.js";
+import { carryYours, isYours, mergeRunResult, supersede, userOwnsStatus } from "../core/refresh.js";
 import { loadArtifact, noteHistory, saveArtifact, updateArtifactByKey } from "../core/state.js";
 import { withWriter } from "../core/history.js";
 import { loadConfig } from "../core/config.js";
@@ -211,13 +211,16 @@ async function performReview(
     }
   }
 
-  // A re-review regenerates the draft, comments and all — deliberately, and
-  // including any the user wrote. Carrying them across is a feature this tool
-  // has decided not to have, so nothing here tries to half-keep them: they go
-  // when the run starts, whichever way it ends. `docs/lifecycle.md` says so
-  // where a reader would otherwise assume otherwise.
+  // A re-review regenerates the AI's draft, comments included. The user's own
+  // comments — written, rewritten, or added through the chat — are carried
+  // over at the claim below (`carryYours`), whichever way the run ends.
   if (existing && existing.comments.length > 0) {
-    log(`Replacing the previous draft's ${existing.comments.length} comment(s) — a re-review starts fresh.`);
+    const yours = existing.comments.filter(isYours).length;
+    const theirs = existing.comments.length - yours;
+    log(
+      `Replacing the previous draft's ${theirs} AI comment(s)` +
+        (yours > 0 ? `, keeping your ${yours}.` : "."),
+    );
   }
 
   let artifact: Artifact = {
@@ -309,6 +312,8 @@ async function performReview(
           ...artifact,
           notified: current.notified,
           viewed: current.viewed,
+          // Yours stay through the run, its failure included; the AI's go.
+          comments: carryYours(current.comments, current.diff, artifact.diff),
           priorSends: supersede(current),
           calibration: current.calibration,
         },
@@ -356,6 +361,7 @@ async function performReview(
         originalLine: null,
         drifted: false,
         alreadyRaised: null,
+        fromChat: false,
       })),
       verdict: review.ai.verdict,
       run: {

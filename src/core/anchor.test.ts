@@ -11,6 +11,7 @@ function comment(overrides: Partial<Comment> & Pick<Comment, "id" | "path" | "li
     origin: "ai",
     status: "draft",
     editedByUser: false,
+    fromChat: false,
     originalLine: null,
     drifted: false,
     alreadyRaised: null,
