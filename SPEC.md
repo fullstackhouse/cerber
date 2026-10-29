@@ -240,7 +240,9 @@ chapter (enforced by de-duplication on ingest, §11.6).
 | `alreadyRaised` | AlreadyRaised \| null | default `null`; another reviewer already raised the same defect on the PR (§14.7). Set on `ai` comments only |
 
 Comments are drafts. They MUST NOT reach GitHub except inside an explicitly
-sent review. Both `draft` and `approved` comments are included in a send;
+sent review. Every comment not `dropped` is included in a send. `approved`
+is a legacy mark (the cockpit's former "keep") that surfaces MUST NOT write
+and MUST treat exactly as `draft`;
 `dropped` ones are excluded but retained in the artifact (struck through in
 the cockpit) — dropping is a marking, deleting is removal, and only the user
 may delete (and only their own comments).

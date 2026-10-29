@@ -84,6 +84,8 @@ export const CommentSchema = z.object({
   /** Merge impact of this finding; null for remarks that are not findings. */
   severity: SeveritySchema.nullable().default(null),
   origin: z.enum(["ai", "user"]),
+  // "approved" was the cockpit's old "keep" mark. It never changed what posts,
+  // so it is no longer written, but files that carry it still parse.
   status: z.enum(["draft", "approved", "dropped"]).default("draft"),
   /** Set when the user edits an AI comment's body — calibration signal. */
   editedByUser: z.boolean().default(false),

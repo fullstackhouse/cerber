@@ -1017,9 +1017,8 @@ function CommentCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
 
-  const kept = comment.status === "approved";
   const dropped = comment.status === "dropped";
-  const tag = comment.origin === "user" ? "yours" : dropped ? "dropped" : kept ? "kept" : "drafted";
+  const tag = comment.origin === "user" ? "yours" : dropped ? "dropped" : "drafted";
 
   return (
     <div id={`c-${comment.id}`} className={`comment comment-${comment.status}${flash ? " comment-flash" : ""}`}>
@@ -1080,14 +1079,6 @@ function CommentCard({
             </>
           ) : (
             <>
-              <button
-                className={`btn btn-sm${kept ? " btn-keep-on" : ""}`}
-                title="Keep this comment — it posts with the review"
-                onClick={() => onUpdate({ status: kept ? "draft" : "approved" })}
-              >
-                <Icon name="check" />
-                keep
-              </button>
               <button className="btn btn-sm" title="Edit the wording" onClick={() => setEditing(true)}>
                 <Icon name="edit" />
                 edit

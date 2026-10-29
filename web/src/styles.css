@@ -2844,11 +2844,6 @@ button {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
-.tag-kept {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-}
-
 .tag-drift {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 10%, transparent);
