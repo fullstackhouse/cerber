@@ -36,6 +36,11 @@ describe("CommentSchema severity", () => {
     expect(() => CommentSchema.parse({ ...base, severity: "major" })).toThrow();
     expect(() => CommentSchema.parse({ ...base, severity: "critical" })).toThrow();
   });
+
+  it("reads the old keep mark as a plain draft — keeping takes no click", () => {
+    expect(CommentSchema.parse({ ...base, status: "approved" }).status).toBe("draft");
+    expect(CommentSchema.parse({ ...base, status: "dropped" }).status).toBe("dropped");
+  });
 });
 
 describe("AiReviewSchema severity", () => {

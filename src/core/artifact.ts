@@ -84,9 +84,12 @@ export const CommentSchema = z.object({
   /** Merge impact of this finding; null for remarks that are not findings. */
   severity: SeveritySchema.nullable().default(null),
   origin: z.enum(["ai", "user"]),
-  // "approved" was the cockpit's old "keep" mark. It never changed what posts,
-  // so it is no longer written, but files that carry it still parse.
-  status: z.enum(["draft", "approved", "dropped"]).default("draft"),
+  // Every comment not dropped posts. "approved" was the cockpit's old "keep"
+  // mark, which never changed that, so files still carrying it read as drafts.
+  status: z
+    .enum(["draft", "approved", "dropped"])
+    .default("draft")
+    .transform((s) => (s === "approved" ? "draft" : s)),
   /** Set when the user edits an AI comment's body — calibration signal. */
   editedByUser: z.boolean().default(false),
   /** Line this comment was written against, when a refresh has since moved it. */

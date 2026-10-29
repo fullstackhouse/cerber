@@ -166,7 +166,7 @@ and empty mean different things (§5.4).
 | Artifact status | `awaiting`, `running`, `ready`, `reviewed`, `sent`, `skipped`, `failed` |
 | Severity | `blocker`, `minor`, `nit` (or `null` = not a finding) |
 | Comment origin | `ai`, `user` |
-| Comment status | `draft`, `approved`, `dropped` |
+| Comment status | `draft`, `dropped` |
 | Verdict recommendation | `approve`, `comment`, `request_changes` |
 | PR state | `OPEN`, `CLOSED`, `MERGED` |
 | Run trigger | `daemon`, `user` (nullable; `null` = legacy) |
@@ -233,16 +233,15 @@ chapter (enforced by de-duplication on ingest, §11.6).
 | `chapterId` | string \| null | default `null` |
 | `severity` | severity \| null | default `null` — `null` means *not a finding* (question, note, praise), never "unknown" |
 | `origin` | `ai` \| `user` | REQUIRED |
-| `status` | `draft` \| `approved` \| `dropped` | default `draft` |
+| `status` | `draft` \| `dropped` | default `draft`; a legacy `approved` reads as `draft` |
 | `editedByUser` | boolean | default `false`; set when the user rewrites an AI comment (a calibration signal, and an ownership marker for chat, §12.4) |
 | `originalLine` | int \| null | default `null`; where the comment was originally written when a refresh moved it |
 | `drifted` | boolean | default `false`; the commented line is no longer in the diff, so the comment cannot post inline |
 | `alreadyRaised` | AlreadyRaised \| null | default `null`; another reviewer already raised the same defect on the PR (§14.7). Set on `ai` comments only |
 
 Comments are drafts. They MUST NOT reach GitHub except inside an explicitly
-sent review. Every comment not `dropped` is included in a send. `approved`
-is a legacy mark (the cockpit's former "keep") that surfaces MUST NOT write
-and MUST treat exactly as `draft`;
+sent review. Every comment not `dropped` is included in a send — keeping one
+takes no click;
 `dropped` ones are excluded but retained in the artifact (struck through in
 the cockpit) — dropping is a marking, deleting is removal, and only the user
 may delete (and only their own comments).

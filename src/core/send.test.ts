@@ -85,7 +85,7 @@ describe("buildReviewPayload", () => {
       comments: [
         { id: "1", path: "src/a.ts", line: 2, body: "inline ok", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
         { id: "2", path: "src/a.ts", line: 999, body: "bad line", chapterId: "core", severity: null, origin: "ai", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
-        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, severity: null, origin: "user", status: "approved", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
+        { id: "3", path: "src/a.ts", line: null, body: "file-level", chapterId: null, severity: null, origin: "user", status: "draft", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
         { id: "4", path: "src/a.ts", line: 2, body: "dropped!", chapterId: null, severity: null, origin: "ai", status: "dropped", editedByUser: false, originalLine: null, drifted: false, alreadyRaised: null },
       ],
     });

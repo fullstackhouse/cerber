@@ -659,9 +659,7 @@ export async function buildApp(
               ...(body.severity !== undefined
                 ? { severity: SeveritySchema.nullable().parse(body.severity) }
                 : {}),
-              ...(body.status !== undefined
-                ? { status: body.status as "draft" | "approved" | "dropped" }
-                : {}),
+              ...(body.status === "draft" || body.status === "dropped" ? { status: body.status } : {}),
               ...(body.body !== undefined && body.body !== cm.body && cm.origin === "ai"
                 ? { editedByUser: true }
                 : {}),
