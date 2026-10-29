@@ -1808,6 +1808,35 @@ describe("your own PRs in the inbox", () => {
     await pollTimes(1);
     expect((await loadArtifact(mineId))?.pr.state).toBe("MERGED");
   });
+
+  it("archives a drafted row the poll after it leaves the search, ahead of the rotation", async () => {
+    const drafted = (ref: typeof MINE) => ({
+      ...stubArtifact(ref, true),
+      status: "ready" as const,
+      verdict: { recommendation: "comment" as const, confidence: 70, reasoning: "" },
+    });
+    // The oldest draft, behind enough newer open ones outside the search to fill
+    // the state check's cap for many polls running: only a jump ahead of them
+    // archives it in time.
+    await saveArtifact(drafted(MINE));
+    for (let n = 100; n < 300; n++) await saveArtifact(drafted({ ...MINE, number: n }));
+    let merged = false;
+    prInfo.mockImplementation(async (ref: typeof MINE) => ({
+      ...stubArtifact(ref).pr,
+      state: merged && ref.number === MINE.number ? "MERGED" : "OPEN",
+    }));
+    const handle = startDaemon(options);
+    try {
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+      merged = true;
+      authored.mockResolvedValue([]);
+      const after = handle.status().polls;
+      await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(after + 2), { interval: 1 });
+    } finally {
+      await stopAndDrain(handle);
+    }
+    expect((await loadArtifact(mineId))?.pr.state).toBe("MERGED");
+  });
 });
 
 describe("dedupeDiscovered", () => {
