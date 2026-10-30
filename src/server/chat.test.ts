@@ -268,6 +268,7 @@ describe("POST /api/reviews/:key/chat/steer", () => {
     expect(res.status).toBe(200);
     expect(steer).not.toHaveBeenCalled();
     expect(turn.mock.calls[0]?.[1]).toBe("hm");
+    await until((a) => a.pendingChat === null);
   });
 
   it("holds what the turn can't take and sends it as the next turn", async () => {
