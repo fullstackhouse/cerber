@@ -347,11 +347,11 @@ does not send you back into a PR you deliberately passed on.
 
 **Sort order** (`sortReviews`): newest first, whatever the status — the tabs
 already split by status, and a band per status buried a PR that moved minutes
-ago under yesterday's drafts. "Newest" is `activityAt`: a row with no draft (`awaiting`, `running`, `failed`)
-is dated by the PR's own last activity on GitHub (`pr.updatedAt`, refreshed from
-every poll's search result, and by a run's own fetch), because its artifact's
-`updatedAt` is only when the poll found it or a run touched it — starting a
-review must not move a row; every other row by the review. The `upd` column shows the same date. The `‹ ›` arrows
+ago under yesterday's drafts. "Newest" is `activityAt`: the PR's last activity on GitHub (`pr.updatedAt`, from
+every poll's search result, a run's own fetch and a send or handoff), on every
+row. Nothing cerber does locally moves a row: not a review starting, landing or
+failing, and not opening one. A row out of the poll's search keeps its last
+known date. The `upd` column shows the same date. The `‹ ›` arrows
 walk `walkable()`: open, unsettled rows only. That list is fetched once, when
 the review opens — finishing one must not renumber the walk under you — so a
 review you settle *during* the walk (skipped, marked reviewed, or sent) is

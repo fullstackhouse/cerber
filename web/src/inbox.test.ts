@@ -718,16 +718,13 @@ describe("activityAt — what the upd column and the sort read", () => {
     expect(activityAt(stub)).toBe(PR_AT);
   });
 
-  it("does not move when a review starts or fails", () => {
-    for (const status of ["running", "failed"]) {
+  it("does not move for anything cerber does locally, whatever the status", () => {
+    for (const status of ["running", "failed", "ready", "reviewed", "skipped", "sent"]) {
       expect(activityAt(row({ status, updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } }))).toBe(PR_AT);
     }
   });
 
-  it("is the review's on a drafted row, and on a stub from a server too old to say", () => {
-    expect(activityAt(row({ status: "ready", updatedAt: FOUND_AT, pr: { ...row().pr, updatedAt: PR_AT } }))).toBe(
-      FOUND_AT,
-    );
+  it("falls back to the write date on a row from a server too old to say", () => {
     expect(activityAt(row({ status: "awaiting", updatedAt: FOUND_AT }))).toBe(FOUND_AT);
   });
 

@@ -1093,6 +1093,8 @@ export async function buildApp(
     await updateArtifactByKey(c.req.param("key"), (a) => ({
       ...a,
       status: "sent" as const,
+      // A send is activity on the PR, and a sent PR usually leaves the poll's search.
+      pr: { ...a.pr, updatedAt: new Date().toISOString() },
       sent: { at: new Date().toISOString(), event: payload.event, url, auto: false },
       calibration: computeCalibration(a, payload.event),
     }));
@@ -1351,6 +1353,7 @@ export async function buildApp(
       const settles = !sent && !a.sent;
       return {
         ...recordReplies(a, replies),
+        pr: { ...a.pr, updatedAt: at },
         status: sent ? ("sent" as const) : a.sent ? a.status : ("skipped" as const),
         settledAt: settles ? at : a.settledAt,
         // Cerber's account of why a row is filed away cannot stand next to your

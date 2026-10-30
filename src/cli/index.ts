@@ -341,6 +341,7 @@ program
     await updateArtifactByKey(artifactKey(id), (a) => ({
       ...a,
       status: "sent" as const,
+      pr: { ...a.pr, updatedAt: new Date().toISOString() },
       sent: { at: new Date().toISOString(), event, url, auto: false },
       calibration: computeCalibration(a, event),
     }));
