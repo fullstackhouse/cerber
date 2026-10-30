@@ -261,19 +261,54 @@ describe("POST /api/reviews/:key/chat/steer", () => {
     expect((await read()).pendingChat?.steers).toEqual(["look at the migration"]);
   });
 
-  it("409s when no turn is being answered, without touching the run", async () => {
+  it("starts the next turn when none is being answered", async () => {
     await write(artifact());
+    turn.mockImplementation(async (a: Artifact) => ({ artifact: a, applied: [], refused: [] }));
     const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "hm" });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     expect(steer).not.toHaveBeenCalled();
+    expect(turn.mock.calls[0]?.[1]).toBe("hm");
   });
 
-  it("409s when the turn can no longer take it, rather than claim it landed", async () => {
-    await write(running());
+  it("holds what the turn can't take and sends it as the next turn", async () => {
+    await write(artifact());
+    let answer!: () => void;
+    turn.mockImplementationOnce(
+      (a: Artifact) =>
+        new Promise((resolve) => {
+          answer = () => resolve({ artifact: a, applied: [], refused: [] });
+        }),
+    );
+    turn.mockImplementation(async (a: Artifact) => ({ artifact: a, applied: [], refused: [] }));
+    await post(`/api/reviews/${KEY}/chat`, { message: "why?" });
     steer.mockReturnValue(false);
+
+    expect((await post(`/api/reviews/${KEY}/chat/steer`, { message: "one" })).status).toBe(200);
+    expect((await post(`/api/reviews/${KEY}/chat/steer`, { message: "two" })).status).toBe(200);
+    expect((await read()).pendingChat?.queued).toEqual(["one", "two"]);
+    expect(turn).toHaveBeenCalledTimes(1);
+
+    answer();
+    await until(() => turn.mock.calls.length === 2);
+    expect(turn.mock.calls[1]?.[1]).toBe("one\n\ntwo");
+    await until((a) => a.pendingChat === null);
+  });
+
+  it("keeps a message on a failed turn for its ask again", async () => {
+    await write(
+      artifact({ pendingChat: { message: "why?", refs: [], startedAt: "t", progress: [], steers: [], error: "boom" } }),
+    );
+    const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "hm" });
+    expect(res.status).toBe(200);
+    expect((await read()).pendingChat?.queued).toEqual(["hm"]);
+    expect(turn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a review that was already sent", async () => {
+    await write(artifact({ sent: { at: "t", event: "COMMENT", url: null } as Artifact["sent"] }));
     const res = await post(`/api/reviews/${KEY}/chat/steer`, { message: "hm" });
     expect(res.status).toBe(409);
-    expect((await read()).pendingChat?.steers).toEqual([]);
+    expect(turn).not.toHaveBeenCalled();
   });
 });
 

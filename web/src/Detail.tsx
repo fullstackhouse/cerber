@@ -1618,7 +1618,7 @@ function ChatPanel({
                   </div>
                 )}
                 <Markdown className="chat-turn-body prose" text={pending.message} />
-                {(pending.steers ?? []).map((m, i) => (
+                {[...(pending.steers ?? []), ...(pending.queued ?? [])].map((m, i) => (
                   <div key={i} className="chat-steer">
                     <div className="chat-turn-who">You, while it worked</div>
                     <Markdown className="chat-turn-body prose" text={m} />
@@ -1633,7 +1633,7 @@ function ChatPanel({
                         <button
                           className="btn btn-sm"
                           // What it was steered with is part of the question.
-                          onClick={() => start([pending.message, ...(pending.steers ?? [])].join("\n\n"), pending.refs)}
+                          onClick={() => start([pending.message, ...(pending.steers ?? []), ...(pending.queued ?? [])].join("\n\n"), pending.refs)}
                         >
                           ask again
                         </button>{" "}

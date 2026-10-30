@@ -66,7 +66,7 @@ import { reviewPr } from "../runner/review.js";
 import { runChatTurn, steerChatTurn } from "../runner/chat.js";
 import { mergeConcurrentEdits, restoreReview } from "../core/revise.js";
 import { progressWriter } from "./progress.js";
-import { ChatTurnSchema } from "../core/artifact.js";
+import { ChatTurnSchema, type ChatTurn } from "../core/artifact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -889,32 +889,22 @@ export async function buildApp(
 
   const turnInFlight = (a: Artifact) => a.pendingChat != null && a.pendingChat.error == null;
 
-  app.post("/api/reviews/:key/chat", async (c) => {
-    const key = c.req.param("key");
-    const artifact = await loadArtifactByKey(key);
-    if (!artifact) return c.json({ error: "not found" }, 404);
-    // A sent review is a record of what was posted — arguing with it now would
-    // rewrite history that GitHub already has.
-    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
-    if (isReviewRunning(artifact.id) || turnInFlight(artifact)) {
-      return c.json({ error: busy(artifact, "a run for this PR is already in flight") }, 409);
-    }
-
-    let request;
-    try {
-      request = ChatRequestSchema.parse(await c.req.json());
-    } catch (err: unknown) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
-    }
-
+  /** Record the question and answer it detached. Resolves once it is recorded. */
+  const startTurn = async (
+    key: string,
+    artifact: Artifact,
+    message: string,
+    refs?: ChatTurn["refs"],
+    allowUserComments?: boolean,
+  ) => {
     // Record the question before responding, so the cockpit's next poll — and a
     // reload mid-turn — finds a turn being answered rather than a message that
     // went nowhere.
     const pending = await updateArtifactByKey(key, (a) => ({
       ...a,
       pendingChat: {
-        message: request.message,
-        refs: request.refs ?? [],
+        message,
+        refs: refs ?? [],
         startedAt: new Date().toISOString(),
         progress: [],
         steers: [],
@@ -930,9 +920,9 @@ export async function buildApp(
     // Holding the request open is fine on localhost and fails behind a reverse
     // proxy's read timeout, which tells the user it broke while the turn
     // quietly succeeds — a worse failure than an honest error.
-    void runChatTurn(artifact, request.message, {
-      refs: request.refs,
-      allowUserComments: request.allowUserComments,
+    void runChatTurn(artifact, message, {
+      refs,
+      allowUserComments,
       onProgress: (m) => {
         console.log(`[chat ${artifact.id}] ${m}`);
         progress.push(m);
@@ -951,11 +941,18 @@ export async function buildApp(
         const added = result.artifact.comments.some(
           (cm) => !artifact.comments.some((before) => before.id === cm.id),
         );
+        let queued: string[] = [];
         const landed = await updateArtifactByKey(key, (current) => {
+          queued = current.pendingChat?.queued ?? [];
           const merged = { ...mergeConcurrentEdits(artifact, result.artifact, current), pendingChat: null };
           return added ? startRaisedCheck(merged, new Date().toISOString()) : merged;
         });
-        if (added && landed) void checkInBackground(landed);
+        const check = added && landed ? checkInBackground(landed) : null;
+        if (queued.length === 0) return;
+        // The check holds the review's slot, so the next turn waits its go.
+        await check;
+        const next = await loadArtifactByKey(key);
+        if (next && !next.sent) await startTurn(key, next, queued.join("\n\n"));
       })
       .catch(async (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
@@ -970,32 +967,65 @@ export async function buildApp(
         })).catch(() => {});
       });
 
+    return pending;
+  };
+
+  app.post("/api/reviews/:key/chat", async (c) => {
+    const key = c.req.param("key");
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return c.json({ error: "not found" }, 404);
+    // A sent review is a record of what was posted — arguing with it now would
+    // rewrite history that GitHub already has.
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
+    if (isReviewRunning(artifact.id) || turnInFlight(artifact)) {
+      return c.json({ error: busy(artifact, "a run for this PR is already in flight") }, 409);
+    }
+
+    let request;
+    try {
+      request = ChatRequestSchema.parse(await c.req.json());
+    } catch (err: unknown) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+
+    const pending = await startTurn(key, artifact, request.message, request.refs, request.allowUserComments);
     return c.json(pending, 202);
   });
 
   // Add to the turn being answered rather than waiting minutes to say "not that,
-  // this". The message goes into the live run; when the turn has already
-  // answered (or is only retrying its JSON) there is nothing to add it to, and
-  // the cockpit is told so instead of being shown a message that went nowhere.
+  // this". A message is never turned away for its timing: one the live run can't
+  // take (still cloning, retrying its JSON, already answered) waits on the
+  // artifact for the next turn, and with no turn left it is the next turn.
   const SteerRequestSchema = z.object({ message: z.string().min(1) });
 
   app.post("/api/reviews/:key/chat/steer", async (c) => {
     const key = c.req.param("key");
     const artifact = await loadArtifactByKey(key);
     if (!artifact) return c.json({ error: "not found" }, 404);
+    if (artifact.sent) return c.json({ error: `already sent at ${artifact.sent.at}` }, 409);
     let request;
     try {
       request = SteerRequestSchema.parse(await c.req.json());
     } catch (err: unknown) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
-    if (!turnInFlight(artifact) || !steerChatTurn(artifact.id, request.message)) {
-      return c.json({ error: "that turn is no longer taking messages — send this as the next one" }, 409);
+    if (turnInFlight(artifact) && steerChatTurn(artifact.id, request.message)) {
+      const updated = await updateArtifactByKey(key, (a) =>
+        a.pendingChat ? { ...a, pendingChat: { ...a.pendingChat, steers: [...a.pendingChat.steers, request.message] } } : a,
+      );
+      return c.json(updated);
     }
     const updated = await updateArtifactByKey(key, (a) =>
-      a.pendingChat ? { ...a, pendingChat: { ...a.pendingChat, steers: [...a.pendingChat.steers, request.message] } } : a,
+      a.pendingChat
+        ? { ...a, pendingChat: { ...a.pendingChat, queued: [...(a.pendingChat.queued ?? []), request.message] } }
+        : a,
     );
-    return c.json(updated);
+    if (updated?.pendingChat) return c.json(updated);
+    if (!updated) return c.json({ error: "not found" }, 404);
+    if (isReviewRunning(updated.id)) {
+      return c.json({ error: busy(updated, "a run for this PR is already in flight") }, 409);
+    }
+    return c.json(await startTurn(key, updated, request.message));
   });
 
   // Clear a turn that failed. Only that: a turn still being answered would come

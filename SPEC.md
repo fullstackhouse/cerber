@@ -339,7 +339,7 @@ A **Refusal** is `{revision, reason}` — a revision the artifact would not
 accept, recorded on the assistant turn and rendered in the transcript (§12.4).
 
 **PendingChat:** `{message, refs, startedAt, progress: string[], steers:
-string[], error: string | null}` — the in-flight (or failed) chat turn. It is
+string[], queued?: string[], error: string | null}` — the in-flight (or failed) chat turn. It is
 written before the turn starts, survives page reloads, carries the turn's live
 progress narration and the steers it has taken (§12.3a), and holds the failure
 when there is no HTTP response left to hold it (§16.3). A ChatTurn MAY carry
@@ -1362,13 +1362,16 @@ message written has been echoed back — a steer read after the answer was
 already on its way starts a second pass, and the last `result` is the answer.
 
 `POST …/chat/steer {message}` writes the steer and appends it to
-`pendingChat.steers`. It MUST answer **409** — and record nothing — when no
-turn is in flight or the turn can no longer take input (it has answered, or is
-retrying its JSON, which has no live process to write to); the cockpit then
-keeps the message for the next turn. The steer reaches the model wrapped in a
+`pendingChat.steers`. A message MUST NOT be refused for its timing: when the
+turn can no longer take input (it has answered, or is retrying its JSON, which
+has no live process to write to) it goes on `pendingChat.queued`, sent together
+as the next turn once this one lands; when no turn is left it starts the next
+turn itself. The endpoint answers **409** only for a sent review or a re-review
+holding the slot. The steer reaches the model wrapped in a
 reminder that the answer is still the one JSON object; the transcript keeps the
 user's own words, as a `steer: true` user turn between the question and the
-answer. "Ask again" on a failed turn re-asks the question with its steers.
+answer. "Ask again" on a failed turn re-asks the question with its steers and
+anything queued.
 
 ### 12.4 Revisions and Refusals
 
@@ -1867,7 +1870,7 @@ static assets included. No CORS: same-origin only.
 | `POST …/refresh` | §13.2 | `{stale, changed, …}`; never an error for "nothing to do" |
 | `POST …/rerun?source=0\|1` | re-review, always forced | **202**; 409 sent; 409 in flight |
 | `POST …/chat` · `DELETE …/chat/pending` · `POST …/chat/reset` | §12 | **202**; 409 sent/in-flight; dismiss clears only *failed* turns |
-| `POST …/chat/steer` | §12.3a | 200; 409 when no turn can take it |
+| `POST …/chat/steer` | §12.3a | 200; 409 for a sent review or a running re-review |
 | `GET …/export` | markdown export | standalone document; verdict basis = blockers + confidence |
 | `GET …/send-preview?event=` | payload preview | pure, no side effects |
 | `POST …/send` | §14.4 | requires `{confirm: true}`; 409/502 as specified; 200 is the artifact plus `replyError` — non-null when the review posted but a reply did not |
