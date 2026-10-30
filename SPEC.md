@@ -1927,9 +1927,9 @@ who has it now rather than with the whose-move label.
 ### 17.3 One Walkable Set
 
 A single definition — non-archived, non-settled, newest first whatever the
-status (an `awaiting` row dated by the PR's own last activity
-(`pr.updatedAt`), since its artifact's `updatedAt` is only when the poll found
-it; every other row by the review's), the user's own PRs last (§17.1) — MUST
+status (an `awaiting`, `running` or `failed` row dated by the PR's own last
+activity (`pr.updatedAt`), since its artifact's `updatedAt` is only when the
+poll found it or a run touched it; every other row by the review's), the user's own PRs last (§17.1) — MUST
 back the prev/next walk, the arrival bell and the favicon dot. These are one
 invariant, not three coincidences: the dot on the tab, the popup, and the
 arrows all answer "what still wants me?". One row is in the walk and answers "nothing": the user's own

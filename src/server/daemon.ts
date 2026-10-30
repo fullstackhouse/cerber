@@ -635,20 +635,22 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         // already in hand — or the queue keeps calling a ready PR a draft until
         // something happens to re-review it.
         //
-        // The PR's last activity is refreshed only on a row nobody has drafted,
-        // the one place the queue reads it (`activityAt`). Every write bumps the
-        // artifact's own `updatedAt`, and on a drafted row that is the review's
-        // date: refreshing there would re-date every draft by the poll each time
+        // The PR's last activity is refreshed only on a row with no draft,
+        // where the queue reads it (`activityAt`) — a running row included, but
+        // its run just read it, and a write here would move "started 3m ago".
+        // Every write bumps the artifact's own `updatedAt`, and on a drafted row
+        // that is the review's date: refreshing there would re-date every draft by the poll each time
         // its PR saw a comment, which is the meaningless date this field exists
         // to replace — and would race an open review's refresh besides.
-        const activity = existing.status === "awaiting" && existing.pr.updatedAt !== ref.updatedAt;
+        const noDraft = (status: string) => status === "awaiting" || status === "failed";
+        const activity = noDraft(existing.status) && existing.pr.updatedAt !== ref.updatedAt;
         if (existing.pr.isDraft !== ref.isDraft || activity) {
           await updateArtifactByKey(artifactKey(existing.id), (a) => ({
             ...a,
             pr: {
               ...a.pr,
               isDraft: ref.isDraft,
-              updatedAt: a.status === "awaiting" ? ref.updatedAt : a.pr.updatedAt,
+              updatedAt: noDraft(a.status) ? ref.updatedAt : a.pr.updatedAt,
             },
           }));
         }

@@ -68,10 +68,14 @@ export const isArchived = (r: ReviewListItem) => !!r.pr.state && r.pr.state !== 
  * `updatedAt` is only the minute the poll found it, which is the same minute
  * for every row found together — so every one read "3m" and the order meant
  * nothing. There the PR's own last activity on GitHub is the fact worth
- * reading. Every other row is dated by the review, which is what changed.
+ * reading. The same goes for a run in progress or one that failed: starting a
+ * review is not news about the PR, and a failed run retried every poll would
+ * otherwise keep jumping back to the top. Every other row is dated by the
+ * review, which is what changed.
  */
 export function activityAt(r: ReviewListItem): string {
-  return r.status === "awaiting" ? (r.pr.updatedAt ?? r.updatedAt) : r.updatedAt;
+  const noDraft = r.status === "awaiting" || r.status === "running" || r.status === "failed";
+  return noDraft ? (r.pr.updatedAt ?? r.updatedAt) : r.updatedAt;
 }
 
 /**

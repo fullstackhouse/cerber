@@ -1729,6 +1729,13 @@ describe("your own PRs in the inbox", () => {
     expect((await loadArtifact(mineId))?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
   });
 
+  it("keeps a failed row's PR activity current, since the queue dates it by that", async () => {
+    await saveArtifact({ ...stubArtifact(MINE, true), status: "failed" });
+    authored.mockResolvedValue([{ ...MINE, updatedAt: "2026-09-01T00:00:00Z" }]);
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
+  });
+
   it("leaves a drafted row's date alone when only its PR's activity moved", async () => {
     await saveArtifact({
       ...stubArtifact(MINE, true),
