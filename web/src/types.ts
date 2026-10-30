@@ -301,6 +301,8 @@ export interface PendingChat {
   progress: string[];
   /** What you added while it worked. Absent on artifacts from before steering. */
   steers?: string[];
+  /** What it could no longer take: sent as the next turn once this one lands. */
+  queued?: string[];
   /** Why the turn failed. Null while it is still being answered. */
   error: string | null;
 }

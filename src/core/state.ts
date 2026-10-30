@@ -172,16 +172,27 @@ export async function deleteArtifact(id: string): Promise<boolean> {
 }
 
 /** Load by key, apply a mutation, bump updatedAt, save. Returns the new artifact. */
-export async function updateArtifactByKey(
+export function updateArtifactByKey(
   key: string,
   mutate: (artifact: Artifact) => Artifact,
 ): Promise<Artifact | null> {
-  const artifact = await loadArtifactByKey(key);
-  if (!artifact) return null;
-  const updated = { ...mutate(artifact), updatedAt: new Date().toISOString() };
-  await saveArtifact(updated);
-  return updated;
+  // One at a time per review: a message queued while the answer is being written
+  // would otherwise be lost, or put the finished turn back as still running.
+  const run = (updates.get(key) ?? Promise.resolve()).then(async () => {
+    const artifact = await loadArtifactByKey(key);
+    if (!artifact) return null;
+    const updated = { ...mutate(artifact), updatedAt: new Date().toISOString() };
+    await saveArtifact(updated);
+    return updated;
+  });
+  const settled = run.catch(() => {}).finally(() => {
+    if (updates.get(key) === settled) updates.delete(key);
+  });
+  updates.set(key, settled);
+  return run;
 }
+
+const updates = new Map<string, Promise<unknown>>();
 
 /**
  * Clear AI work left in flight by a process that died mid-run — a review marked

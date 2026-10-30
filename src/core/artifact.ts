@@ -423,6 +423,8 @@ export const PendingChatSchema = z.object({
   progress: z.array(z.string()).default([]),
   /** What the user added while it worked — each one went into the live run. */
   steers: z.array(z.string()).default([]),
+  /** What it could no longer take: sent as the next turn once this one lands. */
+  queued: z.array(z.string()).optional(),
   /** Why the turn failed. Null while it is still running. */
   error: z.string().nullable().default(null),
 });
