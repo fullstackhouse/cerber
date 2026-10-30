@@ -34,7 +34,7 @@ verdict. No pending reviews, no reactions, and reviewing itself is read-only.**
   effect before mechanism ("a code block was never closed, so everything after
   it displayed as code" — not the parser-level account). It is also shaped
   rather than poured: past two paragraphs a summary breaks into fixed sections
-  (🧭 impact, 🎯 problem, 🔧 fix, 🧩 how the pieces fit, 🔍 details, ⚠️ worth
+  (🎯 problem, 🔧 fix, 🧭 impact, 🧩 how the pieces fit, 🔍 details, ⚠️ worth
   knowing — drop the ones with nothing to say, and a small PR gets no headings
   at all), the verdict is
   one lead sentence then bullets, and a comment leads with the finding on its

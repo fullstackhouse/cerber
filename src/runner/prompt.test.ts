@@ -60,7 +60,9 @@ describe("buildReviewPrompt", () => {
 
   it("asks for a summary in sections, and for none on a small PR", () => {
     const { prompt } = buildReviewPrompt(pr, "d");
-    expect(prompt).toContain("### 🧭 ");
+    expect(prompt.indexOf("### 🎯 ")).toBeLessThan(prompt.indexOf("### 🔧 "));
+    expect(prompt.indexOf("### 🔧 ")).toBeLessThan(prompt.indexOf("### 🧭 "));
+    expect(prompt.indexOf("### 🧭 ")).toBeLessThan(prompt.indexOf("### 🧩 "));
     expect(prompt).toContain("### 🎯 ");
     expect(prompt).toContain("### 🧩 ");
     expect(prompt).toContain("```mermaid");
