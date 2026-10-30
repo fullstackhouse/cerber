@@ -949,39 +949,37 @@ button {
   background: var(--surface);
   box-shadow: 0 -6px 14px -10px light-dark(rgb(15 17 21 / 0.25), rgb(0 0 0 / 0.6));
   padding: 14px 16px;
+  /* One height for every row. The strip follows the pointer, and at the end of
+     the page a height that followed the text would resize the page, scroll the
+     rows under a still pointer, select a different row, and resize it back — a
+     loop that flickers at frame rate. */
+  height: 264px;
 }
 
 .cursor-strip-body {
   flex-grow: 1;
   min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
 }
 
-/* The reasoning is markdown and is rendered as such. Capped, because the strip
-   follows the pointer down the list and an uncapped one re-lays the page out
-   on every mouse move — but capped above the length verdicts actually run to,
-   so the ordinary one is read here in full and only the outliers are cut. The
-   fade is on the clipped state alone: a fade under text that already ended
-   would promise a rest that isn't there. */
+/* The reasoning is markdown and is rendered as such. It takes whatever the
+   strip's height leaves, which is above the length verdicts actually run to, so
+   the ordinary one is read here in full and only the outliers are cut. The fade
+   is on the clipped state alone: a fade under text that already ended would
+   promise a rest that isn't there. */
 .strip-prose {
-  /* The cap and the fade are one measurement — the fade has to land on the
-     cut — so the cut is stated once and everything else is derived from it. */
-  --strip-cap: 196px;
-  --strip-fade: 46px;
   margin: 6px 0 0;
   max-width: 700px;
-  max-height: var(--strip-cap);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 .strip-prose-clipped {
-  -webkit-mask-image: linear-gradient(
-    #000 calc(var(--strip-cap) - var(--strip-fade)),
-    transparent var(--strip-cap)
-  );
-  mask-image: linear-gradient(
-    #000 calc(var(--strip-cap) - var(--strip-fade)),
-    transparent var(--strip-cap)
-  );
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 46px);
+  mask-image: linear-gradient(to top, transparent, #000 46px);
 }
 
 /* Tighter than the detail view's prose: this is a glance, not a read. The
