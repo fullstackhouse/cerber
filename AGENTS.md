@@ -34,13 +34,17 @@ verdict. No pending reviews, no reactions, and reviewing itself is read-only.**
   effect before mechanism ("a code block was never closed, so everything after
   it displayed as code" — not the parser-level account). It is also shaped
   rather than poured: past two paragraphs a summary breaks into fixed sections
-  (🎯 problem, 🔧 fix, 🔍 details, ⚠️ worth knowing — drop the ones with
-  nothing to say, and a small PR gets no headings at all), the verdict is
+  (🎯 problem, 🔧 fix, 🧭 impact, 🧩 how the pieces fit, 🔍 details, ⚠️ worth
+  knowing — drop the ones with nothing to say, and a small PR gets no headings
+  at all), the verdict is
   one lead sentence then bullets, and a comment leads with the finding on its
   own line. Summary and verdict split the work rather than overlap: the
   summary describes the PR, the verdict alone carries the review's own
   verification ("ran the tests", "couldn't check X") — neither retells the
-  other, and the cockpit shows the summary first. The rules live in
+  other, and the cockpit shows the summary first. 🧭 says what merging does and
+  who sees what change; 🧩, for a PR adding or rewiring modules, zooms through
+  the C4 levels it changes in `mermaid` flowcharts, which GitHub draws itself
+  and the cockpit draws on demand (`web/src/diagrams.ts`). The rules live in
   `src/runner/prompt.ts` and were tuned against real reviews — change them
   from evidence, not taste.
 - Findings are graded `blocker | minor | nit`; only a blocker blocks approval,

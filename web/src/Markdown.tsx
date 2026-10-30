@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { renderDiagrams } from "./diagrams";
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -10,11 +11,25 @@ export function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(raw);
 }
 
+/**
+ * Draws the `mermaid` blocks of whatever `html` this ref's element holds. The
+ * caller keeps its `{ __html }` object stable: a new one on a re-render makes
+ * React rewrite the element, which would put the drawn diagrams back to source.
+ */
+function useDiagrams(html: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) void renderDiagrams(ref.current);
+  }, [html]);
+  return ref;
+}
+
 /** Render trusted-ish markdown (AI output / PR content) safely. */
 export function Markdown({ text, className }: { text: string; className?: string }) {
-  const rendered = useMemo(() => renderMarkdown(text), [text]);
+  const rendered = useMemo(() => ({ __html: renderMarkdown(text) }), [text]);
+  const ref = useDiagrams(rendered.__html);
   if (!text?.trim()) return null;
-  return <div className={`md ${className ?? ""}`} dangerouslySetInnerHTML={{ __html: rendered }} />;
+  return <div ref={ref} className={`md ${className ?? ""}`} dangerouslySetInnerHTML={rendered} />;
 }
 
 const ENTITY: Record<string, string> = {
@@ -63,12 +78,13 @@ export function rendersDifferently(text: string, html: string): boolean {
  * should answer before the Send, not after.
  */
 export function MarkdownPreview({ text, className }: { text: string; className?: string }) {
-  const html = useMemo(() => (text?.trim() ? renderMarkdown(text) : ""), [text]);
-  if (!html || !rendersDifferently(text, html)) return null;
+  const html = useMemo(() => ({ __html: text?.trim() ? renderMarkdown(text) : "" }), [text]);
+  const ref = useDiagrams(html.__html);
+  if (!html.__html || !rendersDifferently(text, html.__html)) return null;
   return (
     <div className="md-preview">
       <div className="lab">preview</div>
-      <div className={`md prose ${className ?? ""}`} dangerouslySetInnerHTML={{ __html: html }} />
+      <div ref={ref} className={`md prose ${className ?? ""}`} dangerouslySetInnerHTML={html} />
     </div>
   );
 }

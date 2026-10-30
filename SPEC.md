@@ -1289,8 +1289,11 @@ taste. Normative content, in order: the output-JSON contract (§4.5, "respond
 with ONLY a JSON object"); writing-style rules (plain words for someone who
 has NOT read the diff, effect before mechanism, no hedging chains); the
 summary shape (under two paragraphs → no headings; otherwise `### 🎯 / 🔧 /
-🔍 / ⚠️` sections in that order, dropping any with nothing to say; the
-summary describes the PR, never the review); the verdict shape (one lead
+🧭 / 🧩 / 🔍 / ⚠️` sections in that order, dropping any with nothing to say;
+🧭 says what merging does and who sees what change, and 🧩, for a PR adding or
+rewiring modules, zooms through C4 levels (system, modules, inside a module)
+in `mermaid` flowcharts; the summary describes the PR, never the review); the
+verdict shape (one lead
 sentence, then 2–5 evidence bullets each opening with a bolded lead; the
 verdict alone carries the review's own verification); the comment shape
 (finding first, on its own line; never write the grade into the body); the
