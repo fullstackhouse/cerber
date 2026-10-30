@@ -234,6 +234,21 @@ h3 {
   max-width: 720px;
 }
 
+/* Mermaid draws in fixed colours, so a diagram brings its own light paper in
+   both themes rather than being redrawn when the theme flips. */
+.md-diagram {
+  margin: 12px 0;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.md-diagram svg {
+  display: block;
+  margin: 0 auto;
+}
+
 .prose.lead {
   font-size: 13.5px;
   line-height: 1.62;

@@ -67,3 +67,9 @@ describe("when a preview is worth drawing", () => {
     expect(worth("🚨 **blocker** — this leaks")).toBe(true);
   });
 });
+
+describe("renderMarkdown and diagrams", () => {
+  it("keeps the class a mermaid block is found by", () => {
+    expect(render("```mermaid\nflowchart LR\n  A --> B\n```")).toContain('class="language-mermaid"');
+  });
+});
