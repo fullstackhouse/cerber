@@ -1729,7 +1729,14 @@ describe("your own PRs in the inbox", () => {
     expect((await loadArtifact(mineId))?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
   });
 
-  it("leaves a drafted row's date alone when only its PR's activity moved", async () => {
+  it("keeps a failed row's PR activity current, since the queue dates it by that", async () => {
+    await saveArtifact({ ...stubArtifact(MINE, true), status: "failed" });
+    authored.mockResolvedValue([{ ...MINE, updatedAt: "2026-09-01T00:00:00Z" }]);
+    await pollTimes(1);
+    expect((await loadArtifact(mineId))?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
+  });
+
+  it("re-dates a drafted row's PR without touching its write date", async () => {
     await saveArtifact({
       ...stubArtifact(MINE, true),
       status: "ready",
@@ -1739,9 +1746,9 @@ describe("your own PRs in the inbox", () => {
     authored.mockResolvedValue([{ ...MINE, updatedAt: "2026-09-01T00:00:00Z" }]);
     await pollTimes(1);
     const mine = await loadArtifact(mineId);
-    // The review's date is the review's: a comment on the PR is not a change to it.
+    // A comment on the PR moves the row, and is not a change to the review.
     expect(mine?.updatedAt).toBe("2026-08-19T00:05:00.000Z");
-    expect(mine?.pr.updatedAt).toBe(MINE.updatedAt);
+    expect(mine?.pr.updatedAt).toBe("2026-09-01T00:00:00Z");
   });
 
   it("asks only for your PRs active within the configured days, and never ages review requests", async () => {

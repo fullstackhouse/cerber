@@ -635,22 +635,19 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         // already in hand — or the queue keeps calling a ready PR a draft until
         // something happens to re-review it.
         //
-        // The PR's last activity is refreshed only on a row nobody has drafted,
-        // the one place the queue reads it (`activityAt`). Every write bumps the
-        // artifact's own `updatedAt`, and on a drafted row that is the review's
-        // date: refreshing there would re-date every draft by the poll each time
-        // its PR saw a comment, which is the meaningless date this field exists
-        // to replace — and would race an open review's refresh besides.
-        const activity = existing.status === "awaiting" && existing.pr.updatedAt !== ref.updatedAt;
-        if (existing.pr.isDraft !== ref.isDraft || activity) {
+        if (existing.pr.isDraft !== ref.isDraft) {
           await updateArtifactByKey(artifactKey(existing.id), (a) => ({
             ...a,
-            pr: {
-              ...a.pr,
-              isDraft: ref.isDraft,
-              updatedAt: a.status === "awaiting" ? ref.updatedAt : a.pr.updatedAt,
-            },
+            pr: { ...a.pr, isDraft: ref.isDraft },
           }));
+        }
+        // The PR's last activity is what dates the row in the queue
+        // (`activityAt`). Saved directly: `updatedAt` is the artifact's version
+        // and a running row's "started 3m ago", and neither moved because
+        // somebody commented on the PR.
+        const current = await loadArtifact(existing.id);
+        if (current && current.pr.updatedAt !== ref.updatedAt) {
+          await saveArtifact({ ...current, pr: { ...current.pr, updatedAt: ref.updatedAt } });
         }
         continue;
       }
@@ -1167,6 +1164,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       await updateArtifactByKey(artifactKey(artifact.id), (a) => ({
         ...a,
         status: "sent" as const,
+        pr: { ...a.pr, updatedAt: new Date().toISOString() },
         sent: { at: new Date().toISOString(), event: "APPROVE" as const, url, auto: true },
         calibration: computeCalibration(a, "APPROVE"),
       }));

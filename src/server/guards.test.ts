@@ -145,7 +145,10 @@ describe("POST /api/reviews/:key/send — not while a run is rewriting the draft
     const res = await send();
     expect(res.status).toBe(200);
     expect(submit).toHaveBeenCalledOnce();
-    expect((await loadArtifact(ID))!.status).toBe("sent");
+    const sent = (await loadArtifact(ID))!;
+    expect(sent.status).toBe("sent");
+    // A send is activity on the PR, and a sent PR usually leaves the poll's search.
+    expect(sent.pr.updatedAt).toBeDefined();
   });
 
   it("sends a draft that replaced one already on the PR", async () => {

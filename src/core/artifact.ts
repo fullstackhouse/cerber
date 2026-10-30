@@ -176,8 +176,7 @@ export const PrInfoSchema = z.object({
   changedFiles: z.number().int().default(0),
   /**
    * When the PR itself last changed on GitHub — not when cerber last wrote this
-   * file. On a row nobody has drafted, `updatedAt` is only when the poll found
-   * it, so this is what the queue shows and sorts by there. Optional: artifacts
+   * file. This is what the queue shows and sorts by, on every row. Optional: artifacts
    * written before it existed load without it, and the poll fills it in.
    */
   updatedAt: z.string().optional(),
