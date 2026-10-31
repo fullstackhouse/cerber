@@ -72,6 +72,24 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("A small PR gets one or two short paragraphs and NO headings");
   });
 
+  it("decides the pieces section by what changes, and draws only the levels that changed", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("adds a flow or changes how parts work together, whether built or planned, even inside one module");
+    expect(prompt).toContain("Only a small internal change skips it");
+    expect(prompt).toContain("Show only the levels that changed");
+    expect(prompt).toContain("would just repeat the level above");
+    expect(prompt).toContain("**System** appears only when people or outside systems change");
+    expect(prompt).not.toContain("must show all three");
+    expect(prompt).not.toContain("A change inside one module gets neither");
+  });
+
+  it("keeps details to what a reviewer needs, and verification out of the summary", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("what a reviewer needs, not everything decided");
+    expect(prompt).not.toContain("### ✅ ");
+    expect(prompt).toContain("The summary describes the PR, never your review of it");
+  });
+
   it("asks for a verdict of one lead sentence plus bullets", () => {
     const { prompt } = buildReviewPrompt(pr, "d");
     expect(prompt).toContain("One lead sentence");

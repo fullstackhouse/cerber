@@ -42,8 +42,9 @@ verdict. No pending reviews, no reactions, and reviewing itself is read-only.**
   summary describes the PR, the verdict alone carries the review's own
   verification ("ran the tests", "couldn't check X") — neither retells the
   other, and the cockpit shows the summary first. 🧭 says what merging does and
-  who sees what change; 🧩, for a PR adding or rewiring modules, zooms through
-  the C4 levels it changes in `mermaid` flowcharts, which GitHub draws itself
+  who sees what change; 🧩, for a PR adding a flow or changing how parts work
+  together, even inside one module, zooms through the C4 levels it changes in
+  `mermaid` flowcharts, which GitHub draws itself
   and the cockpit draws on demand (`web/src/diagrams.ts`). The rules live in
   `src/runner/prompt.ts` and were tuned against real reviews — change them
   from evidence, not taste.

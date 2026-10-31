@@ -1290,9 +1290,10 @@ with ONLY a JSON object"); writing-style rules (plain words for someone who
 has NOT read the diff, effect before mechanism, no hedging chains); the
 summary shape (under two paragraphs → no headings; otherwise `### 🎯 / 🔧 /
 🧭 / 🧩 / 🔍 / ⚠️` sections in that order, dropping any with nothing to say;
-🧭 says what merging does and who sees what change, and 🧩, for a PR adding or
-rewiring modules, zooms through C4 levels (system, modules, inside a module)
-in `mermaid` flowcharts; the summary describes the PR, never the review); the
+🧭 says what merging does and who sees what change, and 🧩, for a PR adding a
+flow or changing how parts work together, even inside one module, zooms through
+the C4 levels that changed (system, modules, inside a module) in `mermaid`
+flowcharts; the summary describes the PR, never the review); the
 verdict shape (one lead
 sentence, then 2–5 evidence bullets each opening with a bolded lead; the
 verdict alone carries the review's own verification); the comment shape
