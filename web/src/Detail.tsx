@@ -2811,18 +2811,22 @@ function FreshnessBanner({
 
   if (running) {
     return (
-      <div className="freshness">
+      <>
         {/* Kept visible through the run: "you already reviewed this PR" is the
             one thing on this page a reader cannot work out for themselves,
             and a re-review takes minutes. */}
         {(artifact.sent ? [] : (artifact.priorSends ?? [])).length > 0 && (
-          <PriorSendsNote sends={artifact.priorSends ?? []} />
+          <div className="freshness">
+            <PriorSendsNote sends={artifact.priorSends ?? []} />
+          </div>
         )}
-        <div className="freshness-running">
+        {/* Its own box, not a line inside the amber one: nested, its tint
+            covers only the text and reads as a highlighter mark. */}
+        <div className="freshness freshness-running">
           <strong>Re-reviewing…</strong> Claude is reading the current head. This page updates
           itself when the run lands — it takes a few minutes.
         </div>
-      </div>
+      </>
     );
   }
   const filed = artifact.filed;
