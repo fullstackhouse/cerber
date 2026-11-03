@@ -48,10 +48,11 @@ export interface ReviewListItem {
   own?: boolean;
   /**
    * GitHub asked only a team you are on, not you by name, as of the daemon's
-   * last poll — left to the click when `autoReviewTeamRequests` is off.
-   * Absent from older servers, which draft these like any other.
+   * last poll — left to the click when `autoReviewTeamRequests` is off. Null:
+   * the poll could not tell, and the click waits for those too. Absent from
+   * older servers, which draft these like any other.
    */
-  requestedViaTeam?: boolean;
+  requestedViaTeam?: boolean | null;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;

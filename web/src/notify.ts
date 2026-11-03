@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AutoReviewKnobs, autoReviewFor } from "../../src/core/autoreview";
 import { fetchDaemonStatus, fetchReviews } from "./api";
-import { walkable } from "./inbox";
+import { viaTeamOf, walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 /**
@@ -78,7 +78,7 @@ export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: AutoReviewK
 
 /** `isNews` for a row, with the drafting decision for its own repo and request. */
 const newsFor = (r: ReviewListItem, drafting: AutoReviewKnobs) =>
-  isNews(r, autoReviewFor(drafting, { ...r.pr, requestedViaTeam: r.requestedViaTeam ?? false }));
+  isNews(r, autoReviewFor(drafting, { ...r.pr, requestedViaTeam: viaTeamOf(r) }));
 
 /**
  * Whether this row is news *yet* — the browser half of the rule the daemon

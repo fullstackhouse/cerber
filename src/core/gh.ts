@@ -218,9 +218,10 @@ export interface DiscoveredPr extends PrRef {
   author: string;
   /**
    * GitHub asks for your review only through a team you are on, never by name
-   * (`searchAwaitingMe`). False for a PR found any other way.
+   * (`markTeamRequests`). False for a PR found any other way; null when the
+   * by-name search was not run or failed, and nobody can say which it is.
    */
-  requestedViaTeam: boolean;
+  requestedViaTeam: boolean | null;
 }
 
 /**
@@ -762,23 +763,33 @@ export function searchPrsArgs(
 export const searchAwaitingArgs = (repoFilter?: string, limit = 50) =>
   searchPrsArgs("review-requested", repoFilter, limit);
 
-/**
- * Open PRs where the current gh user's review is requested, drafts included,
- * each marked with whether the request named you or only a team you are on.
- *
- * `review-requested:@me` matches both and cannot say which, so the by-name
- * search runs beside it and whatever it lacks is a team's request. Its page
- * holds a subset of the first one's, so it is only incomplete when more than a
- * page of PRs name you — and then the overflow reads as team-only, which at
- * worst leaves a draft to the click rather than writing one nobody wanted.
- */
+/** Open PRs where the current gh user's review is requested, drafts included. */
 export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
-  const [all, byName] = await Promise.all([
-    gh(searchAwaitingArgs(repoFilter, limit)),
-    gh(searchPrsArgs("user-review-requested", repoFilter, limit)),
-  ]);
-  const named = new Set(mapSearchResults(JSON.parse(byName)).map((pr) => artifactId(pr)));
-  return mapSearchResults(JSON.parse(all)).map((pr) => ({ ...pr, requestedViaTeam: !named.has(artifactId(pr)) }));
+  const out = await gh(searchAwaitingArgs(repoFilter, limit));
+  return mapSearchResults(JSON.parse(out));
+}
+
+/** Open PRs where the current gh user's review is requested by name — a request of a team they are on does not count. */
+export async function searchNamingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
+  const out = await gh(searchPrsArgs("user-review-requested", repoFilter, limit));
+  return mapSearchResults(JSON.parse(out));
+}
+
+/**
+ * Mark each awaiting PR with whether the request named you or only a team
+ * you are on.
+ *
+ * `review-requested:@me` matches both and cannot say which, so whatever the
+ * by-name search lacks is a team's request. Its page holds a subset of the
+ * awaiting one's, so it is only incomplete when more than a page of PRs name
+ * you — and then the overflow reads as team-only, which at worst leaves a
+ * draft to the click rather than writing one nobody wanted. `named` is null
+ * when that search was not run or failed: then nothing is marked either way.
+ */
+export function markTeamRequests(awaiting: DiscoveredPr[], named: DiscoveredPr[] | null): DiscoveredPr[] {
+  if (named === null) return awaiting.map((pr) => ({ ...pr, requestedViaTeam: null }));
+  const ids = new Set(named.map((pr) => artifactId(pr)));
+  return awaiting.map((pr) => ({ ...pr, requestedViaTeam: !ids.has(artifactId(pr)) }));
 }
 
 /**

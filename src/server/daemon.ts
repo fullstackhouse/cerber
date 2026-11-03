@@ -14,9 +14,11 @@ import {
   fetchReviewRequests,
   lastMentionOfYou,
   lastWordOfYours,
+  markTeamRequests,
   ownPrUpdatedSince,
   searchAuthoredByMe,
   searchAwaitingMe,
+  searchNamingMe,
   stillRequested,
   submitReview,
 } from "../core/gh.js";
@@ -97,8 +99,10 @@ export interface AwaitingPr {
    * The request is a team's you are on, not one naming you. This list is
    * where the daemon, the queue's list and the cockpit's bell all read it, so
    * they agree on which rows `autoReviewTeamRequests` leaves to the click.
+   * Null when the poll did not tell: the switch is on, so the by-name search
+   * was not worth a call, or that search failed.
    */
-  requestedViaTeam: boolean;
+  requestedViaTeam: boolean | null;
 }
 
 export interface DaemonStatus {
@@ -189,12 +193,13 @@ function awaitingPr(ref: DiscoveredPr, reply: Reply): AwaitingPr {
 }
 
 /**
- * Whether the last poll found this PR asking only a team of yours. A row the
- * awaiting search did not return — your own PR, one pulled in by hand — was
- * asked of nobody, so of no team either.
+ * Whether the last poll found this PR asking only a team of yours, or null if
+ * it could not tell. A row the awaiting search did not return — your own PR,
+ * one pulled in by hand — was asked of nobody, so of no team either.
  */
-export function requestedViaTeam(awaiting: AwaitingPr[], id: string): boolean {
-  return awaiting.some((a) => a.id === id && a.requestedViaTeam);
+export function requestedViaTeam(awaiting: AwaitingPr[], id: string): boolean | null {
+  const entry = awaiting.find((a) => a.id === id);
+  return entry ? entry.requestedViaTeam : false;
 }
 
 /**
@@ -487,14 +492,26 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   async function discover(
     me: string | null,
     ownPrMaxAgeDays: number | null | undefined,
+    teamRequestsDrafted: boolean,
   ): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
     // Your own PRs only: a review request is never aged out. One that went
     // stale leaves the search, and the reaper below drops its stub like any
     // other the search stopped returning — a draft of yours stays put.
     const since = ownPrUpdatedSince(ownPrMaxAgeDays);
-    const [awaiting, authored] = await Promise.all([
+    const [awaiting, named, authored] = await Promise.all([
       Promise.all(filters.map((repo) => searchAwaitingMe(repo))),
+      // It only tells your requests from your teams', which changes nothing
+      // while both are drafted — so it is only asked while they are not.
+      // Failing, it costs that distinction for one poll rather than the poll:
+      // discovery and the announcements go ahead, and a row nobody could
+      // classify waits for the click like a team's.
+      teamRequestsDrafted
+        ? Promise.resolve(null)
+        : Promise.all(filters.map((repo) => searchNamingMe(repo))).catch((err: unknown) => {
+            log(`could not tell team review requests from yours: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          }),
       me === null
         ? Promise.resolve(null)
         : Promise.all(filters.map((repo) => searchAuthoredByMe(repo, since))).catch((err: unknown) => {
@@ -503,7 +520,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           }),
     ]);
     return {
-      refs: dedupeDiscovered([...awaiting.flat(), ...(authored ?? []).flat()]),
+      refs: dedupeDiscovered([...markTeamRequests(awaiting.flat(), named?.flat() ?? null), ...(authored ?? []).flat()]),
       ownSearched: authored !== null,
     };
   }
@@ -1096,7 +1113,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         return;
       }
 
-      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays);
+      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays, knobs.autoReviewTeamRequests);
       // Your own PRs are synced into the queue with the rest, but nobody is
       // asking you for them: they are not "awaiting" in anything the strip
       // counts, and the cockpit's open-requests tab — "GitHub still lists you

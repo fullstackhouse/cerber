@@ -548,13 +548,17 @@ Off, a PR whose review GitHub requested only from a team the user is on — not
 from the user by name — is not drafted in any repo, whatever the repo's own
 answer is; a request naming the user is drafted as before, even when a team
 was asked too. Such a PR is still discovered, listed and announced, exactly
-like a repo set to `false`. Discovery tells the two apart with a second search
-(`user-review-requested:@me`, §14.1): an awaiting PR it does not return is a
-team's request. The answer is published per PR on the daemon's awaiting list
-(§9.7) and copied onto each row of the review list, so the daemon, the
-cockpit's bell and the row's explanation all read one fact. A team request
-that GitHub's auto-assignment turns into a request for the user is drafted on
-the next poll.
+like a repo set to `false`. While the switch is off, discovery tells the two
+apart with a second search (`user-review-requested:@me`, §14.1): an awaiting
+PR it does not return is a team's request. While it is on the answer changes
+nothing, so the search is not made. A failed search MUST NOT fail the poll:
+it is logged, and the PRs it would have classified are published as unknown
+(`null`), which the switch treats like a team's request — off means only a
+request known to name the user is drafted unasked. The answer is published
+per PR on the daemon's awaiting list (§9.7) and copied onto each row of the
+review list, so the daemon, the cockpit's bell and the row's explanation all
+read one fact. A team request that GitHub's auto-assignment turns into a
+request for the user is drafted on the next poll.
 
 ## 7. Severity, Verdict and Confidence
 
@@ -804,9 +808,10 @@ Each tick, in order:
    requested from the current user (one search per repo filter, or one global;
    results deduplicated by artifact id; draft PRs included — an explicit
    request is an explicit request; archived repos excluded because a review
-   there could never be sent), and once more narrowed to requests naming the
-   user (`user-review-requested:@me`), which marks the rest as requested only
-   from a team (§6.4). The same search is run a second time with
+   there could never be sent) — and, while `autoReviewTeamRequests` is off,
+   once more narrowed to requests naming the user
+   (`user-review-requested:@me`), which marks the rest as requested only from
+   a team (§6.4); its failure is logged and does not fail the tick. The same search is run a second time with
    `author:@me` for the user's own open PRs (§9.10), its results appended
    after the review requests and deduplicated with them — only when the
    current login is known.
@@ -1005,7 +1010,8 @@ cleared the request) and classifies:
   than guess silence at someone who did reply.
 
 Each entry on the published list also says whether the request was made only
-of a team the user is on (`requestedViaTeam`, §6.4).
+of a team the user is on (`requestedViaTeam`, §6.4) — `null` when the poll did
+not or could not tell.
 
 Bots are excluded on both signals GitHub offers (account type `Bot` and the
 `[bot]` login suffix) — a CI bot posting on every push must not read as "they

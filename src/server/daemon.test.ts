@@ -14,6 +14,7 @@ import {
   mapSearchResults,
   searchAuthoredByMe,
   searchAwaitingMe,
+  searchNamingMe,
   submitReview,
 } from "../core/gh.js";
 import { notify } from "../core/notify.js";
@@ -42,6 +43,8 @@ vi.mock("../core/gh.js", async (orig) => ({
   // Your own PRs: none, unless a test says otherwise. An implementation rather
   // than a bare mock, so `clearAllMocks` in every suite's setup keeps it.
   searchAuthoredByMe: vi.fn(async () => []),
+  // Only asked with team drafts off; a test that turns them off says who it names.
+  searchNamingMe: vi.fn(async () => []),
   // The one write auto-send makes. Stubbed so a test can assert it never ran.
   submitReview: vi.fn(),
   fetchPrInfo: vi.fn(),
@@ -71,6 +74,7 @@ vi.mock("../runner/review.js", async (orig) => ({
 
 const search = searchAwaitingMe as Mock;
 const authored = searchAuthoredByMe as Mock;
+const named = searchNamingMe as Mock;
 const submit = submitReview as Mock;
 const prInfo = fetchPrInfo as Mock;
 const config = loadConfig as Mock;
@@ -183,33 +187,52 @@ describe("the awaiting list the daemon publishes", () => {
     );
     const status = await pollTimes(1);
     expect(status.awaiting).toEqual([
-      { id: "acme/widgets#7", reply: "you", requestedViaTeam: false },
-      { id: "acme/gadgets#3", reply: "them", requestedViaTeam: false },
+      { id: "acme/widgets#7", reply: "you", requestedViaTeam: null },
+      { id: "acme/gadgets#3", reply: "them", requestedViaTeam: null },
     ]);
   });
 
   it("says unknown rather than guessing silence it could not confirm", async () => {
     search.mockResolvedValue([DISCOVERED]);
     conversation.mockRejectedValue(new Error("gh: API rate limit exceeded"));
-    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: false }]);
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: null }]);
   });
 
   it("attributes nothing when it cannot tell who you are", async () => {
     search.mockResolvedValue([DISCOVERED]);
     login.mockRejectedValue(new Error("gh: not authenticated"));
-    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: false }]);
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: null }]);
     // The conversation is not worth reading if no comment can be attributed.
     expect(conversation).not.toHaveBeenCalled();
   });
 
   // The cockpit's list and bell read it from here, so it must say it.
-  it("says which requests only a team of yours was asked for", async () => {
-    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8, requestedViaTeam: true }]);
+  it("says which requests only a team of yours was asked for, with team drafts off", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8 }]);
+    named.mockResolvedValue([DISCOVERED]);
     const status = await pollTimes(1);
     expect(status.awaiting.map((a) => [a.id, a.requestedViaTeam])).toEqual([
       ["acme/widgets#7", false],
       ["acme/widgets#8", true],
     ]);
+  });
+
+  // With team requests drafted, which one it is changes nothing — not worth a call.
+  it("does not ask who was named while team requests are drafted", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const status = await pollTimes(1);
+    expect(named).not.toHaveBeenCalled();
+    expect(status.awaiting[0]?.requestedViaTeam).toBeNull();
+  });
+
+  it("keeps polling when it cannot tell your requests from your teams'", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
+    search.mockResolvedValue([DISCOVERED]);
+    named.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    const status = await pollTimes(1);
+    expect(status.lastPollError).toBeNull();
+    expect(status.awaiting).toEqual([{ id: "acme/widgets#7", reply: "none", requestedViaTeam: null }]);
   });
 
   it("claims nothing while polling is off", async () => {
@@ -1533,7 +1556,8 @@ describe("when the tap comes, with cerber drafting for you", () => {
   // and listed like a repo set to review-on-click, and told as it lands.
   it("leaves a request only a team of yours got undrafted with team drafts off, and announces it at once", async () => {
     config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
-    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8, requestedViaTeam: true }]);
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8 }]);
+    named.mockResolvedValue([DISCOVERED]);
     const status = await pollTimes(1);
 
     // Polls repeat every 10ms here, so every run is checked, not counted.
@@ -1546,7 +1570,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
   });
 
   it("drafts a team's request like any other by default", async () => {
-    search.mockResolvedValue([{ ...DISCOVERED, requestedViaTeam: true }]);
+    search.mockResolvedValue([DISCOVERED]);
     await pollTimes(1);
     expect(reviewed.mock.calls.map((c) => c[0].number)).toContain(7);
   });
@@ -1555,9 +1579,20 @@ describe("when the tap comes, with cerber drafting for you", () => {
   // member. When that is you, the next poll drafts it.
   it("drafts a team's request once it names you", async () => {
     config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
-    search.mockResolvedValueOnce([{ ...DISCOVERED, requestedViaTeam: true }]).mockResolvedValue([DISCOVERED]);
+    search.mockResolvedValue([DISCOVERED]);
+    named.mockResolvedValueOnce([]).mockResolvedValue([DISCOVERED]);
     await pollTimes(2);
     expect(reviewed.mock.calls.map((c) => c[0].number)).toContain(7);
+  });
+
+  // Not knowing is not a reason to draft what you asked to leave to the click.
+  it("leaves a request it could not classify to the click with team drafts off", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
+    search.mockResolvedValue([DISCOVERED]);
+    named.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    await pollTimes(1);
+    expect(reviewed).not.toHaveBeenCalled();
+    expect((await loadArtifact("acme/widgets#7"))!.status).toBe("awaiting");
   });
 
   it("drafts a repo set to auto even with auto-review off", async () => {

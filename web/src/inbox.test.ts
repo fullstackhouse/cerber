@@ -416,6 +416,8 @@ describe("a draft cerber filed rather than you", () => {
     expect(strip(row({ status: "awaiting" }), daemon({ autoReviewTeamRequests: false })).reasoning).toContain(
       "still queued",
     );
+    const unknown = row({ status: "awaiting", requestedViaTeam: null });
+    expect(strip(unknown, daemon({ autoReviewTeamRequests: false })).reasoning).toContain("could not tell");
   });
 
   // Off everywhere is not an exception for this repo, and shouldn't read like one.

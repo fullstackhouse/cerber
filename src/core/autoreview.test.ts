@@ -41,6 +41,13 @@ describe("autoReviewFor", () => {
     expect(autoReviewFor(knobs, teamAsked("acme", "web"))).toBe(false);
     expect(autoReviewFor(knobs, asked("acme", "web"))).toBe(true);
   });
+
+  // Not knowing who was asked is no reason to draft what the switch keeps back.
+  it("treats a request nobody could classify like a team's", () => {
+    const unknown = { owner: "acme", repo: "web", requestedViaTeam: null };
+    expect(autoReviewFor(knobsOf({ autoReviewTeamRequests: false }), unknown)).toBe(false);
+    expect(autoReviewFor(knobsOf({}), unknown)).toBe(true);
+  });
 });
 
 describe("anyAutoReview", () => {

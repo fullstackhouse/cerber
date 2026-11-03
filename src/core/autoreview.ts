@@ -26,12 +26,16 @@ export interface AutoReviewKnobs {
 export interface AutoReviewTarget {
   owner: string;
   repo: string;
-  /** Your review was requested only through a team, never by name. */
-  requestedViaTeam: boolean;
+  /**
+   * Your review was requested only through a team, never by name. Null is
+   * "could not tell", which the switch treats like a team's request: off
+   * means only a request known to name you is drafted unasked.
+   */
+  requestedViaTeam: boolean | null;
 }
 
 export function autoReviewFor(knobs: AutoReviewKnobs, pr: AutoReviewTarget): boolean {
-  if (pr.requestedViaTeam && !knobs.autoReviewTeamRequests) return false;
+  if (pr.requestedViaTeam !== false && !knobs.autoReviewTeamRequests) return false;
   const want = `${pr.owner}/${pr.repo}`.toLowerCase();
   for (const [key, on] of Object.entries(knobs.autoReviewRepos)) {
     if (key.toLowerCase() === want) return on;

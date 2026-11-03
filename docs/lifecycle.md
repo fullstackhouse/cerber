@@ -719,7 +719,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
 | `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
-| `daemon.autoReviewTeamRequests` | `true` | off: a PR whose review was requested only from a team you are on waits for a click in every repo, listed and announced like a `false` repo above. A request naming you is drafted either way. Told apart by a second search, `user-review-requested:@me` (`searchAwaitingMe`, `src/core/gh.ts`), and published per PR on the daemon's awaiting list, which the review list copies onto each row |
+| `daemon.autoReviewTeamRequests` | `true` | off: a PR whose review was requested only from a team you are on waits for a click in every repo, listed and announced like a `false` repo above. A request naming you is drafted either way. Told apart, only while this is off, by a second search, `user-review-requested:@me` (`searchNamingMe`/`markTeamRequests`, `src/core/gh.ts`), and published per PR on the daemon's awaiting list, which the review list copies onto each row. If that search fails the poll goes on, and the PRs it could not classify wait for the click too |
 | `daemon.intervalMinutes` | `5` | minutes between polls, at most 1440 (a day) |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |
