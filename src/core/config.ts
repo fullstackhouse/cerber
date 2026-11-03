@@ -44,6 +44,12 @@ export const DaemonConfigSchema = z.object({
     })
     .default({}),
   /**
+   * Draft PRs whose review was requested only from a team you are on. Off
+   * leaves them waiting for a click, in every repo — a request naming you is
+   * drafted either way. Resolved by `autoReviewFor` too.
+   */
+  autoReviewTeamRequests: z.boolean().default(true),
+  /**
    * Tap this machine's notification centre when a PR is worth coming back for
    * — the draft landing, or the arrival itself when nothing is going to be
    * drafted (`isNews` in `core/notify.ts`). The cockpit's bell needs a tab open

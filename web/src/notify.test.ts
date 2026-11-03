@@ -3,6 +3,7 @@ import {
   announced,
   arrivals,
   daemonAnnouncesHere,
+  NOBODY_DRAFTS,
   daemonDrafts,
   notice,
   restoreSeen,
@@ -36,18 +37,27 @@ const pr = (n: number, over: Partial<ReviewListItem> = {}) =>
   row({ key: `acme-web-${n}`, pr: { ...row().pr, number: n }, ...over });
 
 // Nobody is drafting for you, so a PR landing is all the news there will be.
-const BY_HAND = { autoReview: false, autoReviewRepos: {} };
+const BY_HAND = { autoReview: false, autoReviewRepos: {}, autoReviewTeamRequests: true };
 /** The default: cerber drafts every arrival itself, and that takes minutes. */
-const DRAFTING = { autoReview: true, autoReviewRepos: {} };
+const DRAFTING = { autoReview: true, autoReviewRepos: {}, autoReviewTeamRequests: true };
 
 describe("arrivals", () => {
   // The daemon's rule per repo: an arrival in a repo set to review-on-click is
   // the news, one in a repo it drafts waits for its draft.
   it("announces an arrival in a repo nobody drafts, and holds one it does", () => {
     const other = row({ key: "acme-api-1", pr: { ...row().pr, repo: "api" } });
-    const drafting = { autoReview: true, autoReviewRepos: { "acme/web": false } };
+    const drafting = { ...DRAFTING, autoReviewRepos: { "acme/web": false } };
     expect(arrivals([pr(1), other], [], drafting).map((r) => r.key)).toEqual(["acme-web-1"]);
     expect(announced([pr(1), other], drafting)).not.toContain("acme-api-1");
+  });
+
+  // Same rule for a PR only a team of yours was asked for: left to the click,
+  // its arrival is the news; drafted, it waits for the draft like the rest.
+  it("announces a team's request on arrival only when team requests are not drafted", () => {
+    const team = pr(2, { requestedViaTeam: true });
+    const notTeams = { ...DRAFTING, autoReviewTeamRequests: false };
+    expect(arrivals([pr(1), team], [], notTeams).map((r) => r.key)).toEqual(["acme-web-2"]);
+    expect(arrivals([pr(1), team], [], DRAFTING)).toEqual([]);
   });
 
   it("announces a PR the browser has never seen", () => {
@@ -278,10 +288,17 @@ describe("who announces an arrival when both could", () => {
     it("reads it off the daemon when the status says", () => {
       expect(daemonDrafts(daemon(), BY_HAND)).toEqual(DRAFTING);
       expect(daemonDrafts(daemon({ autoReview: false }), DRAFTING)).toEqual(BY_HAND);
-      expect(daemonDrafts(daemon({ pollEnabled: false }), DRAFTING)).toEqual(BY_HAND);
-      expect(daemonDrafts({ enabled: false }, DRAFTING)).toEqual(BY_HAND);
-      const excepted = { autoReview: true, autoReviewRepos: { "acme/web": false } };
+      expect(daemonDrafts(daemon({ pollEnabled: false }), DRAFTING)).toEqual(NOBODY_DRAFTS);
+      expect(daemonDrafts({ enabled: false }, DRAFTING)).toEqual(NOBODY_DRAFTS);
+      const excepted = { ...DRAFTING, autoReviewRepos: { "acme/web": false } };
       expect(daemonDrafts(daemon(excepted), BY_HAND)).toEqual(excepted);
+      const noTeams = { ...DRAFTING, autoReviewTeamRequests: false };
+      expect(daemonDrafts(daemon(noTeams), DRAFTING)).toEqual(noTeams);
+    });
+
+    // A server from before the switch drafted team requests like any other.
+    it("drafts team requests when the status predates the switch", () => {
+      expect(daemonDrafts(daemon({ autoReviewTeamRequests: undefined }), BY_HAND)).toEqual(DRAFTING);
     });
 
     // A read that failed answers nothing. Taken for a no, it announces a row

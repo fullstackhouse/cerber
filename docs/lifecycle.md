@@ -155,7 +155,8 @@ Notes on the edges that surprise people:
 - **`failed` is retried automatically** — it is neither settled nor
   head-sensitive, so the freshness guard below lets it through every time. Only
   by the poll, and only on its terms: `reviewAll` runs solely over PRs the awaiting search returned
-  whose repo auto-review is on for (`autoReviewFor`, `src/core/autoreview.ts`), so a failed artifact
+  that auto-review is on for — by repo, and by whether only a team of yours was asked
+  (`autoReviewFor`, `src/core/autoreview.ts`) — so a failed artifact
   GitHub has stopped asking about is never picked up *on its own*. You can
   always start one yourself — both forcing paths take any status at all,
   `sent` included.
@@ -704,8 +705,8 @@ dropped. Deleting a stub deletes its history with it; nothing else removes one.
 ## 7. Settings that change any of this
 
 `~/.cerber/config.json`, zod-validated, and mostly live. The poll re-reads it
-every tick and acts on `poll`, `autoReview`, `autoReviewRepos` and
-`intervalMinutes`, so the cockpit's settings apply without a restart (a new
+every tick and acts on `poll`, `autoReview`, `autoReviewRepos`,
+`autoReviewTeamRequests` and `intervalMinutes`, so the cockpit's settings apply without a restart (a new
 interval from the cockpit also retimes the wait already under way; `--interval`
 pins it for the run); `trust` is re-read by every `reviewPr` call, so a rule you
 add binds the next run. Only `parallel` and `repos` are captured by
@@ -718,6 +719,7 @@ read-only) and auto-send does nothing but log.
 | `daemon.poll` | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | `true` | draft a review for what the poll finds |
 | `daemon.autoReviewRepos` | `{}` | `owner/repo` → `true`/`false`, overriding `autoReview` for that repo either way. A `false` repo is still listed and announced on arrival; the poll just never starts its run, not even after a push to a draft you asked for |
+| `daemon.autoReviewTeamRequests` | `true` | off: a PR whose review was requested only from a team you are on waits for a click in every repo, listed and announced like a `false` repo above. A request naming you is drafted either way. Told apart by a second search, `user-review-requested:@me` (`searchAwaitingMe`, `src/core/gh.ts`), and published per PR on the daemon's awaiting list, which the review list copies onto each row |
 | `daemon.intervalMinutes` | `5` | minutes between polls, at most 1440 (a day) |
 | `daemon.parallel` | `3` | concurrent runs |
 | `daemon.repos` | `[]` | empty = everything `gh` can see |

@@ -254,6 +254,16 @@ export function Settings({ daemonAnnounces }: { daemonAnnounces: boolean }) {
         />{" "}
         draft a review automatically (off: awaiting PRs wait for a click)
       </label>
+      <label className="inbox-toggle">
+        <input
+          type="checkbox"
+          checked={config.daemon.autoReviewTeamRequests}
+          disabled={busy || !config.daemon.poll}
+          onChange={(e) => apply(updateDaemonConfig({ autoReviewTeamRequests: e.target.checked }))}
+        />{" "}
+        draft PRs requested only from a team you are on (off: they wait for a click; a request naming you is
+        drafted either way)
+      </label>
       {config.daemon.poll && (
         <AutoReviewExceptions
           daemon={config.daemon}

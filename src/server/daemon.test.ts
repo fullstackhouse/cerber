@@ -93,6 +93,7 @@ const DISCOVERED = {
   updatedAt: "2026-08-19T00:00:00Z",
   isDraft: false,
   author: "someone",
+  requestedViaTeam: false,
 };
 
 /**
@@ -113,6 +114,7 @@ describe("the awaiting list the daemon publishes", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -181,23 +183,33 @@ describe("the awaiting list the daemon publishes", () => {
     );
     const status = await pollTimes(1);
     expect(status.awaiting).toEqual([
-      { id: "acme/widgets#7", reply: "you" },
-      { id: "acme/gadgets#3", reply: "them" },
+      { id: "acme/widgets#7", reply: "you", requestedViaTeam: false },
+      { id: "acme/gadgets#3", reply: "them", requestedViaTeam: false },
     ]);
   });
 
   it("says unknown rather than guessing silence it could not confirm", async () => {
     search.mockResolvedValue([DISCOVERED]);
     conversation.mockRejectedValue(new Error("gh: API rate limit exceeded"));
-    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown" }]);
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: false }]);
   });
 
   it("attributes nothing when it cannot tell who you are", async () => {
     search.mockResolvedValue([DISCOVERED]);
     login.mockRejectedValue(new Error("gh: not authenticated"));
-    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown" }]);
+    expect((await pollTimes(1)).awaiting).toEqual([{ id: "acme/widgets#7", reply: "unknown", requestedViaTeam: false }]);
     // The conversation is not worth reading if no comment can be attributed.
     expect(conversation).not.toHaveBeenCalled();
+  });
+
+  // The cockpit's list and bell read it from here, so it must say it.
+  it("says which requests only a team of yours was asked for", async () => {
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8, requestedViaTeam: true }]);
+    const status = await pollTimes(1);
+    expect(status.awaiting.map((a) => [a.id, a.requestedViaTeam])).toEqual([
+      ["acme/widgets#7", false],
+      ["acme/widgets#8", true],
+    ]);
   });
 
   it("claims nothing while polling is off", async () => {
@@ -321,6 +333,7 @@ describe("draft PRs in the inbox", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -429,6 +442,7 @@ describe("a draft you already answered on GitHub", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -754,6 +768,7 @@ describe("the tap on the machine when a PR lands", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -909,6 +924,7 @@ describe("a review you settled, and were asked for again", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -1274,6 +1290,7 @@ describe("when the tap comes, with cerber drafting for you", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -1512,6 +1529,37 @@ describe("when the tap comes, with cerber drafting for you", () => {
     expect(notified).toHaveBeenCalledWith(expect.objectContaining({ title: "2 PRs await your review" }));
   });
 
+  // A team request is "someone on this team"; with the switch off it is found
+  // and listed like a repo set to review-on-click, and told as it lands.
+  it("leaves a request only a team of yours got undrafted with team drafts off, and announces it at once", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
+    search.mockResolvedValue([DISCOVERED, { ...DISCOVERED, number: 8, requestedViaTeam: true }]);
+    const status = await pollTimes(1);
+
+    // Polls repeat every 10ms here, so every run is checked, not counted.
+    expect(reviewed.mock.calls.map((c) => c[0].number)).not.toContain(8);
+    expect(reviewed.mock.calls.map((c) => c[0].number)).toContain(7);
+    expect((await loadArtifact("acme/widgets#8"))!.status).toBe("awaiting");
+    expect(status.lastSummary).toContain("1 waiting for a click");
+    expect(status.autoReviewTeamRequests).toBe(false);
+    expect(notified).toHaveBeenCalledWith(expect.objectContaining({ title: "2 PRs await your review" }));
+  });
+
+  it("drafts a team's request like any other by default", async () => {
+    search.mockResolvedValue([{ ...DISCOVERED, requestedViaTeam: true }]);
+    await pollTimes(1);
+    expect(reviewed.mock.calls.map((c) => c[0].number)).toContain(7);
+  });
+
+  // GitHub's team auto-assignment swaps the team's request for one naming a
+  // member. When that is you, the next poll drafts it.
+  it("drafts a team's request once it names you", async () => {
+    config.mockResolvedValue({ trust: [], daemon: { ...daemonKnobs, autoReviewTeamRequests: false } });
+    search.mockResolvedValueOnce([{ ...DISCOVERED, requestedViaTeam: true }]).mockResolvedValue([DISCOVERED]);
+    await pollTimes(2);
+    expect(reviewed.mock.calls.map((c) => c[0].number)).toContain(7);
+  });
+
   it("drafts a repo set to auto even with auto-review off", async () => {
     config.mockResolvedValue({
       trust: [],
@@ -1557,6 +1605,7 @@ describe("your own PRs in the inbox", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 1,
@@ -1863,6 +1912,7 @@ describe("auto-send without knowing who you are", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: false,
     intervalMinutes: 5,
     parallel: 1,
@@ -1917,6 +1967,7 @@ describe("the poll interval", () => {
     poll: false,
     autoReview: false,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: false,
     intervalMinutes: 2,
     parallel: 1,

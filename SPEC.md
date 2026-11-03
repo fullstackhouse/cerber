@@ -490,6 +490,7 @@ present an absent log as "predates history being kept", not as an empty one.
 | `daemon.poll` | boolean | `true` | discover awaiting PRs at all |
 | `daemon.autoReview` | boolean | `true` | draft a review for what the poll finds |
 | `daemon.autoReviewRepos` | record `owner/repo` → boolean | `{}` | per-repo exceptions to `autoReview`, either way (§6.4); keys matched case-insensitively |
+| `daemon.autoReviewTeamRequests` | boolean | `true` | also draft PRs whose only review request went to a team the user is on (§6.4) |
 | `daemon.notify` | boolean | `true` | desktop announcements on this machine (§9.8) |
 | `daemon.intervalMinutes` | positive int, max 1440 | `5` | minutes between polls; live (§6.3) |
 | `daemon.parallel` | positive int | `3` | concurrent AI runs |
@@ -514,7 +515,7 @@ launch.
 ### 6.3 Reload and Precedence
 
 - The daemon MUST re-read the config on **every poll tick**, so cockpit
-  toggles for `poll`, `autoReview`, `autoReviewRepos` (and `notify`) apply on the next tick
+  toggles for `poll`, `autoReview`, `autoReviewRepos`, `autoReviewTeamRequests` (and `notify`) apply on the next tick
   without a restart. `intervalMinutes` is re-read too, and a change saved from
   the cockpit reschedules the pending tick at once (last poll's end + new
   interval); `--interval` pins it for the process. `parallel` and `repos` are
@@ -541,6 +542,19 @@ and the cockpit's bell so both agree on when a PR is news (§9.8). A repo set to
 `false` is still discovered, listed and announced — only the run waits — and
 the daemon never starts one there, including on a new push to a draft the user
 asked for.
+
+`daemon.autoReviewTeamRequests` cuts across the repos rather than along them.
+Off, a PR whose review GitHub requested only from a team the user is on — not
+from the user by name — is not drafted in any repo, whatever the repo's own
+answer is; a request naming the user is drafted as before, even when a team
+was asked too. Such a PR is still discovered, listed and announced, exactly
+like a repo set to `false`. Discovery tells the two apart with a second search
+(`user-review-requested:@me`, §14.1): an awaiting PR it does not return is a
+team's request. The answer is published per PR on the daemon's awaiting list
+(§9.7) and copied onto each row of the review list, so the daemon, the
+cockpit's bell and the row's explanation all read one fact. A team request
+that GitHub's auto-assignment turns into a request for the user is drafted on
+the next poll.
 
 ## 7. Severity, Verdict and Confidence
 
@@ -790,7 +804,9 @@ Each tick, in order:
    requested from the current user (one search per repo filter, or one global;
    results deduplicated by artifact id; draft PRs included — an explicit
    request is an explicit request; archived repos excluded because a review
-   there could never be sent). The same search is run a second time with
+   there could never be sent), and once more narrowed to requests naming the
+   user (`user-review-requested:@me`), which marks the rest as requested only
+   from a team (§6.4). The same search is run a second time with
    `author:@me` for the user's own open PRs (§9.10), its results appended
    after the review requests and deduplicated with them — only when the
    current login is known.
@@ -800,7 +816,7 @@ Each tick, in order:
 4. **Sync the queue** (§9.3–9.6): create stubs for new arrivals, archive
    merged/closed PRs, reap dead stubs, file drafts GitHub moved past, and
    reopen settled rows someone has asked about again.
-5. If auto-review is on for its repo (§6.4): run a review for every awaiting PR (bounded by
+5. If auto-review is on for its repo and request (§6.4): run a review for every awaiting PR (bounded by
    `parallel`; the freshness guard makes already-current drafts free), and
    evaluate auto-send for each *fresh* result (§15).
 6. **Announce** on this machine whatever has become worth coming back for
@@ -987,6 +1003,9 @@ cleared the request) and classifies:
 - `them` — a human other than you spoke strictly later than your last word;
 - `unknown` — the read failed; the implementation MUST claim nothing rather
   than guess silence at someone who did reply.
+
+Each entry on the published list also says whether the request was made only
+of a team the user is on (`requestedViaTeam`, §6.4).
 
 Bots are excluded on both signals GitHub offers (account type `Bot` and the
 `[bot]` login suffix) — a CI bot posting on every push must not read as "they
@@ -1473,7 +1492,8 @@ All GitHub access shells out to `gh` with an **argument array, never a shell
 string** — a shell interpolation carrying PR-sourced text is a
 specification-level defect. Auth is entirely `gh`'s. Reads used: PR view, PR
 diff, review-request and own-PR searches (`--review-requested=@me` /
-`--author=@me`, open, non-archived, limit 50 each), issue-comment pagination, PR review listing, review-request
+`user-review-requested:@me` / `--author=@me`, open, non-archived, limit 50
+each — the by-name one has no `gh` flag, so it is passed as a qualifier), issue-comment pagination, PR review listing, review-request
 listing, the review-request timeline (GraphQL, one call, for the reopen check
 of §9.6), the PR's review threads with their resolution state and its review
 bodies (GraphQL, one call, last 100 of each, for §14.7), org/team membership probes, current login (cached per process,
@@ -1860,7 +1880,7 @@ static assets included. No CORS: same-origin only.
 |---|---|---|
 | `GET /api/daemon` | daemon status | `{enabled: false}` when none |
 | `GET /api/config` · `POST /api/config/daemon` · `POST /api/config/trust` · `POST /api/config/auto-review-repo` | settings | full config view, with the running package `version`; 400 with the trust parser's message verbatim. The last sets (`on: true\|false`) or removes (`on: null`) one `autoReviewRepos` entry against the file as it is now, so a stale view can't overwrite another exception |
-| `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded |
+| `GET /api/reviews` | queue list items | derived counts: comments, drifted, blockers, graded; `requestedViaTeam` from the daemon's last awaiting list (§6.4) |
 | `POST /api/reviews` | pull a PR in by URL/ref | **202** + artifact (run started); 200 existing; 409 in flight; 502 fetch failed, nothing left behind |
 | `GET /api/reviews/:key` | one artifact | 404 |
 | `PATCH /api/reviews/:key` | settle · set the verdict · write the body to post | only `reviewed`/`skipped` accepted (§8.1); stamps `settledAt`, clears `filed`; `bodyOverride` takes a string or `null` (back to composed), and **400** on any other type — it is posted verbatim, so coercing `{}` into `"[object Object]"` is worse than refusing it |

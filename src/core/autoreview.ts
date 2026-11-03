@@ -10,14 +10,29 @@
  *
  * GitHub treats owner/repo case-insensitively, and so does this: a key written
  * `Acme/Web` still matches the PR the API reports as `acme/web`.
+ *
+ * `autoReviewTeamRequests` is a different cut across the same PRs: whether
+ * GitHub asked *you*, or only a team you are on. A team request is "someone on
+ * this team" — often somebody else will take it — so turning it off leaves
+ * those to the click in every repo, whatever the repo's own answer says. A PR
+ * that names you as well as your team is yours either way.
  */
 export interface AutoReviewKnobs {
   autoReview: boolean;
   autoReviewRepos: Record<string, boolean>;
+  autoReviewTeamRequests: boolean;
 }
 
-export function autoReviewFor(knobs: AutoReviewKnobs, owner: string, repo: string): boolean {
-  const want = `${owner}/${repo}`.toLowerCase();
+export interface AutoReviewTarget {
+  owner: string;
+  repo: string;
+  /** Your review was requested only through a team, never by name. */
+  requestedViaTeam: boolean;
+}
+
+export function autoReviewFor(knobs: AutoReviewKnobs, pr: AutoReviewTarget): boolean {
+  if (pr.requestedViaTeam && !knobs.autoReviewTeamRequests) return false;
+  const want = `${pr.owner}/${pr.repo}`.toLowerCase();
   for (const [key, on] of Object.entries(knobs.autoReviewRepos)) {
     if (key.toLowerCase() === want) return on;
   }
@@ -37,7 +52,7 @@ export function anyAutoReview(knobs: AutoReviewKnobs): boolean {
  * the config's own `autoReview: false` — never the flag.
  */
 export function capAutoReview(knobs: AutoReviewKnobs, flag: boolean): AutoReviewKnobs {
-  return flag ? knobs : { autoReview: false, autoReviewRepos: {} };
+  return flag ? knobs : { autoReview: false, autoReviewRepos: {}, autoReviewTeamRequests: false };
 }
 
 /**

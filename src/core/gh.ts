@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { PrInfo, PrInfoSchema } from "./artifact.js";
+import { PrInfo, PrInfoSchema, artifactId } from "./artifact.js";
 import type { PriorRemark } from "./raised.js";
 
 const execFileAsync = promisify(execFile);
@@ -216,6 +216,11 @@ export interface DiscoveredPr extends PrRef {
   isDraft: boolean;
   /** Who opened it — the queue shows whose code an unattended run would execute. */
   author: string;
+  /**
+   * GitHub asks for your review only through a team you are on, never by name
+   * (`searchAwaitingMe`). False for a PR found any other way.
+   */
+  requestedViaTeam: boolean;
 }
 
 /**
@@ -254,6 +259,7 @@ export function mapSearchResults(
         updatedAt: r.updatedAt,
         isDraft: r.isDraft,
         author: r.author?.login ?? "",
+        requestedViaTeam: false,
       },
     ];
   });
@@ -712,7 +718,7 @@ export async function fetchPriorRemarks(
   return priorRemarks({ threads: pr.reviewThreads?.nodes ?? [], reviews: pr.reviews?.nodes ?? [] }, people);
 }
 
-export type PrSearch = "review-requested" | "author";
+export type PrSearch = "review-requested" | "user-review-requested" | "author";
 
 /**
  * The two questions the inbox asks GitHub, as `gh search prs` qualifiers.
@@ -721,8 +727,10 @@ export type PrSearch = "review-requested" | "author";
  * `author` is your own open PRs, which that search returns only when a team
  * you are on was requested — GitHub will not let anyone request a review from
  * a PR's author — so self-reviewing one would otherwise mean pasting its URL
- * every time. Both are the same search with one flag changed, so they cannot
- * drift apart on what "open" means or which repos are read-only.
+ * every time. `user-review-requested` is the inbox narrowed to requests naming
+ * you, leaving out the ones made only of a team you are on. All three are the
+ * same search with one qualifier changed, so they cannot drift apart on what
+ * "open" means or which repos are read-only.
  */
 export function searchPrsArgs(
   search: PrSearch,
@@ -738,7 +746,9 @@ export function searchPrsArgs(
     "archived:false",
     // Only the author search is ever given one (`ownPrUpdatedSince`).
     ...(updatedSince ? [`updated:>=${updatedSince}`] : []),
-    `--${search}=@me`,
+    // gh has a flag for the other two and none for this one, so it goes in
+    // as a qualifier — which is what each flag turns into anyway.
+    search === "user-review-requested" ? `${search}:@me` : `--${search}=@me`,
     "--state=open",
     "--limit",
     String(limit),
@@ -752,10 +762,23 @@ export function searchPrsArgs(
 export const searchAwaitingArgs = (repoFilter?: string, limit = 50) =>
   searchPrsArgs("review-requested", repoFilter, limit);
 
-/** Open PRs where the current gh user's review is requested, drafts included. */
+/**
+ * Open PRs where the current gh user's review is requested, drafts included,
+ * each marked with whether the request named you or only a team you are on.
+ *
+ * `review-requested:@me` matches both and cannot say which, so the by-name
+ * search runs beside it and whatever it lacks is a team's request. Its page
+ * holds a subset of the first one's, so it is only incomplete when more than a
+ * page of PRs name you — and then the overflow reads as team-only, which at
+ * worst leaves a draft to the click rather than writing one nobody wanted.
+ */
 export async function searchAwaitingMe(repoFilter?: string, limit = 50): Promise<DiscoveredPr[]> {
-  const out = await gh(searchAwaitingArgs(repoFilter, limit));
-  return mapSearchResults(JSON.parse(out));
+  const [all, byName] = await Promise.all([
+    gh(searchAwaitingArgs(repoFilter, limit)),
+    gh(searchPrsArgs("user-review-requested", repoFilter, limit)),
+  ]);
+  const named = new Set(mapSearchResults(JSON.parse(byName)).map((pr) => artifactId(pr)));
+  return mapSearchResults(JSON.parse(all)).map((pr) => ({ ...pr, requestedViaTeam: !named.has(artifactId(pr)) }));
 }
 
 /**

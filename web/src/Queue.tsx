@@ -55,6 +55,7 @@ function DaemonStrip({ daemon }: { daemon: DaemonStatus | null }) {
         <span>
           auto-review <b>{daemon.autoReview ? "on" : "off"}</b>
           {exceptionsLabel(daemon.autoReview, daemon.autoReviewRepos ?? {})}
+          {daemon.autoReviewTeamRequests === false && " · team requests on click"}
         </span>
         <span>
           auto-send <b>{daemon.autoSend === "on" ? "on" : "shadow"}</b> ≥{daemon.autoSendThreshold}%

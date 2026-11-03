@@ -6,7 +6,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { DaemonHandle, isPureStub } from "./daemon.js";
+import { DaemonHandle, isPureStub, requestedViaTeam } from "./daemon.js";
 import {
   Artifact,
   ArtifactStatusSchema,
@@ -346,6 +346,7 @@ export async function buildApp(
     // and must not hang on GitHub: a gh that cannot say in time marks nothing
     // as yours, and Send's own guard still refuses what GitHub would.
     const me = await loginWithin(LOGIN_WAIT_MS);
+    const awaiting = opts.daemon?.status().awaiting ?? [];
     return c.json(
       artifacts.map((a) => ({
         id: a.id,
@@ -390,6 +391,10 @@ export async function buildApp(
         // A PR you opened: listed apart from the ones awaiting you, and sent
         // as a comment only (`ownPrRefusal`).
         own: isOwnPr(a.pr, me),
+        // Only a team of yours was asked, as of the last poll — what the bell
+        // and the row's explanation need to tell "waits for a click" from
+        // "being drafted" under `autoReviewTeamRequests`.
+        requestedViaTeam: requestedViaTeam(awaiting, a.id),
         costUsd: a.run?.costUsd ?? null,
         withSource: a.run?.withSource ?? null,
         trusted: a.run?.trusted ?? null,

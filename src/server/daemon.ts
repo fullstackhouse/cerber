@@ -93,6 +93,12 @@ export interface DaemonOptions {
 export interface AwaitingPr {
   id: string;
   reply: Reply;
+  /**
+   * The request is a team's you are on, not one naming you. This list is
+   * where the daemon, the queue's list and the cockpit's bell all read it, so
+   * they agree on which rows `autoReviewTeamRequests` leaves to the click.
+   */
+  requestedViaTeam: boolean;
 }
 
 export interface DaemonStatus {
@@ -114,6 +120,8 @@ export interface DaemonStatus {
   autoReview: boolean;
   /** Per-repo exceptions to `autoReview` (config's daemon.autoReviewRepos). */
   autoReviewRepos: Record<string, boolean>;
+  /** Whether a PR only a team of yours was asked for is drafted too. */
+  autoReviewTeamRequests: boolean;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
   polls: number;
@@ -174,6 +182,19 @@ export function dedupeDiscovered(refs: DiscoveredPr[]): DiscoveredPr[] {
     seen.add(id);
     return true;
   });
+}
+
+function awaitingPr(ref: DiscoveredPr, reply: Reply): AwaitingPr {
+  return { id: artifactId(ref), reply, requestedViaTeam: ref.requestedViaTeam };
+}
+
+/**
+ * Whether the last poll found this PR asking only a team of yours. A row the
+ * awaiting search did not return — your own PR, one pulled in by hand — was
+ * asked of nobody, so of no team either.
+ */
+export function requestedViaTeam(awaiting: AwaitingPr[], id: string): boolean {
+  return awaiting.some((a) => a.id === id && a.requestedViaTeam);
 }
 
 /**
@@ -421,6 +442,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     notify: false,
     autoReview: opts.autoReview,
     autoReviewRepos: {},
+    autoReviewTeamRequests: opts.autoReview,
     trustedRuns: false,
     polls: 0,
     errors: 0,
@@ -870,7 +892,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * browser bell records what it stays quiet about.
    */
   async function announce(
-    drafts: (pr: { owner: string; repo: string; author: string }) => boolean,
+    drafts: (pr: { owner: string; repo: string; number: number; author: string }) => boolean,
     tell: boolean,
   ): Promise<void> {
     const owed = (await listArtifacts()).flatMap((a) => {
@@ -917,13 +939,13 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       login = await currentLogin();
     } catch {
       // Without knowing who you are, no comment can be attributed to you.
-      return refs.map((ref) => ({ id: artifactId(ref), reply: "unknown" as const }));
+      return refs.map((ref) => awaitingPr(ref, "unknown"));
     }
     return pool(refs, opts.parallel, async (ref) => {
       try {
-        return { id: artifactId(ref), reply: classifyReply(await fetchConversation(ref), login) };
+        return awaitingPr(ref, classifyReply(await fetchConversation(ref), login));
       } catch {
-        return { id: artifactId(ref), reply: "unknown" as const };
+        return awaitingPr(ref, "unknown");
       }
     });
   }
@@ -1022,8 +1044,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // Your own PRs are never drafted unasked, whatever auto-review says for
     // their repo: they are in the inbox for a self-review on demand. The same
     // predicate decides when a tap is due, which keeps them quiet there too.
-    const drafts = (pr: { owner: string; repo: string; author: string }) =>
-      !isOwnPr(pr, me) && autoReviewFor(autoReview, pr.owner, pr.repo);
+    // Whether only a team was asked is read off the published list rather
+    // than the PR, because the cockpit reads it there too.
+    const drafts = (pr: { owner: string; repo: string; number: number; author: string }) =>
+      !isOwnPr(pr, me) &&
+      autoReviewFor(autoReview, { ...pr, requestedViaTeam: requestedViaTeam(status.awaiting, artifactId(pr)) });
     status.pollEnabled = knobs.poll;
     // What the cockpit's bell defers to: a loop that isn't polling announces
     // nothing, whatever the notify toggle says.
@@ -1035,6 +1060,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     status.notify = announcing();
     status.autoReview = autoReview.autoReview;
     status.autoReviewRepos = autoReview.autoReviewRepos;
+    status.autoReviewTeamRequests = autoReview.autoReviewTeamRequests;
     // Recomputed too, so a trust rule added mid-run shows up in the strip.
     status.trustedRuns = anyAutoReview(autoReview) && opts.trust !== false && config.trust.length > 0;
     return { knobs, drafts, drafting: anyAutoReview(autoReview), notifyOn, announcing };

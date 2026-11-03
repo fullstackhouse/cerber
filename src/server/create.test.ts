@@ -112,7 +112,7 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
   // so a settle landing during `fetchPrInfo` has to end the request, not just
   // survive the claim write it was about to be overwritten by.
   it("does not start a forced run over a decision made while it fetched", async () => {
-    await saveArtifact(stubArtifact({ ...REF, title: "Add a thing", url: URL, author: "someone", isDraft: false, updatedAt: "2026-08-21T09:00:00.000Z" }));
+    await saveArtifact(stubArtifact({ ...REF, title: "Add a thing", url: URL, author: "someone", isDraft: false, updatedAt: "2026-08-21T09:00:00.000Z", requestedViaTeam: false }));
     prInfo.mockImplementationOnce(async () => {
       await updateArtifactByKey("acme__widgets__42", (a) => ({
         ...a,
@@ -156,6 +156,7 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
         updatedAt: "2026-08-20T00:00:00Z",
         isDraft: false,
         author: "someone",
+        requestedViaTeam: false,
       }),
     );
 
@@ -177,6 +178,7 @@ describe("POST /api/reviews — pulling a PR in from the cockpit", () => {
       updatedAt: "2026-08-20T00:00:00Z",
       isDraft: false,
       author: "someone",
+      requestedViaTeam: false,
     });
     await saveArtifact({ ...stub, viewed: { "a.ts": "0badf00d" } });
 
