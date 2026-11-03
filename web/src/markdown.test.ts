@@ -92,7 +92,30 @@ describe("GitHub alerts", () => {
   });
 
   it("leaves an ordinary quote a quote", () => {
-    expect(render("> quoting you")).toContain("<blockquote>");
+    expect(render("> quoting you")).toBe("<blockquote>\n<p>quoting you</p>\n</blockquote>\n");
     expect(render("> [!SHOUT] not a kind GitHub knows")).toContain("<blockquote>");
+  });
+
+  it("leaves an escaped marker as the literal text it asks for", () => {
+    const html = render("> \\[!WARNING]\n> literal");
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("[!WARNING]");
+    expect(html).not.toContain("md-alert");
+  });
+
+  it("renders nested quotes in work linear in their depth", () => {
+    const parse = marked.Parser.prototype.parse;
+    let calls = 0;
+    marked.Parser.prototype.parse = function (...args: Parameters<typeof parse>) {
+      calls++;
+      return parse.apply(this, args);
+    };
+    try {
+      const html = render(">".repeat(12) + " deep");
+      expect(html.match(/<blockquote>/g)).toHaveLength(12);
+      expect(calls).toBeLessThan(30);
+    } finally {
+      marked.Parser.prototype.parse = parse;
+    }
   });
 });

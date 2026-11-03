@@ -21,14 +21,18 @@ const ALERTS = {
  */
 marked.use({
   renderer: {
-    blockquote({ tokens }) {
+    blockquote({ tokens, text }) {
+      // Parsed once and rendered here either way: falling back to marked's own
+      // blockquote would parse the children again, doubling the work per level
+      // of nesting.
       const body = this.parser.parse(tokens);
-      // The marker shares a paragraph with the text below it, or stands alone in one.
-      const alert = /^<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(\n|<\/p>\n?)/.exec(body);
-      if (!alert) return false;
-      const [marker, end] = [alert[0], alert[2]];
+      // Decided on the source, where an escaped `\[!WARNING]` is still escaped
+      // and means the literal text, as it does on GitHub.
+      const alert = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/.exec(text);
+      if (!alert) return `<blockquote>\n${body}</blockquote>\n`;
       const kind = alert[1] as keyof typeof ALERTS;
-      const rest = (end === "\n" ? "<p>" : "") + body.slice(marker.length);
+      // The marker shares a paragraph with the text below it, or stands alone in one.
+      const rest = body.replace(/^<p>\[![A-Z]+\][ \t]*(?:\n|<\/p>\n?)/, (marker) => (marker.includes("</p>") ? "" : "<p>"));
       return `<div class="md-alert md-alert-${kind.toLowerCase()}"><p class="md-alert-title">${ALERTS[kind]}</p>\n${rest}</div>\n`;
     },
   },
