@@ -123,6 +123,11 @@ describe("buildChatPrompt", () => {
     expect(prompt).toContain("defend what you actually checked");
   });
 
+  it("keeps a before-the-merge step at the top of a rewritten summary", () => {
+    const { prompt } = buildChatPrompt(artifact(), "move the deploy warning up");
+    expect(prompt).toContain("always opens the summary as a `> [!WARNING]` alert");
+  });
+
   it("lists the ids a revision has to name", () => {
     const { prompt } = buildChatPrompt(artifact(), "hm");
     expect(prompt).toContain("c1 — src/a.ts:10");

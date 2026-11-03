@@ -73,3 +73,26 @@ describe("renderMarkdown and diagrams", () => {
     expect(render("```mermaid\nflowchart LR\n  A --> B\n```")).toContain('class="language-mermaid"');
   });
 });
+
+describe("GitHub alerts", () => {
+  it("draws a warning as an alert, not as a quote with its marker showing", () => {
+    const html = render("> [!WARNING]\n> **Run the check first.** The migration fails otherwise.");
+    expect(html).toContain('class="md-alert md-alert-warning"');
+    expect(html).toContain('<p class="md-alert-title">Warning</p>');
+    expect(html).toContain("<p><strong>Run the check first.</strong> The migration fails otherwise.</p>");
+    expect(html).not.toContain("[!WARNING]");
+    expect(html).not.toContain("<blockquote>");
+  });
+
+  it("keeps a list that follows the marker", () => {
+    const html = render("> [!CAUTION]\n>\n> - one\n> - two");
+    expect(html).toContain("md-alert-caution");
+    expect(html).toMatch(/<\/p>\n<ul>\n<li>one<\/li>/);
+    expect(html).not.toContain("[!CAUTION]");
+  });
+
+  it("leaves an ordinary quote a quote", () => {
+    expect(render("> quoting you")).toContain("<blockquote>");
+    expect(render("> [!SHOUT] not a kind GitHub knows")).toContain("<blockquote>");
+  });
+});
