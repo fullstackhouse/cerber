@@ -2621,6 +2621,40 @@ button {
   color: var(--muted);
 }
 
+/* GitHub's alerts. Unlike a quote, an alert is the line the reader must not
+   miss, so it keeps the body's ink and takes the colour on its rule and title. */
+.md-alert {
+  --alert: var(--accent);
+  margin: 8px 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--alert);
+}
+
+.md-alert > :first-child {
+  margin-top: 0;
+}
+
+.md-alert > :last-child {
+  margin-bottom: 0;
+}
+
+.md-alert-title {
+  font-weight: 650;
+  color: var(--alert);
+}
+
+.md-alert-tip {
+  --alert: var(--green);
+}
+
+.md-alert-warning {
+  --alert: var(--amber);
+}
+
+.md-alert-caution {
+  --alert: var(--red);
+}
+
 /* Section headings carry the summary's shape: they have to be findable while
    skimming, without shouting over the prose they introduce. */
 .md h1,

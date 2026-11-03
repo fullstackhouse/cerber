@@ -5,6 +5,39 @@ import { renderDiagrams } from "./diagrams";
 
 marked.setOptions({ gfm: true, breaks: false });
 
+const ALERTS = {
+  NOTE: "Note",
+  TIP: "Tip",
+  IMPORTANT: "Important",
+  WARNING: "Warning",
+  CAUTION: "Caution",
+} as const;
+
+/**
+ * GitHub's alerts — a blockquote opening `[!WARNING]` — drawn as GitHub draws
+ * them. A review leads with one when something must happen before the merge,
+ * and the cockpit showing the marker as a grey quote would bury exactly the
+ * line it exists to put first.
+ */
+marked.use({
+  renderer: {
+    blockquote({ tokens, text }) {
+      // Parsed once and rendered here either way: falling back to marked's own
+      // blockquote would parse the children again, doubling the work per level
+      // of nesting.
+      const body = this.parser.parse(tokens);
+      // Decided on the source, where an escaped `\[!WARNING]` is still escaped
+      // and means the literal text, as it does on GitHub.
+      const alert = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/.exec(text);
+      if (!alert) return `<blockquote>\n${body}</blockquote>\n`;
+      const kind = alert[1] as keyof typeof ALERTS;
+      // The marker shares a paragraph with the text below it, or stands alone in one.
+      const rest = body.replace(/^<p>\[![A-Z]+\][ \t]*(?:\n|<\/p>\n?)/, (marker) => (marker.includes("</p>") ? "" : "<p>"));
+      return `<div class="md-alert md-alert-${kind.toLowerCase()}"><p class="md-alert-title">${ALERTS[kind]}</p>\n${rest}</div>\n`;
+    },
+  },
+});
+
 /** Markdown → sanitized HTML. One path, so a preview can't drift from the real render. */
 export function renderMarkdown(text: string): string {
   const raw = marked.parse(text ?? "", { async: false }) as string;

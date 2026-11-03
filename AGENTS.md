@@ -36,7 +36,10 @@ verdict. No pending reviews, no reactions, and reviewing itself is read-only.**
   rather than poured: past two paragraphs a summary breaks into fixed sections
   (🎯 problem, 🔧 fix, 🧭 impact, 🧩 how the pieces fit, 🔍 details, ⚠️ worth
   knowing — drop the ones with nothing to say, and a small PR gets no headings
-  at all), the verdict is
+  at all), anything someone must do by hand before the merge or deploy opens
+  the summary as a `> [!WARNING]` alert instead of waiting in ⚠️ (the cockpit
+  draws GitHub's alerts the way GitHub does, in `web/src/Markdown.tsx`), the
+  verdict is
   one lead sentence then bullets, and a comment leads with the finding on its
   own line. Summary and verdict split the work rather than overlap: the
   summary describes the PR, the verdict alone carries the review's own

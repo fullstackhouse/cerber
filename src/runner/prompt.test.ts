@@ -51,6 +51,13 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("the rest of the change is in the checkout");
   });
 
+  it("opens the summary with what must happen before the merge, as a GitHub alert", () => {
+    const { prompt } = buildReviewPrompt(pr, "d");
+    expect(prompt).toContain("the summary OPENS with it");
+    expect(prompt).toContain("> [!WARNING]");
+    expect(prompt).toContain("never invent a step to fill it");
+  });
+
   it("asks for a severity per finding, graded as if the finding is true", () => {
     const { prompt } = buildReviewPrompt(pr, "d");
     expect(prompt).toContain('"severity": "blocker" | "minor" | "nit" | null');

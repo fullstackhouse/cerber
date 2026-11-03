@@ -1293,7 +1293,10 @@ summary shape (under two paragraphs → no headings; otherwise `### 🎯 / 🔧 
 🧭 says what merging does and who sees what change, and 🧩, for a PR adding a
 flow or changing how parts work together, even inside one module, zooms through
 the C4 levels that changed (system, modules, inside a module) in `mermaid`
-flowcharts; the summary describes the PR, never the review); the
+flowcharts; a step someone must take by hand before merging or deploying,
+or the merge or deploy breaks, opens the summary as a GitHub `> [!WARNING]`
+alert at any summary size, and no section repeats it; the summary describes
+the PR, never the review); the
 verdict shape (one lead
 sentence, then 2–5 evidence bullets each opening with a bolded lead; the
 verdict alone carries the review's own verification); the comment shape
