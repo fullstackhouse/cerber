@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AutoReviewKnobs, autoReviewFor } from "../../src/core/autoreview";
 import { fetchDaemonStatus, fetchReviews } from "./api";
-import { walkable } from "./inbox";
+import { viaTeamOf, walkable } from "./inbox";
 import { DaemonStatus, ReviewListItem } from "./types";
 
 /**
@@ -52,7 +52,7 @@ const write = (key: string, value: string) => {
 };
 
 /** Nobody is drafting anything: what a daemon that is off or idle amounts to. */
-export const NOBODY_DRAFTS: AutoReviewKnobs = { autoReview: false, autoReviewRepos: {} };
+export const NOBODY_DRAFTS: AutoReviewKnobs = { autoReview: false, autoReviewRepos: {}, autoReviewTeamRequests: false };
 
 /**
  * Which repos the daemon is drafting for you, which is what decides whether an
@@ -67,13 +67,18 @@ export const NOBODY_DRAFTS: AutoReviewKnobs = { autoReview: false, autoReviewRep
 export function daemonDrafts(daemon: DaemonStatus | null, lastKnown: AutoReviewKnobs): AutoReviewKnobs {
   if (!daemon) return lastKnown;
   if (!daemon.enabled || !daemon.pollEnabled) return NOBODY_DRAFTS;
-  // A server from before the exceptions sends none.
-  return { autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} };
+  // A server from before the exceptions sends none, and one from before the
+  // team switch drafts team requests like any other.
+  return {
+    autoReview: daemon.autoReview,
+    autoReviewRepos: daemon.autoReviewRepos ?? {},
+    autoReviewTeamRequests: daemon.autoReviewTeamRequests ?? true,
+  };
 }
 
-/** `isNews` for a row, with the drafting decision for its own repo. */
+/** `isNews` for a row, with the drafting decision for its own repo and request. */
 const newsFor = (r: ReviewListItem, drafting: AutoReviewKnobs) =>
-  isNews(r, autoReviewFor(drafting, r.pr.owner, r.pr.repo));
+  isNews(r, autoReviewFor(drafting, { ...r.pr, requestedViaTeam: viaTeamOf(r) }));
 
 /**
  * Whether this row is news *yet* — the browser half of the rule the daemon
@@ -332,7 +337,7 @@ export function useArrivalNotifications(): boolean {
    * notice, since a held-back row is not recorded as seen either, so the first
    * successful read announces it properly.
    */
-  const drafting = useRef<AutoReviewKnobs>({ autoReview: true, autoReviewRepos: {} });
+  const drafting = useRef<AutoReviewKnobs>({ autoReview: true, autoReviewRepos: {}, autoReviewTeamRequests: true });
   const [daemonAnnounces, setDaemonAnnounces] = useState(false);
 
   useEffect(() => {

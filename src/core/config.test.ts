@@ -23,6 +23,7 @@ describe("config", () => {
     poll: true,
     autoReview: true,
     autoReviewRepos: {},
+    autoReviewTeamRequests: true,
     notify: true,
     intervalMinutes: 5,
     parallel: 3,

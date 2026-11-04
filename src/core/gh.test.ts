@@ -212,7 +212,7 @@ describe("lastMentionOfYou", () => {
     expect(lastMentionOfYou([], "me")).toBeNull();
   });
 });
-import { ghErrorDetail, ownPrUpdatedSince, parsePrRef, searchAwaitingArgs, searchPrsArgs } from "./gh.js";
+import { ghErrorDetail, markTeamRequests, mapSearchResults, ownPrUpdatedSince, parsePrRef, searchAwaitingArgs, searchPrsArgs } from "./gh.js";
 
 describe("latestOwnReview", () => {
   const r = (author: string, at: string | null, state: string) => ({
@@ -336,6 +336,39 @@ describe("searchPrsArgs", () => {
 
   it("is what the CLI's --awaiting-me still asks — review requests only", () => {
     expect(searchAwaitingArgs("acme/widgets", 10)).toEqual(searchPrsArgs("review-requested", "acme/widgets", 10));
+  });
+});
+
+describe("markTeamRequests", () => {
+  const hit = (number: number) =>
+    mapSearchResults([
+      {
+        number,
+        title: "t",
+        url: `https://github.com/acme/widgets/pull/${number}`,
+        updatedAt: "2026-08-19T00:00:00Z",
+        isDraft: false,
+        repository: { nameWithOwner: "acme/widgets" },
+        author: { login: "someone" },
+      },
+    ])[0]!;
+
+  // gh has no flag for this one, so it goes in as query text.
+  it("narrows the by-name search with the qualifier gh has no flag for", () => {
+    const byName = searchPrsArgs("user-review-requested", "acme/widgets", 10);
+    expect(byName).toContain("user-review-requested:@me");
+    expect(byName.some((a) => a.startsWith("--user-review-requested"))).toBe(false);
+  });
+
+  it("marks what the by-name search lacks as a team's request", () => {
+    expect(markTeamRequests([hit(7), hit(8)], [hit(7)]).map((pr) => [pr.number, pr.requestedViaTeam])).toEqual([
+      [7, false],
+      [8, true],
+    ]);
+  });
+
+  it("marks nothing either way without the by-name search", () => {
+    expect(markTeamRequests([hit(7)], null).map((pr) => pr.requestedViaTeam)).toEqual([null]);
   });
 });
 

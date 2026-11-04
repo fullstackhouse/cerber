@@ -406,6 +406,30 @@ describe("a draft cerber filed rather than you", () => {
     expect(strip(waiting, daemon()).reasoning).toContain("still queued");
   });
 
+  // The team switch is why, so it is named rather than a repo exception nobody made.
+  it("says when a team's request waits because team requests are not drafted", () => {
+    const team = row({ status: "awaiting", requestedViaTeam: true });
+    expect(strip(team, daemon({ autoReviewTeamRequests: false })).reasoning).toContain(
+      "Only a team you are on was asked",
+    );
+    expect(strip(team, daemon()).reasoning).toContain("still queued");
+    expect(strip(row({ status: "awaiting" }), daemon({ autoReviewTeamRequests: false })).reasoning).toContain(
+      "still queued",
+    );
+    const unknown = row({ status: "awaiting", requestedViaTeam: null });
+    expect(strip(unknown, daemon({ autoReviewTeamRequests: false })).reasoning).toContain("could not tell");
+  });
+
+  // With the repo not drafted at all, who was asked changes nothing — so the
+  // row names the repo's setting, not the team switch.
+  it("names auto-review being off over the team switch", () => {
+    const unknown = row({ status: "awaiting", requestedViaTeam: null });
+    const team = row({ status: "awaiting", requestedViaTeam: true });
+    const off = daemon({ autoReview: false, autoReviewTeamRequests: false });
+    expect(strip(unknown, off).reasoning).toContain("Auto-review is off, so it waits");
+    expect(strip(team, off).reasoning).toContain("Auto-review is off, so it waits");
+  });
+
   // Off everywhere is not an exception for this repo, and shouldn't read like one.
   it("doesn't name the repo when auto-review is simply off", () => {
     const waiting = row({ status: "awaiting" });

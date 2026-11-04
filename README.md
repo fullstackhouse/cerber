@@ -88,7 +88,9 @@ PRs, review on click) or `--no-poll` (no GitHub polling at all) — or flip thos
 switches in the cockpit's Settings, which persist in `~/.cerber/config.json`
 and apply on the next poll. Settings also takes per-repo exceptions
 (`daemon.autoReviewRepos`): keep a busy repo to the click while the rest are
-drafted, or draft one repo with auto-review otherwise off.
+drafted, or draft one repo with auto-review otherwise off. And it can leave
+PRs that only a team of yours was asked to review to the click
+(`daemon.autoReviewTeamRequests`), while the ones naming you are still drafted.
 
 ## Contents
 

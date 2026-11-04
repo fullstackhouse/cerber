@@ -46,6 +46,13 @@ export interface ReviewListItem {
    * a server too old to send it has no own PRs in its inbox.
    */
   own?: boolean;
+  /**
+   * GitHub asked only a team you are on, not you by name, as of the daemon's
+   * last poll — left to the click when `autoReviewTeamRequests` is off. Null:
+   * the poll could not tell, and the click waits for those too. Absent from
+   * older servers, which draft these like any other.
+   */
+  requestedViaTeam?: boolean | null;
   costUsd: number | null;
   withSource?: boolean | null;
   trusted?: boolean | null;
@@ -348,6 +355,8 @@ export type DaemonStatus =
       autoReview: boolean;
       /** Per-repo exceptions to `autoReview`; absent from servers that predate them. */
       autoReviewRepos?: Record<string, boolean>;
+      /** Whether PRs only a team of yours was asked for are drafted; absent from older servers. */
+      autoReviewTeamRequests?: boolean;
       /** Unattended reviews may run PR code: auto-review on + trust rules set. */
       trustedRuns: boolean;
       polls: number;
@@ -391,6 +400,8 @@ export interface DaemonConfig {
   autoReview: boolean;
   /** owner/repo → true (draft it) or false (wait for a click), overriding `autoReview`. */
   autoReviewRepos: Record<string, boolean>;
+  /** Draft PRs whose only review request went to a team of yours. */
+  autoReviewTeamRequests: boolean;
   notify: boolean;
   intervalMinutes: number;
   parallel: number;

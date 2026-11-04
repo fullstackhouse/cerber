@@ -14,9 +14,11 @@ import {
   fetchReviewRequests,
   lastMentionOfYou,
   lastWordOfYours,
+  markTeamRequests,
   ownPrUpdatedSince,
   searchAuthoredByMe,
   searchAwaitingMe,
+  searchNamingMe,
   stillRequested,
   submitReview,
 } from "../core/gh.js";
@@ -93,6 +95,14 @@ export interface DaemonOptions {
 export interface AwaitingPr {
   id: string;
   reply: Reply;
+  /**
+   * The request is a team's you are on, not one naming you. This list is
+   * where the daemon, the queue's list and the cockpit's bell all read it, so
+   * they agree on which rows `autoReviewTeamRequests` leaves to the click.
+   * Null when the poll did not tell: the switch is on, so the by-name search
+   * was not worth a call, or that search failed.
+   */
+  requestedViaTeam: boolean | null;
 }
 
 export interface DaemonStatus {
@@ -114,6 +124,15 @@ export interface DaemonStatus {
   autoReview: boolean;
   /** Per-repo exceptions to `autoReview` (config's daemon.autoReviewRepos). */
   autoReviewRepos: Record<string, boolean>;
+  /**
+   * Whether a PR only a team of yours was asked for is drafted too — as the
+   * last poll applied it, not as the config says this minute. It is only
+   * meaningful beside `awaiting`'s `requestedViaTeam`, which a poll with team
+   * drafts on leaves unclassified; published apart, a switch turned off from
+   * the cockpit would read every one of those rows as "could not tell" until
+   * the next poll. So the two are written together.
+   */
+  autoReviewTeamRequests: boolean;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
   polls: number;
@@ -174,6 +193,20 @@ export function dedupeDiscovered(refs: DiscoveredPr[]): DiscoveredPr[] {
     seen.add(id);
     return true;
   });
+}
+
+function awaitingPr(ref: DiscoveredPr, reply: Reply): AwaitingPr {
+  return { id: artifactId(ref), reply, requestedViaTeam: ref.requestedViaTeam };
+}
+
+/**
+ * Whether the last poll found this PR asking only a team of yours, or null if
+ * it could not tell. A row the awaiting search did not return — your own PR,
+ * one pulled in by hand — was asked of nobody, so of no team either.
+ */
+export function requestedViaTeam(awaiting: AwaitingPr[], id: string): boolean | null {
+  const entry = awaiting.find((a) => a.id === id);
+  return entry ? entry.requestedViaTeam : false;
 }
 
 /**
@@ -421,6 +454,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     notify: false,
     autoReview: opts.autoReview,
     autoReviewRepos: {},
+    autoReviewTeamRequests: opts.autoReview,
     trustedRuns: false,
     polls: 0,
     errors: 0,
@@ -465,14 +499,26 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
   async function discover(
     me: string | null,
     ownPrMaxAgeDays: number | null | undefined,
+    teamRequestsDrafted: boolean,
   ): Promise<{ refs: DiscoveredPr[]; ownSearched: boolean }> {
     const filters = opts.repos.length > 0 ? opts.repos : [undefined];
     // Your own PRs only: a review request is never aged out. One that went
     // stale leaves the search, and the reaper below drops its stub like any
     // other the search stopped returning — a draft of yours stays put.
     const since = ownPrUpdatedSince(ownPrMaxAgeDays);
-    const [awaiting, authored] = await Promise.all([
+    const [awaiting, named, authored] = await Promise.all([
       Promise.all(filters.map((repo) => searchAwaitingMe(repo))),
+      // It only tells your requests from your teams', which changes nothing
+      // while both are drafted — so it is only asked while they are not.
+      // Failing, it costs that distinction for one poll rather than the poll:
+      // discovery and the announcements go ahead, and a row nobody could
+      // classify waits for the click like a team's.
+      teamRequestsDrafted
+        ? Promise.resolve(null)
+        : Promise.all(filters.map((repo) => searchNamingMe(repo))).catch((err: unknown) => {
+            log(`could not tell team review requests from yours: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          }),
       me === null
         ? Promise.resolve(null)
         : Promise.all(filters.map((repo) => searchAuthoredByMe(repo, since))).catch((err: unknown) => {
@@ -481,7 +527,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
           }),
     ]);
     return {
-      refs: dedupeDiscovered([...awaiting.flat(), ...(authored ?? []).flat()]),
+      refs: dedupeDiscovered([...markTeamRequests(awaiting.flat(), named?.flat() ?? null), ...(authored ?? []).flat()]),
       ownSearched: authored !== null,
     };
   }
@@ -870,7 +916,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
    * browser bell records what it stays quiet about.
    */
   async function announce(
-    drafts: (pr: { owner: string; repo: string; author: string }) => boolean,
+    drafts: (pr: { owner: string; repo: string; number: number; author: string }) => boolean,
     tell: boolean,
   ): Promise<void> {
     const owed = (await listArtifacts()).flatMap((a) => {
@@ -917,13 +963,13 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       login = await currentLogin();
     } catch {
       // Without knowing who you are, no comment can be attributed to you.
-      return refs.map((ref) => ({ id: artifactId(ref), reply: "unknown" as const }));
+      return refs.map((ref) => awaitingPr(ref, "unknown"));
     }
     return pool(refs, opts.parallel, async (ref) => {
       try {
-        return { id: artifactId(ref), reply: classifyReply(await fetchConversation(ref), login) };
+        return awaitingPr(ref, classifyReply(await fetchConversation(ref), login));
       } catch {
-        return { id: artifactId(ref), reply: "unknown" as const };
+        return awaitingPr(ref, "unknown");
       }
     });
   }
@@ -1022,8 +1068,11 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     // Your own PRs are never drafted unasked, whatever auto-review says for
     // their repo: they are in the inbox for a self-review on demand. The same
     // predicate decides when a tap is due, which keeps them quiet there too.
-    const drafts = (pr: { owner: string; repo: string; author: string }) =>
-      !isOwnPr(pr, me) && autoReviewFor(autoReview, pr.owner, pr.repo);
+    // Whether only a team was asked is read off the published list rather
+    // than the PR, because the cockpit reads it there too.
+    const drafts = (pr: { owner: string; repo: string; number: number; author: string }) =>
+      !isOwnPr(pr, me) &&
+      autoReviewFor(autoReview, { ...pr, requestedViaTeam: requestedViaTeam(status.awaiting, artifactId(pr)) });
     status.pollEnabled = knobs.poll;
     // What the cockpit's bell defers to: a loop that isn't polling announces
     // nothing, whatever the notify toggle says.
@@ -1037,7 +1086,14 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     status.autoReviewRepos = autoReview.autoReviewRepos;
     // Recomputed too, so a trust rule added mid-run shows up in the strip.
     status.trustedRuns = anyAutoReview(autoReview) && opts.trust !== false && config.trust.length > 0;
-    return { knobs, drafts, drafting: anyAutoReview(autoReview), notifyOn, announcing };
+    return {
+      knobs,
+      drafts,
+      drafting: anyAutoReview(autoReview),
+      teamRequestsDrafted: autoReview.autoReviewTeamRequests,
+      notifyOn,
+      announcing,
+    };
   }
 
   /** Everything a poll writes is the poll's — including the reviews it starts,
@@ -1059,7 +1115,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // what tells your own PRs apart from the ones awaiting you. Null is "gh
       // could not say", and then no own PR is brought in at all — see `discover`.
       const me = await currentLogin().catch(() => null);
-      const { knobs, drafts, drafting, notifyOn, announcing } = applyKnobs(config, me);
+      const { knobs, drafts, drafting, teamRequestsDrafted, notifyOn, announcing } = applyKnobs(config, me);
 
       if (!knobs.poll) {
         // Deliberately off is not an outage — don't leave a stale error up, or
@@ -1070,7 +1126,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
         return;
       }
 
-      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays);
+      const { refs, ownSearched } = await discover(me, knobs.ownPrMaxAgeDays, knobs.autoReviewTeamRequests);
       // Your own PRs are synced into the queue with the rest, but nobody is
       // asking you for them: they are not "awaiting" in anything the strip
       // counts, and the cockpit's open-requests tab — "GitHub still lists you
@@ -1083,6 +1139,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // and the rows the cockpit can name always come from one answer.
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(asked);
+      status.autoReviewTeamRequests = teamRequestsDrafted;
       const { discovered } = await syncQueue(refs, ownSearched);
 
       if (drafting) {

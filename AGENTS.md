@@ -121,7 +121,8 @@ left unwritten. Code and tests win when they disagree.
   (`daemon.ts`, on by default in `serve`): polls PRs awaiting review into
   `awaiting` stub artifacts, drafts a review for each unless
   auto-review is off for its repo (`daemon.autoReview`, overridden per repo
-  either way by `daemon.autoReviewRepos` — `core/autoreview.ts`). Your own
+  either way by `daemon.autoReviewRepos` — `core/autoreview.ts`) or the PR
+  asked only a team of yours and `daemon.autoReviewTeamRequests` is off. Your own
   open PRs come in through a second `author:@me` search and are never drafted,
   announced, filed, reopened or auto-sent, and Send takes only a comment there
   (`isOwnPr` in `core/own.ts`; `docs/lifecycle.md` §5). It archives merged/closed PRs, and files a draft

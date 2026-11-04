@@ -488,6 +488,10 @@ export function exceptionsLabel(autoReview: boolean, repos: Record<string, boole
   return ` · ${against} repo${against === 1 ? "" : "s"} ${autoReview ? "on click" : "auto"}`;
 }
 
+/** The row's `requestedViaTeam`, with a server too old to send it read as "named you". */
+export const viaTeamOf = (r: ReviewListItem): boolean | null =>
+  r.requestedViaTeam === undefined ? false : r.requestedViaTeam;
+
 /**
  * Why this row reads the way it does — the strip under the table. `meta` is the
  * quiet line under the reasoning; the view joins it with " · ".
@@ -512,20 +516,34 @@ export function strip(
     };
   }
   if (r.status === "awaiting") {
-    // Said outright when the daemon is not going to draft this repo, rather
+    // Said outright when the daemon is not going to draft this PR, rather
     // than leaving the reader to wait for a run that is never coming.
-    if (
-      daemon?.enabled &&
-      daemon.pollEnabled &&
-      !autoReviewFor({ autoReview: daemon.autoReview, autoReviewRepos: daemon.autoReviewRepos ?? {} }, r.pr.owner, r.pr.repo)
-    ) {
-      // Naming the repo only when an exception is why, so nobody goes looking
-      // for a per-repo setting they never made.
-      const off = daemon.autoReview ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}` : "Auto-review is off";
-      return {
-        reasoning: `Found by the inbox poll. ${off}, so it waits for you to ask for a draft.`,
-        meta: ["no run yet", "press r to review now"],
+    if (daemon?.enabled && daemon.pollEnabled) {
+      const knobs = {
+        autoReview: daemon.autoReview,
+        autoReviewRepos: daemon.autoReviewRepos ?? {},
+        autoReviewTeamRequests: daemon.autoReviewTeamRequests ?? true,
       };
+      const viaTeam = viaTeamOf(r);
+      if (!autoReviewFor(knobs, { ...r.pr, requestedViaTeam: viaTeam })) {
+        // Naming whichever setting is why, so nobody goes looking for a
+        // per-repo exception they never made — or for one when it was the
+        // team switch. The repo's answer comes first: with it off, who was
+        // asked changes nothing.
+        const repoDrafts = autoReviewFor({ ...knobs, autoReviewTeamRequests: true }, { ...r.pr, requestedViaTeam: false });
+        const asked = viaTeam
+          ? "Only a team you are on was asked"
+          : "Cerber could not tell whether you or only a team you are on was asked";
+        const off = repoDrafts
+          ? `${asked}, and team requests are not drafted automatically`
+          : daemon.autoReview
+            ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}`
+            : "Auto-review is off";
+        return {
+          reasoning: `Found by the inbox poll. ${off}, so it waits for you to ask for a draft.`,
+          meta: ["no run yet", "press r to review now"],
+        };
+      }
     }
     return {
       reasoning:
