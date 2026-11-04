@@ -528,13 +528,17 @@ export function strip(
       if (!autoReviewFor(knobs, { ...r.pr, requestedViaTeam: viaTeam })) {
         // Naming whichever setting is why, so nobody goes looking for a
         // per-repo exception they never made — or for one when it was the
-        // team switch.
-        const off =
-          viaTeam !== false && !knobs.autoReviewTeamRequests
-            ? `${viaTeam ? "Only a team you are on was asked" : "Cerber could not tell whether you or only a team you are on was asked"}, and team requests are not drafted automatically`
-            : daemon.autoReview
-              ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}`
-              : "Auto-review is off";
+        // team switch. The repo's answer comes first: with it off, who was
+        // asked changes nothing.
+        const repoDrafts = autoReviewFor({ ...knobs, autoReviewTeamRequests: true }, { ...r.pr, requestedViaTeam: false });
+        const asked = viaTeam
+          ? "Only a team you are on was asked"
+          : "Cerber could not tell whether you or only a team you are on was asked";
+        const off = repoDrafts
+          ? `${asked}, and team requests are not drafted automatically`
+          : daemon.autoReview
+            ? `Auto-review is off for ${r.pr.owner}/${r.pr.repo}`
+            : "Auto-review is off";
         return {
           reasoning: `Found by the inbox poll. ${off}, so it waits for you to ask for a draft.`,
           meta: ["no run yet", "press r to review now"],

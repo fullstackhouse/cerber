@@ -420,6 +420,16 @@ describe("a draft cerber filed rather than you", () => {
     expect(strip(unknown, daemon({ autoReviewTeamRequests: false })).reasoning).toContain("could not tell");
   });
 
+  // With the repo not drafted at all, who was asked changes nothing — so the
+  // row names the repo's setting, not the team switch.
+  it("names auto-review being off over the team switch", () => {
+    const unknown = row({ status: "awaiting", requestedViaTeam: null });
+    const team = row({ status: "awaiting", requestedViaTeam: true });
+    const off = daemon({ autoReview: false, autoReviewTeamRequests: false });
+    expect(strip(unknown, off).reasoning).toContain("Auto-review is off, so it waits");
+    expect(strip(team, off).reasoning).toContain("Auto-review is off, so it waits");
+  });
+
   // Off everywhere is not an exception for this repo, and shouldn't read like one.
   it("doesn't name the repo when auto-review is simply off", () => {
     const waiting = row({ status: "awaiting" });

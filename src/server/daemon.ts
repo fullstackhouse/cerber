@@ -124,7 +124,14 @@ export interface DaemonStatus {
   autoReview: boolean;
   /** Per-repo exceptions to `autoReview` (config's daemon.autoReviewRepos). */
   autoReviewRepos: Record<string, boolean>;
-  /** Whether a PR only a team of yours was asked for is drafted too. */
+  /**
+   * Whether a PR only a team of yours was asked for is drafted too — as the
+   * last poll applied it, not as the config says this minute. It is only
+   * meaningful beside `awaiting`'s `requestedViaTeam`, which a poll with team
+   * drafts on leaves unclassified; published apart, a switch turned off from
+   * the cockpit would read every one of those rows as "could not tell" until
+   * the next poll. So the two are written together.
+   */
   autoReviewTeamRequests: boolean;
   /** Unattended reviews may run PR code: auto-review on, trust rules present. */
   trustedRuns: boolean;
@@ -1077,10 +1084,16 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
     status.notify = announcing();
     status.autoReview = autoReview.autoReview;
     status.autoReviewRepos = autoReview.autoReviewRepos;
-    status.autoReviewTeamRequests = autoReview.autoReviewTeamRequests;
     // Recomputed too, so a trust rule added mid-run shows up in the strip.
     status.trustedRuns = anyAutoReview(autoReview) && opts.trust !== false && config.trust.length > 0;
-    return { knobs, drafts, drafting: anyAutoReview(autoReview), notifyOn, announcing };
+    return {
+      knobs,
+      drafts,
+      drafting: anyAutoReview(autoReview),
+      teamRequestsDrafted: autoReview.autoReviewTeamRequests,
+      notifyOn,
+      announcing,
+    };
   }
 
   /** Everything a poll writes is the poll's — including the reviews it starts,
@@ -1102,7 +1115,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // what tells your own PRs apart from the ones awaiting you. Null is "gh
       // could not say", and then no own PR is brought in at all — see `discover`.
       const me = await currentLogin().catch(() => null);
-      const { knobs, drafts, drafting, notifyOn, announcing } = applyKnobs(config, me);
+      const { knobs, drafts, drafting, teamRequestsDrafted, notifyOn, announcing } = applyKnobs(config, me);
 
       if (!knobs.poll) {
         // Deliberately off is not an outage — don't leave a stale error up, or
@@ -1126,6 +1139,7 @@ export function startDaemon(opts: DaemonOptions): DaemonHandle {
       // and the rows the cockpit can name always come from one answer.
       // A failed poll leaves the last good list up; lastPollError says so.
       status.awaiting = await classifyAll(asked);
+      status.autoReviewTeamRequests = teamRequestsDrafted;
       const { discovered } = await syncQueue(refs, ownSearched);
 
       if (drafting) {

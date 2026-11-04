@@ -216,6 +216,22 @@ describe("the awaiting list the daemon publishes", () => {
       ["acme/widgets#7", false],
       ["acme/widgets#8", true],
     ]);
+    expect(status.autoReviewTeamRequests).toBe(false);
+  });
+
+  // Turned off from the cockpit, the switch would otherwise be published at
+  // once beside a list the last poll left unclassified, and every waiting row
+  // would read "could not tell" until the next poll.
+  it("publishes the team switch only with the list classified under it", async () => {
+    search.mockResolvedValue([DISCOVERED]);
+    const handle = startDaemon({ ...options, autoReview: true });
+    await vi.waitFor(() => expect(handle.status().polls).toBeGreaterThanOrEqual(1));
+    // Stopped first, so no poll can be what moves it.
+    await stopAndDrain(handle);
+    expect(handle.status().autoReviewTeamRequests).toBe(true);
+    handle.reconfigure({ trust: [], daemon: { ...daemonKnobs, ownPrMaxAgeDays: 30, autoReviewTeamRequests: false } });
+    expect(handle.status().autoReviewTeamRequests).toBe(true);
+    expect(handle.status().awaiting[0]?.requestedViaTeam).toBeNull();
   });
 
   // With team requests drafted, which one it is changes nothing — not worth a call.

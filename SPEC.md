@@ -557,7 +557,12 @@ it is logged, and the PRs it would have classified are published as unknown
 request known to name the user is drafted unasked. The answer is published
 per PR on the daemon's awaiting list (§9.7) and copied onto each row of the
 review list, so the daemon, the cockpit's bell and the row's explanation all
-read one fact. A team request that GitHub's auto-assignment turns into a
+read one fact. The daemon status MUST publish the switch together with the
+list classified under it, never ahead of it: a switch turned off from the
+cockpit takes effect at the next poll, like the other toggles (§6.3), rather
+than reading every row the last poll left unclassified as unknown. Where the
+repo itself is not drafted, that is the reason a row gives, not the team
+switch. A team request that GitHub's auto-assignment turns into a
 request for the user is drafted on the next poll.
 
 ## 7. Severity, Verdict and Confidence
