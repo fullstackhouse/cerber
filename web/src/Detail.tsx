@@ -47,6 +47,7 @@ import {
   recentHandoffs,
   rememberHandoff,
 } from "./handoff";
+import { groupChangedRows } from "./diffrows";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
@@ -315,7 +316,9 @@ function DiffGroup({
   const rendered = useMemo(
     () =>
       patch.trim()
-        ? html(patch, { drawFileList: false, matching: "lines", outputFormat: "line-by-line" })
+        ? groupChangedRows(
+            html(patch, { drawFileList: false, matching: "lines", outputFormat: "line-by-line" }),
+          )
         : "",
     [patch],
   );
