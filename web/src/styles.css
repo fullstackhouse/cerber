@@ -2545,6 +2545,14 @@ button {
   font-size: 10.5px;
 }
 
+/* Where the PR took lines out: the same strip as a skipped stretch, in the
+   colour a removal has in the diff. */
+.md-removed {
+  border-color: var(--d2h-del-border-color);
+  background: var(--d2h-del-bg-color);
+  color: var(--d2h-del-label-color);
+}
+
 .md-file .comment {
   margin: 8px 16px;
 }

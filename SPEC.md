@@ -2132,10 +2132,12 @@ And it MUST NOT pass off a fragment as the whole:
 
 - A file the PR only edits carries the hunks alone, so its header says so, the
   lines between hunks are marked as skipped and counted, and the blocks the PR
-  added are marked as changed. In a file the PR creates nothing is marked,
-  since everything is new.
-- What the PR **removed** is not in the document at all. The diff is one click
-  away and is where that question is answered.
+  added to — or took a line out of — are marked as changed. In a file the PR
+  creates nothing is marked, since everything is new.
+- What the PR **removed** is not in the document, but where it was is: lines
+  taken out between blocks (a paragraph, a section) MUST be marked at that
+  place and counted, so a PR that only deletes does not read as unchanged.
+  The removed text itself is in the diff, one click away.
 
 ### 17.8 Light and Dark
 

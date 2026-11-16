@@ -735,6 +735,10 @@ function MarkdownFile({
             <div className="md-gap" title="These lines are in the file but not in the diff.">
               ⋯ {item.lines.toLocaleString()} line{item.lines === 1 ? "" : "s"} the diff skips
             </div>
+          ) : item.kind === "removed" ? (
+            <div className="md-gap md-removed" title="The PR took these lines out here — the diff shows them.">
+              ⊖ {item.lines.toLocaleString()} line{item.lines === 1 ? "" : "s"} removed
+            </div>
           ) : (
             <MdBlockView
               block={item}
