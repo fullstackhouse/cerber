@@ -47,7 +47,7 @@ import {
   recentHandoffs,
   rememberHandoff,
 } from "./handoff";
-import { groupChangedRows } from "./diffrows";
+import { describeFiles, groupChangedRows } from "./diffrows";
 import { highlightDiff } from "./highlight";
 import { Icon, IconName, Key } from "./Icon";
 import { Markdown, MarkdownPreview, renderMarkdown } from "./Markdown";
@@ -313,15 +313,19 @@ function DiffGroup({
   onRead: (path: string) => void;
   viewedState: ViewedState;
 }) {
-  const rendered = useMemo(
-    () =>
-      patch.trim()
-        ? groupChangedRows(
-            html(patch, { drawFileList: false, matching: "lines", outputFormat: "line-by-line" }),
-          )
-        : "",
-    [patch],
-  );
+  const rendered = useMemo(() => {
+    if (!patch.trim()) return "";
+    // Rendered from the split rather than the raw patch: the split is what
+    // writes a quoted path (anything outside ASCII) out as the file's name.
+    const files = splitDiffByFile(patch);
+    const plain = files.map((f) => f.patch).join("\n");
+    return describeFiles(
+      groupChangedRows(
+        html(plain, { drawFileList: false, matching: "lines", outputFormat: "line-by-line" }),
+      ),
+      files,
+    );
+  }, [patch]);
   // The paths as the diff itself spells them: the rendered header shows a
   // rename as "old → new", which is not something to hang a comment on.
   const paths = useMemo(() => splitDiffByFile(patch).map((p) => p.path), [patch]);

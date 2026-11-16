@@ -1776,10 +1776,13 @@ button {
 /* A long line wraps rather than running off the side. diff2html scrolls it
    sideways, which hides the end of every prose line in a spec or a markdown
    file — and a sideways scrollbar under the diff is a line you have to go and
-   fetch instead of read. The continuation lines land under the first
-   character, not under the gutter, because the line numbers are their own
-   absolutely positioned column. */
+   fetch instead of read. The line numbers are their own absolutely positioned
+   column, so the continuation never lands under them — and the +/- marker
+   gets its own column too (a flex row), so the continuation lands under the
+   line's first character rather than under the marker, where it would read
+   as a separate line with no number. */
 .diff .d2h-code-line {
+  display: flex;
   white-space: normal;
   /* With nothing left to scroll, the 8em diff2html holds in reserve on the
      right is width the code could be using. */
@@ -1787,16 +1790,34 @@ button {
   padding-right: 1em;
 }
 
+/* Its own column, one space wider than the marker — the space diff2html's
+   markup put between them, which a flex row no longer prints. */
+.diff .d2h-code-line-prefix {
+  flex: none;
+  width: 2ch;
+}
+
 /* Only the text span wraps, and only it keeps the line's own spacing: the row
-   around it holds diff2html's markup indentation, which `pre` would print.
-   The span is a full-width inline-block there, which once it could wrap would
-   push itself onto the line below its own +/- marker — inline, it sits beside
-   the marker and wraps under it. */
+   around it holds diff2html's markup indentation, which `pre` would print. */
 .diff .d2h-code-line-ctn {
-  display: inline;
+  flex: 0 1 auto;
+  min-width: 0;
   width: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* What diff2html drops from a patch, said beside the line it is about —
+   without it, adding the missing final newline reads as the same line
+   removed and added again. */
+.diff .no-eol {
+  flex: none;
+  align-self: center;
+  margin-left: 1.5em;
+  font-family: var(--prose);
+  font-size: 10px;
+  color: var(--muted);
+  user-select: none;
 }
 
 /* Word-level highlights are inline-blocks, which would refuse to break in the
