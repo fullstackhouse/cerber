@@ -158,6 +158,24 @@ describe("what the PR removed", () => {
     ]);
   });
 
+  it("marks a block that lost its first or its last line", () => {
+    expect(shape(md(" # T", " ", "-zero", " one", " two", " ", " end"))).toEqual([
+      "# T",
+      "*one\ntwo",
+      "end",
+    ]);
+    expect(shape(md(" # T", " ", " one", " two", "-three", " ", " end"))).toEqual([
+      "# T",
+      "*one\ntwo",
+      "end",
+    ]);
+  });
+
+  it("gives a removed paragraph its own mark, not its neighbour's", () => {
+    // The run holds the paragraph's blank line too, so it was a block of its own.
+    expect(shape(md(" one", "-", "-gone", " ", " end"))).toEqual(["one", "removed:2", "end"]);
+  });
+
   it("does not report an edit as a removal", () => {
     expect(shape(md(" # T", " ", "-one", "+ONE", " ", " end"))).toEqual(["# T", "*ONE", "end"]);
   });

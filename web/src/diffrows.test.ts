@@ -219,6 +219,28 @@ describe("describeFiles", () => {
     expect(out).not.toContain("File without changes");
   });
 
+  it("never calls a binary unchanged, renamed or with its mode changed", () => {
+    // diff2html says "Binary file" for these, which is left as it is.
+    const patch = [
+      "diff --git a/img.png b/pic.png",
+      "similarity index 97%",
+      "rename from img.png",
+      "rename to pic.png",
+      "index e746e83..c73993c 100644",
+      "Binary files a/img.png and b/pic.png differ",
+      "diff --git a/tool.bin b/tool.bin",
+      "old mode 100644",
+      "new mode 100755",
+      "index b9afa22..2bad3fc",
+      "Binary files a/tool.bin and b/tool.bin differ",
+      "",
+    ].join("\n");
+    const out = describe_(patch);
+    expect(out).not.toContain("without changes");
+    expect(out).not.toContain("File mode changed");
+    expect(out.match(/Binary file/g)).toHaveLength(2);
+  });
+
   it("leaves the diff alone when it cannot line files up with the render", () => {
     const rendered = html("diff --git a/a b/a\nold mode 100644\nnew mode 100755\n", {
       drawFileList: false,

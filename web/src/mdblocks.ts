@@ -71,12 +71,20 @@ interface Line {
 interface Removal {
   at: number;
   lines: number;
+  /** Every removed line had text — no blank line, so no whole block went. */
+  solid: boolean;
 }
 
 /** The new side of a single file's patch: added and context lines, in order. */
 function newSide(patch: string, removals: Removal[] = []): Line[] {
   const out: Line[] = [];
   let removing = 0;
+  let solid = true;
+  const removed = () => {
+    if (removing > 0) removals.push({ at: n, lines: removing, solid });
+    removing = 0;
+    solid = true;
+  };
   let n = 0;
   let inHunk = false;
   const lines = patch.split("\n");
@@ -84,8 +92,7 @@ function newSide(patch: string, removals: Removal[] = []): Line[] {
     const line = lines[i]!;
     const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunk) {
-      if (removing > 0) removals.push({ at: n, lines: removing });
-      removing = 0;
+      removed();
       n = Number(hunk[1]);
       inHunk = true;
       continue;
@@ -100,16 +107,18 @@ function newSide(patch: string, removals: Removal[] = []): Line[] {
     if (line.startsWith("-")) {
       // The old side isn't part of the document, but where it was is.
       removing++;
+      if (line.slice(1).trim() === "") solid = false;
       continue;
     }
-    if (removing > 0 && !line.startsWith("+")) removals.push({ at: n, lines: removing });
-    removing = 0;
+    // A run followed by additions is an edit: forget it rather than report it.
+    if (line.startsWith("+")) removing = 0;
+    removed();
     if (line.startsWith("+") || line.startsWith(" ") || line === "") {
       out.push({ n, text: line === "" ? "" : line.slice(1), added: line.startsWith("+") });
       n++;
     }
   }
-  if (removing > 0) removals.push({ at: n, lines: removing });
+  removed();
   return out;
 }
 
@@ -174,11 +183,17 @@ export function readMarkdown(patch: string): MdDocument {
   }
   flush();
 
-  for (const { at, lines: count } of removals) {
-    // Taken out of the middle of a block: that block changed.
-    const inside = items.find((i) => i.kind === "block" && i.from < at && at <= i.to);
-    if (inside?.kind === "block") {
-      inside.changed = true;
+  for (const { at, lines: count, solid } of removals) {
+    // Taken out of a block: that block changed. Out of its middle, whatever
+    // went; off its first or last line, only lines of text — a run holding a
+    // blank line took a whole block of its own, which gets its own mark.
+    const touched = items.filter(
+      (i) =>
+        i.kind === "block" &&
+        ((i.from < at && at <= i.to) || (solid && (i.from === at || i.to === at - 1))),
+    );
+    if (touched.length > 0) {
+      for (const block of touched) if (block.kind === "block") block.changed = true;
       continue;
     }
     // Between blocks (or before a stretch the diff skips): say so there.
