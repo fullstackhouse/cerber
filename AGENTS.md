@@ -223,8 +223,9 @@ left unwritten. Code and tests win when they disagree.
   line, and the block numbers are what let the review's comments stay where
   they point. A file the PR edits stays a diff (the change is the point) and
   says, when read, that it is only the hunks: removals are not in a document,
-  so the reading view marks the changed blocks, counts the lines it skipped,
-  and keeps the diff one click away
+  so the reading view marks the changed blocks, marks where lines were taken
+  out between them, counts the lines it skipped, and keeps the diff one click
+  away
 
 ## Conventions
 

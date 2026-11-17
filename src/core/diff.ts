@@ -10,39 +10,122 @@ export interface FilePatch {
 
 export function splitDiffByFile(diff: string): FilePatch[] {
   const patches: FilePatch[] = [];
-  const lines = diff.split("\n");
   let current: string[] | null = null;
-  let currentPath: string | null = null;
+  let inHeader = false;
 
   const flush = () => {
-    if (current && currentPath) {
-      patches.push({ path: currentPath, patch: current.join("\n") });
+    if (current) {
+      const path = pathOf(current);
+      if (path) patches.push({ path, patch: current.join("\n") });
     }
     current = null;
-    currentPath = null;
   };
 
-  for (const line of lines) {
+  for (const line of diff.split("\n")) {
     if (line.startsWith("diff --git ")) {
       flush();
-      current = [line];
-      // "diff --git a/foo b/foo" — prefer the b-side path; fall back to a-side.
-      const m = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
-      currentPath = m ? m[2]! : line.slice("diff --git ".length);
+      current = [unquoteHeader(line)];
+      inHeader = true;
     } else if (current) {
-      current.push(line);
-      // Deleted files: b-side is /dev/null, use the a-side path instead.
-      if (line.startsWith("--- a/") && currentPath === "/dev/null") {
-        currentPath = line.slice("--- a/".length);
-      }
-      if (line === "+++ /dev/null") {
-        const minus = current.find((l) => l.startsWith("--- a/"));
-        if (minus) currentPath = minus.slice("--- a/".length);
-      }
+      if (line.startsWith("@@")) inHeader = false;
+      // Only the header names files; inside a hunk a `--- a/x` is a removed
+      // `-- a/x`, and it stays exactly as written.
+      current.push(inHeader ? unquoteHeader(line) : line);
     }
   }
   flush();
   return patches;
+}
+
+/**
+ * A file's path, read off its (already unquoted) header: the new side from
+ * `+++ b/…`, the old side when the file is deleted. A header without the pair
+ * — a binary, a pure rename, a mode change — names it in `rename to`, or in the
+ * `diff --git a/P b/P` line, which is split down the middle rather than at the
+ * first ` b/`, because a path can contain one.
+ */
+function pathOf(lines: string[]): string | null {
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  const header = firstHunk < 0 ? lines : lines.slice(0, firstHunk);
+  const field = (prefix: string) => header.find((l) => l.startsWith(prefix))?.slice(prefix.length);
+  const plus = field("+++ ");
+  if (plus?.startsWith("b/")) return plus.slice(2);
+  if (plus === "/dev/null") {
+    const minus = field("--- a/");
+    if (minus) return minus;
+  }
+  const renamed = field("rename to ") ?? field("copy to ");
+  if (renamed) return renamed;
+  const both = lines[0]!.slice("diff --git ".length);
+  const half = (both.length - 1) / 2;
+  if (Number.isInteger(half)) {
+    const [a, b] = [both.slice(0, half), both.slice(half + 1)];
+    if (a.startsWith("a/") && b.startsWith("b/") && a.slice(2) === b.slice(2)) return b.slice(2);
+  }
+  const m = both.match(/^a\/(.+?) b\/(.+)$/);
+  return m ? m[2]! : both || null;
+}
+
+/**
+ * The diff with every file header naming its files plainly — what the review
+ * run reads, so the path it writes on a comment is the one the rest of cerber
+ * (and GitHub's comment API) knows the file by. Hunks are left as written.
+ */
+export function plainPaths(diff: string): string {
+  let inHeader = false;
+  return diff
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("diff --git ")) inHeader = true;
+      else if (line.startsWith("@@")) inHeader = false;
+      return inHeader ? unquoteHeader(line) : line;
+    })
+    .join("\n");
+}
+
+const C_ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+
+/**
+ * A path as git writes it into a header: wrapped in quotes, with C escapes and
+ * every byte outside ASCII spelled in octal, whenever it holds one — so a file
+ * named `zażółć.md` arrives as `"a/za\305\274\303\263\305\202\304\207.md"`.
+ * GitHub's diffs do the same.
+ */
+export function unquoteGitPath(quoted: string): string {
+  if (!(quoted.length >= 2 && quoted.startsWith('"') && quoted.endsWith('"'))) return quoted;
+  const bytes: number[] = [];
+  const body = quoted.slice(1, -1);
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (ch !== "\\") {
+      bytes.push(...new TextEncoder().encode(ch));
+      continue;
+    }
+    const next = body[i + 1] ?? "";
+    const octal = body.slice(i + 1, i + 4);
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(parseInt(octal, 8));
+      i += 3;
+    } else if (next in C_ESCAPES) {
+      bytes.push(C_ESCAPES[next]!);
+      i += 1;
+    } else {
+      bytes.push(92);
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+/**
+ * A header line with every quoted path written out plainly, so the rest of the
+ * cockpit — and diff2html, which prints the quotes and octal as they are —
+ * sees the file's real name. The tab git ends a `---`/`+++` line with goes
+ * too, or it becomes part of the name.
+ */
+function unquoteHeader(line: string): string {
+  // git also ends a name holding a space with a tab, quoted or not.
+  const bare = /^(---|\+\+\+) /.test(line) ? line.replace(/\t$/, "") : line;
+  return bare.includes('"') ? bare.replace(/"(?:[^"\\]|\\.)*"/g, (q) => unquoteGitPath(q)) : bare;
 }
 
 /** Concatenate the patches of the given files (order = diff order). */

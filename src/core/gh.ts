@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { PrInfo, PrInfoSchema, artifactId } from "./artifact.js";
 import type { PriorRemark } from "./raised.js";
+import { plainPaths } from "./diff.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -119,7 +120,8 @@ async function membershipCheck(args: string[]): Promise<boolean> {
  */
 export async function fetchPrDiff(ref: PrRef): Promise<string> {
   try {
-    return await gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]);
+    // GitHub, like git, quotes a path with anything outside ASCII in it.
+    return plainPaths(await gh(["pr", "diff", String(ref.number), "--repo", `${ref.owner}/${ref.repo}`]));
   } catch (err: unknown) {
     // Matched on GitHub's own `too_large` signature rather than the bare 406:
     // 406 is "Not Acceptable" generally, while `too_large` is emitted for this

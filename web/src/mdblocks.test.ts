@@ -132,3 +132,83 @@ describe("the empty string at the end of a patch", () => {
     expect(doc.items).toEqual([{ kind: "block", raw: "# Hi", from: 1, to: 1, changed: true }]);
   });
 });
+
+describe("what the PR removed", () => {
+  const md = (...body: string[]) =>
+    ["diff --git a/d.md b/d.md", "--- a/d.md", "+++ b/d.md", "@@ -1,9 +1,6 @@", ...body, ""].join("\n");
+  const shape = (patch: string) =>
+    readMarkdown(patch).items.map((i) =>
+      i.kind === "block" ? `${i.changed ? "*" : ""}${i.raw}` : `${i.kind}:${i.lines}`,
+    );
+
+  it("marks a block a line was taken out of", () => {
+    expect(shape(md(" # T", " ", " one", "-two", " three", " ", " end"))).toEqual([
+      "# T",
+      "*one\nthree",
+      "end",
+    ]);
+  });
+
+  it("shows a section taken out between blocks where it was", () => {
+    expect(shape(md(" # T", " ", " one", " ", "-## Gone", "-", "-gone text", "-", " end"))).toEqual([
+      "# T",
+      "one",
+      "removed:4",
+      "end",
+    ]);
+  });
+
+  it("marks a block that lost its first or its last line", () => {
+    expect(shape(md(" # T", " ", "-zero", " one", " two", " ", " end"))).toEqual([
+      "# T",
+      "*one\ntwo",
+      "end",
+    ]);
+    expect(shape(md(" # T", " ", " one", " two", "-three", " ", " end"))).toEqual([
+      "# T",
+      "*one\ntwo",
+      "end",
+    ]);
+  });
+
+  it("gives a removed paragraph its own mark, not its neighbour's", () => {
+    // The run holds the paragraph's blank line too, so it was a block of its own.
+    expect(shape(md(" one", "-", "-gone", " ", " end"))).toEqual(["one", "removed:2", "end"]);
+  });
+
+  it("reports a section taken out right before an edited paragraph", () => {
+    // git writes both as one run of removals followed by additions.
+    expect(
+      shape(md(" # T", " ", "-## Gone", "-", "-gone text", "-", "-old para", "+new para", " ", " end")),
+    ).toEqual(["# T", "removed:4", "*new para", "end"]);
+  });
+
+  it("does not report a rewritten paragraph's blank line as a removal", () => {
+    expect(shape(md(" # T", " ", "-old para", "-", "+new para", "+", " end"))).toEqual([
+      "# T",
+      "*new para",
+      "end",
+    ]);
+  });
+
+  it("does not report an edit as a removal", () => {
+    expect(shape(md(" # T", " ", "-one", "+ONE", " ", " end"))).toEqual(["# T", "*ONE", "end"]);
+  });
+
+  it("puts a removal at the end of a hunk before the stretch the diff skips", () => {
+    const patch = [
+      "diff --git a/d.md b/d.md",
+      "--- a/d.md",
+      "+++ b/d.md",
+      "@@ -1,3 +1,2 @@",
+      " one",
+      " ",
+      "-gone",
+      "@@ -20,1 +19,1 @@",
+      " later",
+      "",
+    ].join("\n");
+    expect(shape(patch)).toEqual(["one", "removed:1", "gap:16", "later"]);
+  });
+});
+
