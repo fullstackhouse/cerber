@@ -66,7 +66,9 @@ interface Line {
 /**
  * A run of removed lines that nothing was added in place of — it sits just
  * before new-side line `at`. A run followed by additions is an edit, and the
- * block those additions land in already says it changed.
+ * block those additions land in already says it changed — except for the
+ * blocks it has more of than the additions do, which git folds into the same
+ * run when a section goes right before an edited paragraph.
  */
 interface Removal {
   at: number;
@@ -80,7 +82,9 @@ function newSide(patch: string, removals: Removal[] = []): Line[] {
   const out: Line[] = [];
   let removing = 0;
   let solid = true;
+  let removedText: string[] = [];
   const removed = () => {
+    removedText = [];
     if (removing > 0) removals.push({ at: n, lines: removing, solid });
     removing = 0;
     solid = true;
@@ -107,11 +111,24 @@ function newSide(patch: string, removals: Removal[] = []): Line[] {
     if (line.startsWith("-")) {
       // The old side isn't part of the document, but where it was is.
       removing++;
+      removedText.push(line.slice(1));
       if (line.slice(1).trim() === "") solid = false;
       continue;
     }
-    // A run followed by additions is an edit: forget it rather than report it.
-    if (line.startsWith("+")) removing = 0;
+    if (line.startsWith("+") && removing > 0) {
+      // A run followed by additions is an edit, of as many blocks as were
+      // added; the blocks before those went, and are reported as gone.
+      const added: string[] = [];
+      for (let j = i; j < lines.length && lines[j]!.startsWith("+"); j++) added.push(lines[j]!.slice(1));
+      const starts = blockStarts(removedText);
+      const gone = starts.length - blockStarts(added).length;
+      // Additions with no text at all (blank lines) replace nothing: the
+      // whole run went.
+      if (gone < starts.length) {
+        removing = gone > 0 ? starts[gone]! : 0;
+        solid = false;
+      }
+    }
     removed();
     if (line.startsWith("+") || line.startsWith(" ") || line === "") {
       out.push({ n, text: line === "" ? "" : line.slice(1), added: line.startsWith("+") });
@@ -120,6 +137,15 @@ function newSide(patch: string, removals: Removal[] = []): Line[] {
   }
   removed();
   return out;
+}
+
+/** Where each blank-line-separated block of these lines begins. */
+function blockStarts(texts: string[]): number[] {
+  const starts: number[] = [];
+  texts.forEach((t, i) => {
+    if (t.trim() !== "" && (i === 0 || texts[i - 1]!.trim() === "")) starts.push(i);
+  });
+  return starts;
 }
 
 const newlines = (s: string) => (s.match(/\n/g) ?? []).length;

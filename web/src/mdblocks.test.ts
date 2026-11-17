@@ -176,6 +176,21 @@ describe("what the PR removed", () => {
     expect(shape(md(" one", "-", "-gone", " ", " end"))).toEqual(["one", "removed:2", "end"]);
   });
 
+  it("reports a section taken out right before an edited paragraph", () => {
+    // git writes both as one run of removals followed by additions.
+    expect(
+      shape(md(" # T", " ", "-## Gone", "-", "-gone text", "-", "-old para", "+new para", " ", " end")),
+    ).toEqual(["# T", "removed:4", "*new para", "end"]);
+  });
+
+  it("does not report a rewritten paragraph's blank line as a removal", () => {
+    expect(shape(md(" # T", " ", "-old para", "-", "+new para", "+", " end"))).toEqual([
+      "# T",
+      "*new para",
+      "end",
+    ]);
+  });
+
   it("does not report an edit as a removal", () => {
     expect(shape(md(" # T", " ", "-one", "+ONE", " ", " end"))).toEqual(["# T", "*ONE", "end"]);
   });
