@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^1.13.7
-        version: 1.19.17(hono@4.13.3)
+        version: 1.19.17(hono@4.13.16)
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -19,7 +19,7 @@ importers:
         version: 3.4.56
       hono:
         specifier: ^4.6.16
-        version: 4.13.3
+        version: 4.13.16
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -1715,8 +1715,8 @@ packages:
     resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
     engines: {node: '>=12.0.0'}
 
-  hono@4.13.3:
-    resolution: {integrity: sha512-r8AO2mYHoLxSHkgafNeC/BXyb2vWRxD3jem4Ts+ptav8oTG5FIRifAjuJEmZI4bSvvc2ns0GxmIYiZnHqN3mMw==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   hook-std@4.0.0:
@@ -3147,9 +3147,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@hono/node-server@1.19.17(hono@4.13.3)':
+  '@hono/node-server@1.19.17(hono@4.13.16)':
     dependencies:
-      hono: 4.13.3
+      hono: 4.13.16
 
   '@iconify/types@2.0.0': {}
 
@@ -4315,7 +4315,7 @@ snapshots:
 
   highlight.js@11.12.0: {}
 
-  hono@4.13.3: {}
+  hono@4.13.16: {}
 
   hook-std@4.0.0: {}
 
