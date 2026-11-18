@@ -44,7 +44,7 @@
     "prepublishOnly": "node scripts/refuse-sentinel-publish.mjs && pnpm build"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.7",
+    "@hono/node-server": "^2.1.6",
     "commander": "^13.1.0",
     "diff2html": "^3.4.51",
     "hono": "^4.6.16",
